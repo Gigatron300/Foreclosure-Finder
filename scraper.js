@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -18,7 +18,7 @@ const CONFIG = {
     county: 'Montgomery',
     state: 'PA'
   },
-  requestDelay: 1000, // ms between requests to be respectful
+  requestDelay: 1500,
   maxRetries: 3
 };
 
@@ -31,10 +31,18 @@ const parseDebtAmount = (text) => {
   return parseFloat(cleaned) || 0;
 };
 
-const cleanText = (text) => {
-  if (!text) return '';
-  return text.replace(/\s+/g, ' ').trim();
-};
+// Find Chrome executable
+function getChromePath() {
+  // Render.com provides Chrome at this location
+  const possiblePaths = [
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    process.env.CHROME_PATH
+  ].filter(Boolean);
+  
+  return possiblePaths[0] || '/usr/bin/google-chrome';
+}
 
 // CivilView Scraper (Camden County, NJ)
 async function scrapeCivilView(browser) {
@@ -43,106 +51,84 @@ async function scrapeCivilView(browser) {
   const page = await browser.newPage();
   
   try {
-    // Set a realistic user agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 1080 });
     
-    // Go to the search page
     console.log('  Loading search page...');
     await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     
-    // Wait for the table to load
-    await page.waitForSelector('table', { timeout: 30000 }).catch(() => {});
+    // Wait for content
+    await delay(3000);
     
-    // Get all sale dates available (they often have a dropdown)
-    // First, let's see what's on the page
-    const pageContent = await page.content();
-    
-    // Find all property links on the page
+    // Get all property links
     let propertyLinks = await page.evaluate(() => {
       const links = [];
-      // Look for links that go to property details
       document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
-        links.push(link.href);
-      });
-      return [...new Set(links)]; // Remove duplicates
-    });
-    
-    console.log(`  Found ${propertyLinks.length} properties on first page`);
-    
-    // Check for pagination or "show all" option
-    const hasMorePages = await page.evaluate(() => {
-      // Look for pagination elements
-      const pagination = document.querySelector('.pagination, [class*="pager"], nav[aria-label*="page"]');
-      const showAll = document.querySelector('a[href*="pageSize"], select[name*="pageSize"], [class*="show-all"]');
-      return { pagination: !!pagination, showAll: !!showAll };
-    });
-    
-    // Try to show all results if possible
-    const showAllClicked = await page.evaluate(() => {
-      const showAllLink = document.querySelector('a[href*="pageSize=All"], a[href*="pageSize=1000"], option[value="All"], option[value="1000"]');
-      if (showAllLink) {
-        if (showAllLink.tagName === 'OPTION') {
-          showAllLink.selected = true;
-          showAllLink.parentElement.dispatchEvent(new Event('change'));
-        } else {
-          showAllLink.click();
+        if (link.href && !links.includes(link.href)) {
+          links.push(link.href);
         }
-        return true;
-      }
-      return false;
-    });
-    
-    if (showAllClicked) {
-      await delay(3000);
-      await page.waitForSelector('table', { timeout: 30000 }).catch(() => {});
-    }
-    
-    // Now get all property links again
-    propertyLinks = await page.evaluate(() => {
-      const links = [];
-      document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
-        links.push(link.href);
       });
-      return [...new Set(links)];
+      return links;
     });
     
-    // If we still don't have many links, try pagination
-    if (propertyLinks.length < 50) {
-      let pageNum = 1;
-      let hasMore = true;
+    console.log(`  Found ${propertyLinks.length} property links on main page`);
+    
+    // Try to find and click through pagination or date selectors
+    const saleDates = await page.evaluate(() => {
+      const dates = [];
+      document.querySelectorAll('select option, a[href*="saleDate"], .sale-date-link').forEach(el => {
+        if (el.value || el.href) {
+          dates.push(el.value || el.href);
+        }
+      });
+      return dates;
+    });
+    
+    // Check for pagination
+    let hasNextPage = true;
+    let pageNum = 1;
+    
+    while (hasNextPage && pageNum < 15) {
+      const nextButton = await page.evaluate(() => {
+        const next = document.querySelector('a[href*="page"]:not([href*="page=1"]), .pagination .next a, a:contains("Next"), [aria-label="Next"]');
+        if (next && !next.classList.contains('disabled')) {
+          return next.href || true;
+        }
+        return null;
+      });
       
-      while (hasMore && pageNum < 20) { // Safety limit
-        const nextButton = await page.$('a[href*="page"]:has-text("Next"), .pagination a:last-child, [aria-label="Next"]');
-        if (nextButton) {
-          await nextButton.click();
-          await delay(2000);
-          
-          const newLinks = await page.evaluate(() => {
-            const links = [];
-            document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
-              links.push(link.href);
-            });
-            return links;
+      if (nextButton && typeof nextButton === 'string') {
+        console.log(`  Navigating to page ${pageNum + 1}...`);
+        await page.goto(nextButton, { waitUntil: 'networkidle2', timeout: 30000 });
+        await delay(2000);
+        
+        const newLinks = await page.evaluate(() => {
+          const links = [];
+          document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
+            if (link.href) links.push(link.href);
           });
-          
-          const beforeCount = propertyLinks.length;
-          newLinks.forEach(link => {
-            if (!propertyLinks.includes(link)) {
-              propertyLinks.push(link);
-            }
-          });
-          
-          if (propertyLinks.length === beforeCount) {
-            hasMore = false;
+          return links;
+        });
+        
+        const beforeCount = propertyLinks.length;
+        newLinks.forEach(link => {
+          if (!propertyLinks.includes(link)) {
+            propertyLinks.push(link);
           }
-          pageNum++;
-        } else {
-          hasMore = false;
+        });
+        
+        console.log(`    Found ${newLinks.length} links, total unique: ${propertyLinks.length}`);
+        
+        if (propertyLinks.length === beforeCount) {
+          hasNextPage = false;
         }
+        pageNum++;
+      } else {
+        hasNextPage = false;
       }
     }
     
-    console.log(`  Total unique property links found: ${propertyLinks.length}`);
+    console.log(`  Total property links to scrape: ${propertyLinks.length}`);
     
     // Visit each property detail page
     for (let i = 0; i < propertyLinks.length; i++) {
@@ -154,65 +140,70 @@ async function scrapeCivilView(browser) {
         await delay(CONFIG.requestDelay);
         
         const propertyData = await page.evaluate(() => {
-          const getText = (selector) => {
-            const el = document.querySelector(selector);
-            return el ? el.textContent.trim() : '';
-          };
-          
-          const getTextByLabel = (label) => {
-            const rows = document.querySelectorAll('tr, .row, .detail-row, dl dt, .field');
+          const getTextByLabel = (labels) => {
+            const searchLabels = Array.isArray(labels) ? labels : [labels];
+            
+            // Method 1: Look in table rows
+            const rows = document.querySelectorAll('tr');
             for (const row of rows) {
-              if (row.textContent.toLowerCase().includes(label.toLowerCase())) {
-                const value = row.querySelector('td:last-child, dd, .value, span:last-child');
-                if (value) return value.textContent.trim();
-                // Try getting text after the label
-                const text = row.textContent;
-                const parts = text.split(/:\s*/);
-                if (parts.length > 1) return parts.slice(1).join(':').trim();
+              const cells = row.querySelectorAll('td, th');
+              for (let i = 0; i < cells.length - 1; i++) {
+                const cellText = cells[i].textContent.toLowerCase().trim();
+                for (const label of searchLabels) {
+                  if (cellText.includes(label.toLowerCase())) {
+                    return cells[i + 1]?.textContent?.trim() || '';
+                  }
+                }
               }
             }
+            
+            // Method 2: Look for label/value patterns in any element
+            const allElements = document.querySelectorAll('*');
+            for (const el of allElements) {
+              const text = el.textContent || '';
+              for (const label of searchLabels) {
+                const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
+                const match = text.match(regex);
+                if (match && match[1].trim().length < 500) {
+                  return match[1].trim();
+                }
+              }
+            }
+            
             return '';
           };
           
-          // Try multiple methods to find data
-          const data = {
-            sheriffNumber: getTextByLabel('sheriff') || getTextByLabel('sale number') || getTextByLabel('writ'),
-            courtCase: getTextByLabel('court') || getTextByLabel('docket') || getTextByLabel('case'),
-            salesDate: getTextByLabel('sale date') || getTextByLabel('auction date'),
-            plaintiff: getTextByLabel('plaintiff'),
-            defendant: getTextByLabel('defendant'),
-            address: getTextByLabel('address') || getTextByLabel('property address') || getTextByLabel('premises'),
-            city: getTextByLabel('city') || getTextByLabel('municipality'),
-            zipCode: getTextByLabel('zip'),
-            debtAmount: getTextByLabel('debt') || getTextByLabel('amount') || getTextByLabel('judgment'),
-            attorney: getTextByLabel('attorney') || getTextByLabel('firm'),
-            attorneyPhone: getTextByLabel('phone'),
-            parcelNumber: getTextByLabel('parcel') || getTextByLabel('block') || getTextByLabel('lot'),
-            status: getTextByLabel('status'),
-            township: getTextByLabel('township') || getTextByLabel('municipality'),
+          // Extract data with multiple possible labels
+          return {
+            sheriffNumber: getTextByLabel(['sheriff', 'writ', 'sale number', 'sale #']),
+            courtCase: getTextByLabel(['court case', 'docket', 'case number', 'case #']),
+            salesDate: getTextByLabel(['sale date', 'auction date', 'date of sale']),
+            plaintiff: getTextByLabel(['plaintiff']),
+            defendant: getTextByLabel(['defendant']),
+            address: getTextByLabel(['address', 'property address', 'premises', 'location']),
+            city: getTextByLabel(['city', 'municipality', 'town']),
+            zipCode: getTextByLabel(['zip', 'postal']),
+            debtAmount: getTextByLabel(['debt', 'judgment', 'amount due', 'total due', 'upset']),
+            attorney: getTextByLabel(['attorney', 'firm', 'counsel']),
+            attorneyPhone: getTextByLabel(['phone', 'telephone']),
+            parcelNumber: getTextByLabel(['parcel', 'tax id', 'block', 'lot', 'account']),
+            status: getTextByLabel(['status']),
+            township: getTextByLabel(['township', 'municipality', 'borough']),
           };
-          
-          // Also try to find address in common header locations
-          const header = document.querySelector('h1, h2, .property-header, .address-header');
-          if (header && !data.address) {
-            data.address = header.textContent.trim();
-          }
-          
-          return data;
         });
         
-        if (propertyData.address || propertyData.sheriffNumber) {
-          // Parse the address to extract city/state/zip if combined
-          let address = propertyData.address;
-          let city = propertyData.city;
+        // Only add if we got meaningful data
+        if (propertyData.address || propertyData.defendant || propertyData.sheriffNumber) {
+          let address = propertyData.address || '';
+          let city = propertyData.city || '';
           let state = 'NJ';
-          let zipCode = propertyData.zipCode;
+          let zipCode = propertyData.zipCode || '';
           
-          // Try to parse "123 Main St, City, NJ 08000" format
+          // Parse combined address format
           const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
           if (addressMatch) {
-            address = addressMatch[1];
-            city = addressMatch[2];
+            address = addressMatch[1].trim();
+            city = addressMatch[2].trim();
             state = addressMatch[3];
             zipCode = addressMatch[4] || zipCode;
           }
@@ -226,7 +217,7 @@ async function scrapeCivilView(browser) {
             plaintiff: propertyData.plaintiff,
             defendant: propertyData.defendant,
             address: address,
-            city: city || '',
+            city: city,
             state: state,
             zipCode: zipCode,
             debtAmount: parseDebtAmount(propertyData.debtAmount),
@@ -239,10 +230,12 @@ async function scrapeCivilView(browser) {
             county: CONFIG.civilview.county,
             detailUrl: link
           });
+          
+          console.log(`    ✓ Scraped: ${address || propertyData.defendant || 'Property ' + (i+1)}`);
         }
         
       } catch (err) {
-        console.log(`    Error scraping property: ${err.message}`);
+        console.log(`    ✗ Error: ${err.message}`);
       }
     }
     
@@ -264,57 +257,56 @@ async function scrapeBid4Assets(browser) {
   
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 1080 });
     
     console.log('  Loading auction listing...');
     await page.goto(CONFIG.bid4assets.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     
-    // Wait for listings to load
     await delay(3000);
     
-    // Scroll to load all items (they might use infinite scroll)
-    let previousHeight = 0;
-    let scrollAttempts = 0;
-    while (scrollAttempts < 10) {
-      const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-      if (currentHeight === previousHeight) break;
-      previousHeight = currentHeight;
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await delay(1500);
-      scrollAttempts++;
+    // Scroll to load lazy content
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => window.scrollBy(0, 1000));
+      await delay(1000);
     }
+    await page.evaluate(() => window.scrollTo(0, 0));
     
-    // Get all auction item links
+    // Get auction item links
     let auctionLinks = await page.evaluate(() => {
       const links = [];
-      // Bid4Assets typically uses these patterns
-      document.querySelectorAll('a[href*="/auction/index/"], a[href*="/auction/item/"], .auction-item a, .listing-item a').forEach(link => {
-        if (link.href && !links.includes(link.href)) {
-          links.push(link.href);
+      document.querySelectorAll('a[href*="/auction/"]').forEach(link => {
+        const href = link.href;
+        if (href && href.includes('/auction/') && !href.includes('/auction/Montgomery') && !links.includes(href)) {
+          links.push(href);
         }
       });
       return links;
     });
     
-    console.log(`  Found ${auctionLinks.length} auction items`);
+    console.log(`  Found ${auctionLinks.length} auction items on first page`);
     
     // Check for pagination
     let pageNum = 1;
     let hasMore = true;
     
-    while (hasMore && pageNum < 30) {
-      const nextLink = await page.evaluate(() => {
-        const next = document.querySelector('a[rel="next"], .pagination .next a, a:has-text("Next"), [aria-label="Next page"]');
-        return next ? next.href : null;
+    while (hasMore && pageNum < 20) {
+      const nextPageUrl = await page.evaluate(() => {
+        const nextLink = document.querySelector('a[rel="next"], .pagination a.next, a:contains("Next »")');
+        return nextLink ? nextLink.href : null;
       });
       
-      if (nextLink) {
-        await page.goto(nextLink, { waitUntil: 'networkidle2', timeout: 30000 });
+      if (nextPageUrl) {
+        console.log(`  Loading page ${pageNum + 1}...`);
+        await page.goto(nextPageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
         await delay(2000);
         
         const newLinks = await page.evaluate(() => {
           const links = [];
-          document.querySelectorAll('a[href*="/auction/index/"], a[href*="/auction/item/"], .auction-item a, .listing-item a').forEach(link => {
-            if (link.href) links.push(link.href);
+          document.querySelectorAll('a[href*="/auction/"]').forEach(link => {
+            const href = link.href;
+            if (href && href.includes('/auction/') && !href.includes('/auction/Montgomery')) {
+              links.push(href);
+            }
           });
           return links;
         });
@@ -326,7 +318,7 @@ async function scrapeBid4Assets(browser) {
           }
         });
         
-        console.log(`    Page ${pageNum + 1}: Found ${newLinks.length} items, total: ${auctionLinks.length}`);
+        console.log(`    Found ${newLinks.length} items, total: ${auctionLinks.length}`);
         
         if (auctionLinks.length === beforeCount) {
           hasMore = false;
@@ -337,9 +329,9 @@ async function scrapeBid4Assets(browser) {
       }
     }
     
-    console.log(`  Total auction links: ${auctionLinks.length}`);
+    console.log(`  Total auction links to scrape: ${auctionLinks.length}`);
     
-    // Visit each auction detail page
+    // Visit each auction page
     for (let i = 0; i < auctionLinks.length; i++) {
       const link = auctionLinks[i];
       console.log(`  Scraping auction ${i + 1}/${auctionLinks.length}...`);
@@ -349,80 +341,70 @@ async function scrapeBid4Assets(browser) {
         await delay(CONFIG.requestDelay);
         
         const auctionData = await page.evaluate(() => {
-          const getText = (selector) => {
-            const el = document.querySelector(selector);
-            return el ? el.textContent.trim() : '';
-          };
-          
-          const getTextByLabel = (label) => {
-            // Try various table/list structures
-            const allText = document.body.innerText;
-            const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
-            const match = allText.match(regex);
-            if (match) return match[1].trim();
+          const getTextByLabel = (labels) => {
+            const searchLabels = Array.isArray(labels) ? labels : [labels];
+            const bodyText = document.body.innerText;
             
-            // Try finding in tables
-            const cells = document.querySelectorAll('td, th, dd, .value');
-            for (let i = 0; i < cells.length; i++) {
-              const cell = cells[i];
-              const prev = cells[i - 1];
-              if (prev && prev.textContent.toLowerCase().includes(label.toLowerCase())) {
-                return cell.textContent.trim();
+            for (const label of searchLabels) {
+              const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
+              const match = bodyText.match(regex);
+              if (match) {
+                return match[1].trim();
               }
             }
             return '';
           };
           
-          // Get the title/address which is usually prominent
           const title = document.querySelector('h1, .auction-title, .property-title')?.textContent?.trim() || '';
           
           return {
             title: title,
-            sheriffNumber: getTextByLabel('sheriff') || getTextByLabel('sale number'),
-            courtCase: getTextByLabel('case') || getTextByLabel('docket'),
-            salesDate: getTextByLabel('sale date') || getTextByLabel('auction date') || getTextByLabel('auction ends'),
-            plaintiff: getTextByLabel('plaintiff'),
-            defendant: getTextByLabel('defendant') || getTextByLabel('owner'),
-            address: getTextByLabel('address') || getTextByLabel('property'),
-            city: getTextByLabel('city'),
-            zipCode: getTextByLabel('zip'),
-            debtAmount: getTextByLabel('judgment') || getTextByLabel('debt') || getTextByLabel('upset'),
-            attorney: getTextByLabel('attorney'),
-            parcelNumber: getTextByLabel('parcel') || getTextByLabel('tax id'),
-            status: getTextByLabel('status'),
-            currentBid: getTextByLabel('current bid') || getTextByLabel('high bid'),
-            township: getTextByLabel('township') || getTextByLabel('municipality'),
+            sheriffNumber: getTextByLabel(['sheriff', 'sale number', 'writ']),
+            courtCase: getTextByLabel(['case', 'docket']),
+            salesDate: getTextByLabel(['sale date', 'auction date', 'auction ends', 'end date']),
+            plaintiff: getTextByLabel(['plaintiff']),
+            defendant: getTextByLabel(['defendant', 'owner', 'debtor']),
+            address: getTextByLabel(['address', 'property address', 'location']),
+            city: getTextByLabel(['city']),
+            zipCode: getTextByLabel(['zip']),
+            debtAmount: getTextByLabel(['judgment', 'debt', 'upset', 'amount', 'opening bid']),
+            attorney: getTextByLabel(['attorney']),
+            parcelNumber: getTextByLabel(['parcel', 'tax id', 'folio']),
+            status: getTextByLabel(['status']),
+            currentBid: getTextByLabel(['current bid', 'high bid', 'winning bid']),
+            township: getTextByLabel(['township', 'municipality']),
           };
         });
         
-        // Parse address from title if needed
-        let address = auctionData.address || auctionData.title;
-        let city = auctionData.city;
-        let zipCode = auctionData.zipCode;
+        let address = auctionData.address || auctionData.title || '';
+        let city = auctionData.city || '';
+        let zipCode = auctionData.zipCode || '';
         let state = 'PA';
         
-        // Try to parse combined address
+        // Parse address
         const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
         if (addressMatch) {
-          address = addressMatch[1];
-          city = addressMatch[2];
+          address = addressMatch[1].trim();
+          city = addressMatch[2].trim();
           state = addressMatch[3];
           zipCode = addressMatch[4] || zipCode;
         }
         
-        if (address) {
+        if (address && address.length > 3) {
+          const propertyId = link.match(/\/(\d+)/)?.[1] || `${Date.now()}-${i}`;
+          
           properties.push({
             source: 'Bid4Assets',
-            propertyId: `B4A-${link.split('/').pop()}`,
+            propertyId: `B4A-${propertyId}`,
             sheriffNumber: auctionData.sheriffNumber,
             courtCase: auctionData.courtCase,
             salesDate: auctionData.salesDate,
             plaintiff: auctionData.plaintiff,
             defendant: auctionData.defendant,
             address: address,
-            city: city || '',
+            city: city,
             state: state,
-            zipCode: zipCode || '',
+            zipCode: zipCode,
             debtAmount: parseDebtAmount(auctionData.debtAmount),
             attorney: auctionData.attorney,
             attorneyPhone: '',
@@ -433,10 +415,12 @@ async function scrapeBid4Assets(browser) {
             county: CONFIG.bid4assets.county,
             detailUrl: link
           });
+          
+          console.log(`    ✓ Scraped: ${address}`);
         }
         
       } catch (err) {
-        console.log(`    Error scraping auction: ${err.message}`);
+        console.log(`    ✗ Error: ${err.message}`);
       }
     }
     
@@ -456,35 +440,34 @@ async function runScraper() {
   console.log('================================');
   console.log(`Started at: ${new Date().toLocaleString()}`);
   
-  // Ensure output directory exists
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
-  // Launch browser
+  const chromePath = getChromePath();
+  console.log(`Using Chrome at: ${chromePath}`);
+  
   const browser = await puppeteer.launch({
     headless: 'new',
+    executablePath: chromePath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
       '--disable-gpu',
-      '--window-size=1920,1080'
+      '--window-size=1920,1080',
+      '--single-process'
     ]
   });
   
   let allProperties = [];
   
   try {
-    // Scrape both sources
     const civilViewProperties = await scrapeCivilView(browser);
     const bid4AssetsProperties = await scrapeBid4Assets(browser);
     
     allProperties = [...civilViewProperties, ...bid4AssetsProperties];
-    
-    // Sort by debt amount
     allProperties.sort((a, b) => a.debtAmount - b.debtAmount);
     
-    // Save to JSON
     const outputPath = path.join(CONFIG.outputDir, CONFIG.outputFile);
     const outputData = {
       lastUpdated: new Date().toISOString(),
@@ -509,7 +492,6 @@ async function runScraper() {
   return allProperties;
 }
 
-// Export for use as module or run directly
 module.exports = { runScraper, CONFIG };
 
 if (require.main === module) {
