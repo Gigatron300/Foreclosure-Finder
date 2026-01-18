@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -31,19 +31,6 @@ const parseDebtAmount = (text) => {
   return parseFloat(cleaned) || 0;
 };
 
-// Find Chrome executable
-function getChromePath() {
-  // Render.com provides Chrome at this location
-  const possiblePaths = [
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    process.env.CHROME_PATH
-  ].filter(Boolean);
-  
-  return possiblePaths[0] || '/usr/bin/google-chrome';
-}
-
 // CivilView Scraper (Camden County, NJ)
 async function scrapeCivilView(browser) {
   console.log('\n📍 Starting CivilView scraper (Camden County, NJ)...');
@@ -73,31 +60,20 @@ async function scrapeCivilView(browser) {
     
     console.log(`  Found ${propertyLinks.length} property links on main page`);
     
-    // Try to find and click through pagination or date selectors
-    const saleDates = await page.evaluate(() => {
-      const dates = [];
-      document.querySelectorAll('select option, a[href*="saleDate"], .sale-date-link').forEach(el => {
-        if (el.value || el.href) {
-          dates.push(el.value || el.href);
-        }
-      });
-      return dates;
-    });
-    
     // Check for pagination
     let hasNextPage = true;
     let pageNum = 1;
     
     while (hasNextPage && pageNum < 15) {
       const nextButton = await page.evaluate(() => {
-        const next = document.querySelector('a[href*="page"]:not([href*="page=1"]), .pagination .next a, a:contains("Next"), [aria-label="Next"]');
+        const next = document.querySelector('a[href*="page"]:not([href*="page=1"]), .pagination .next a, [aria-label="Next"]');
         if (next && !next.classList.contains('disabled')) {
-          return next.href || true;
+          return next.href || null;
         }
         return null;
       });
       
-      if (nextButton && typeof nextButton === 'string') {
+      if (nextButton) {
         console.log(`  Navigating to page ${pageNum + 1}...`);
         await page.goto(nextButton, { waitUntil: 'networkidle2', timeout: 30000 });
         await delay(2000);
@@ -157,7 +133,7 @@ async function scrapeCivilView(browser) {
               }
             }
             
-            // Method 2: Look for label/value patterns in any element
+            // Method 2: Look for label/value patterns
             const allElements = document.querySelectorAll('*');
             for (const el of allElements) {
               const text = el.textContent || '';
@@ -173,7 +149,6 @@ async function scrapeCivilView(browser) {
             return '';
           };
           
-          // Extract data with multiple possible labels
           return {
             sheriffNumber: getTextByLabel(['sheriff', 'writ', 'sale number', 'sale #']),
             courtCase: getTextByLabel(['court case', 'docket', 'case number', 'case #']),
@@ -192,14 +167,12 @@ async function scrapeCivilView(browser) {
           };
         });
         
-        // Only add if we got meaningful data
         if (propertyData.address || propertyData.defendant || propertyData.sheriffNumber) {
           let address = propertyData.address || '';
           let city = propertyData.city || '';
           let state = 'NJ';
           let zipCode = propertyData.zipCode || '';
           
-          // Parse combined address format
           const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
           if (addressMatch) {
             address = addressMatch[1].trim();
@@ -291,7 +264,7 @@ async function scrapeBid4Assets(browser) {
     
     while (hasMore && pageNum < 20) {
       const nextPageUrl = await page.evaluate(() => {
-        const nextLink = document.querySelector('a[rel="next"], .pagination a.next, a:contains("Next »")');
+        const nextLink = document.querySelector('a[rel="next"], .pagination a.next');
         return nextLink ? nextLink.href : null;
       });
       
@@ -381,7 +354,6 @@ async function scrapeBid4Assets(browser) {
         let zipCode = auctionData.zipCode || '';
         let state = 'PA';
         
-        // Parse address
         const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
         if (addressMatch) {
           address = addressMatch[1].trim();
@@ -442,12 +414,8 @@ async function runScraper() {
   
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
-  const chromePath = getChromePath();
-  console.log(`Using Chrome at: ${chromePath}`);
-  
   const browser = await puppeteer.launch({
     headless: 'new',
-    executablePath: chromePath,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -455,7 +423,8 @@ async function runScraper() {
       '--disable-accelerated-2d-canvas',
       '--disable-gpu',
       '--window-size=1920,1080',
-      '--single-process'
+      '--single-process',
+      '--no-zygote'
     ]
   });
   
