@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: foreclosure-finder
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx puppeteer browsers install chrome
+    startCommand: npm start
+    envVars:
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: false
+      - key: NODE_ENV
+        value: production
