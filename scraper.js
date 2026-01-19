@@ -1,5 +1,4 @@
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -13,13 +12,7 @@ const CONFIG = {
     county: 'Camden',
     state: 'NJ'
   },
-  bid4assets: {
-    baseUrl: 'https://www.bid4assets.com',
-    searchUrl: 'https://www.bid4assets.com/auction/Montgomery-County-Pennsylvania-Sheriff-Sale/3702',
-    county: 'Montgomery',
-    state: 'PA'
-  },
-  requestDelay: 1500,
+  requestDelay: 800, // Reduced delay since we're being more efficient
   maxRetries: 3
 };
 
@@ -28,21 +21,79 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const parseDebtAmount = (text) => {
   if (!text) return 0;
-  const cleaned = text.replace(/[^0-9.]/g, '');
+  // Remove $ and commas, then parse
+  const cleaned = text.replace(/[$,]/g, '').trim();
   return parseFloat(cleaned) || 0;
 };
 
-// Get browser instance
-async function getBrowser() {
-  const executablePath = await chromium.executablePath();
+// Parse address into components
+const parseAddress = (fullAddress) => {
+  if (!fullAddress) return { address: '', city: '', state: 'NJ', zipCode: '' };
   
-  return puppeteer.launch({
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: executablePath,
-    headless: chromium.headless,
-  });
-}
+  // Try to extract zip code
+  const zipMatch = fullAddress.match(/(\d{5})(-\d{4})?/);
+  const zipCode = zipMatch ? zipMatch[1] : '';
+  
+  // Try to extract state (NJ)
+  const stateMatch = fullAddress.match(/\b(NJ|PA)\b/i);
+  const state = stateMatch ? stateMatch[1].toUpperCase() : 'NJ';
+  
+  // Try to extract city - usually appears before state
+  let city = '';
+  let address = fullAddress;
+  
+  // Common pattern: "123 MAIN ST CITY NJ 08XXX" or "123 MAIN ST, CITY, NJ 08XXX"
+  const parts = fullAddress.split(/\s+/);
+  
+  // Find where the city might be (before NJ/state)
+  const stateIndex = parts.findIndex(p => /^(NJ|PA)$/i.test(p));
+  if (stateIndex > 0) {
+    // City is likely the word(s) before state
+    // Look for common city patterns
+    const beforeState = parts.slice(0, stateIndex);
+    
+    // The last 1-3 words before state are usually the city
+    // But we need to be smart about it
+    const knownCities = ['CAMDEN', 'CHERRY HILL', 'VOORHEES', 'SICKLERVILLE', 'HADDONFIELD', 
+                         'BLACKWOOD', 'LINDENWOLD', 'GLOUCESTER', 'PENNSAUKEN', 'COLLINGSWOOD',
+                         'CLEMENTON', 'ATCO', 'BERLIN', 'MAGNOLIA', 'AUDUBON', 'RUNNEMEDE',
+                         'BELLMAWR', 'HADDON', 'WINSLOW', 'PINE HILL', 'GLENDORA', 'ERIAL',
+                         'WATERFORD', 'MERCHANTVILLE', 'LAWNSIDE', 'BARRINGTON', 'SOMERDALE',
+                         'OAKLYN', 'WOODLYNNE', 'STRATFORD', 'LAUREL SPRINGS', 'CHESILHURST',
+                         'MOUNT EPHRAIM', 'BROOKLAWN', 'HADDON HEIGHTS', 'HADDON TOWNSHIP'];
+    
+    // Check if any known city is in the address
+    const upperAddress = fullAddress.toUpperCase();
+    for (const knownCity of knownCities) {
+      if (upperAddress.includes(knownCity)) {
+        city = knownCity;
+        break;
+      }
+    }
+    
+    if (!city && beforeState.length > 2) {
+      // Take last word before state as city guess
+      city = beforeState[beforeState.length - 1];
+    }
+  }
+  
+  // Clean up address - remove the city/state/zip part
+  if (city) {
+    const cityIndex = fullAddress.toUpperCase().indexOf(city.toUpperCase());
+    if (cityIndex > 0) {
+      address = fullAddress.substring(0, cityIndex).trim();
+      // Remove trailing commas
+      address = address.replace(/,\s*$/, '');
+    }
+  }
+  
+  // Handle A/K/A addresses - take the first one
+  if (address.includes('A/K/A')) {
+    address = address.split('A/K/A')[0].trim();
+  }
+  
+  return { address, city, state, zipCode };
+};
 
 // CivilView Scraper (Camden County, NJ)
 async function scrapeCivilView(browser) {
@@ -52,70 +103,26 @@ async function scrapeCivilView(browser) {
   
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 1080 });
     
     console.log('  Loading search page...');
     await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await delay(2000);
     
-    await delay(3000);
-    
-    // Get all property links
-    let propertyLinks = await page.evaluate(() => {
+    // Get all property detail links from the search results table
+    const propertyLinks = await page.evaluate(() => {
       const links = [];
-      document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
-        if (link.href && !links.includes(link.href)) {
-          links.push(link.href);
+      // Find all "View Details" links
+      document.querySelectorAll('a[href*="SaleDetails"]').forEach(link => {
+        const href = link.href;
+        if (href && !links.includes(href)) {
+          links.push(href);
         }
       });
       return links;
     });
     
-    console.log(`  Found ${propertyLinks.length} property links on main page`);
-    
-    // Check for pagination
-    let hasNextPage = true;
-    let pageNum = 1;
-    
-    while (hasNextPage && pageNum < 15) {
-      const nextButton = await page.evaluate(() => {
-        const next = document.querySelector('a[href*="page"]:not([href*="page=1"]), .pagination .next a, [aria-label="Next"]');
-        if (next && !next.classList.contains('disabled')) {
-          return next.href || null;
-        }
-        return null;
-      });
-      
-      if (nextButton) {
-        console.log(`  Navigating to page ${pageNum + 1}...`);
-        await page.goto(nextButton, { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(2000);
-        
-        const newLinks = await page.evaluate(() => {
-          const links = [];
-          document.querySelectorAll('a[href*="SaleDetails"], a[href*="PropertyId"]').forEach(link => {
-            if (link.href) links.push(link.href);
-          });
-          return links;
-        });
-        
-        const beforeCount = propertyLinks.length;
-        newLinks.forEach(link => {
-          if (!propertyLinks.includes(link)) {
-            propertyLinks.push(link);
-          }
-        });
-        
-        console.log(`    Found ${newLinks.length} links, total unique: ${propertyLinks.length}`);
-        
-        if (propertyLinks.length === beforeCount) {
-          hasNextPage = false;
-        }
-        pageNum++;
-      } else {
-        hasNextPage = false;
-      }
-    }
-    
-    console.log(`  Total property links to scrape: ${propertyLinks.length}`);
+    console.log(`  Found ${propertyLinks.length} properties to scrape`);
     
     // Visit each property detail page
     for (let i = 0; i < propertyLinks.length; i++) {
@@ -127,97 +134,105 @@ async function scrapeCivilView(browser) {
         await delay(CONFIG.requestDelay);
         
         const propertyData = await page.evaluate(() => {
-          const getTextByLabel = (labels) => {
-            const searchLabels = Array.isArray(labels) ? labels : [labels];
-            
+          // Helper function to get text content by label
+          const getFieldValue = (labelText) => {
             const rows = document.querySelectorAll('tr');
             for (const row of rows) {
-              const cells = row.querySelectorAll('td, th');
-              for (let i = 0; i < cells.length - 1; i++) {
-                const cellText = cells[i].textContent.toLowerCase().trim();
-                for (const label of searchLabels) {
-                  if (cellText.includes(label.toLowerCase())) {
-                    return cells[i + 1]?.textContent?.trim() || '';
+              const cells = row.querySelectorAll('td');
+              if (cells.length >= 2) {
+                const label = cells[0].textContent.trim().toLowerCase();
+                if (label.includes(labelText.toLowerCase())) {
+                  return cells[1].textContent.trim();
+                }
+              }
+            }
+            return '';
+          };
+          
+          // Get status history
+          const getStatusHistory = () => {
+            const history = [];
+            // Find the Status History section
+            const tables = document.querySelectorAll('table');
+            for (const table of tables) {
+              const headerRow = table.querySelector('tr');
+              if (headerRow && headerRow.textContent.includes('Status') && headerRow.textContent.includes('Date')) {
+                const rows = table.querySelectorAll('tr');
+                for (let i = 1; i < rows.length; i++) { // Skip header
+                  const cells = rows[i].querySelectorAll('td');
+                  if (cells.length >= 2) {
+                    history.push({
+                      status: cells[0].textContent.trim(),
+                      date: cells[1].textContent.trim()
+                    });
                   }
                 }
               }
             }
-            
-            const allElements = document.querySelectorAll('*');
-            for (const el of allElements) {
-              const text = el.textContent || '';
-              for (const label of searchLabels) {
-                const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
-                const match = text.match(regex);
-                if (match && match[1].trim().length < 500) {
-                  return match[1].trim();
-                }
-              }
+            return history;
+          };
+          
+          // Get current status from header
+          const getCurrentStatus = () => {
+            const statusHeader = document.body.textContent.match(/Current Status[:\s]*([^-\n]+)/i);
+            if (statusHeader) {
+              return statusHeader[1].trim();
             }
-            
             return '';
           };
           
           return {
-            sheriffNumber: getTextByLabel(['sheriff', 'writ', 'sale number', 'sale #']),
-            courtCase: getTextByLabel(['court case', 'docket', 'case number', 'case #']),
-            salesDate: getTextByLabel(['sale date', 'auction date', 'date of sale']),
-            plaintiff: getTextByLabel(['plaintiff']),
-            defendant: getTextByLabel(['defendant']),
-            address: getTextByLabel(['address', 'property address', 'premises', 'location']),
-            city: getTextByLabel(['city', 'municipality', 'town']),
-            zipCode: getTextByLabel(['zip', 'postal']),
-            debtAmount: getTextByLabel(['debt', 'judgment', 'amount due', 'total due', 'upset']),
-            attorney: getTextByLabel(['attorney', 'firm', 'counsel']),
-            attorneyPhone: getTextByLabel(['phone', 'telephone']),
-            parcelNumber: getTextByLabel(['parcel', 'tax id', 'block', 'lot', 'account']),
-            status: getTextByLabel(['status']),
-            township: getTextByLabel(['township', 'municipality', 'borough']),
+            sheriffNumber: getFieldValue('sheriff'),
+            courtCase: getFieldValue('court case'),
+            salesDate: getFieldValue('sales date'),
+            plaintiff: getFieldValue('plaintiff'),
+            defendant: getFieldValue('defendant'),
+            fullAddress: getFieldValue('address'),
+            approxUpset: getFieldValue('approx. upset') || getFieldValue('approx upset') || getFieldValue('upset'),
+            attorney: getFieldValue('attorney:') || getFieldValue('attorney'),
+            attorneyPhone: getFieldValue('attorney phone'),
+            parcelNumber: getFieldValue('parcel'),
+            propertyNote: getFieldValue('property note'),
+            currentStatus: getCurrentStatus(),
+            statusHistory: getStatusHistory()
           };
         });
         
-        if (propertyData.address || propertyData.defendant || propertyData.sheriffNumber) {
-          let address = propertyData.address || '';
-          let city = propertyData.city || '';
-          let state = 'NJ';
-          let zipCode = propertyData.zipCode || '';
-          
-          const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
-          if (addressMatch) {
-            address = addressMatch[1].trim();
-            city = addressMatch[2].trim();
-            state = addressMatch[3];
-            zipCode = addressMatch[4] || zipCode;
-          }
-          
-          properties.push({
+        // Parse the address
+        const parsedAddress = parseAddress(propertyData.fullAddress);
+        
+        // Only add if we have meaningful data
+        if (parsedAddress.address || propertyData.defendant || propertyData.sheriffNumber) {
+          const property = {
             source: 'CivilView',
-            propertyId: `CV-${Date.now()}-${i}`,
+            propertyId: `CV-${propertyData.sheriffNumber || Date.now()}-${i}`,
             sheriffNumber: propertyData.sheriffNumber,
             courtCase: propertyData.courtCase,
             salesDate: propertyData.salesDate,
             plaintiff: propertyData.plaintiff,
             defendant: propertyData.defendant,
-            address: address,
-            city: city,
-            state: state,
-            zipCode: zipCode,
-            debtAmount: parseDebtAmount(propertyData.debtAmount),
+            address: parsedAddress.address || propertyData.fullAddress,
+            city: parsedAddress.city,
+            state: parsedAddress.state,
+            zipCode: parsedAddress.zipCode,
+            debtAmount: parseDebtAmount(propertyData.approxUpset),
+            approxUpset: propertyData.approxUpset, // Keep original string too
             attorney: propertyData.attorney,
             attorneyPhone: propertyData.attorneyPhone,
             parcelNumber: propertyData.parcelNumber,
-            status: propertyData.status || 'Scheduled',
-            currentBid: '',
-            township: propertyData.township,
+            propertyNote: propertyData.propertyNote,
+            status: propertyData.currentStatus || 'Scheduled',
+            statusHistory: propertyData.statusHistory,
             county: CONFIG.civilview.county,
             detailUrl: link
-          });
+          };
           
-          console.log(`    ✓ Scraped: ${address || propertyData.defendant || 'Property ' + (i+1)}`);
+          properties.push(property);
+          console.log(`    ✓ ${parsedAddress.address || 'Property'} - $${property.debtAmount.toLocaleString()}`);
         }
         
       } catch (err) {
-        console.log(`    ✗ Error: ${err.message}`);
+        console.log(`    ✗ Error scraping property: ${err.message}`);
       }
     }
     
@@ -231,185 +246,6 @@ async function scrapeCivilView(browser) {
   return properties;
 }
 
-// Bid4Assets Scraper (Montgomery County, PA)
-async function scrapeBid4Assets(browser) {
-  console.log('\n📍 Starting Bid4Assets scraper (Montgomery County, PA)...');
-  const properties = [];
-  const page = await browser.newPage();
-  
-  try {
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    console.log('  Loading auction listing...');
-    await page.goto(CONFIG.bid4assets.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-    
-    await delay(3000);
-    
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(() => window.scrollBy(0, 1000));
-      await delay(1000);
-    }
-    await page.evaluate(() => window.scrollTo(0, 0));
-    
-    let auctionLinks = await page.evaluate(() => {
-      const links = [];
-      document.querySelectorAll('a[href*="/auction/"]').forEach(link => {
-        const href = link.href;
-        if (href && href.includes('/auction/') && !href.includes('/auction/Montgomery') && !links.includes(href)) {
-          links.push(href);
-        }
-      });
-      return links;
-    });
-    
-    console.log(`  Found ${auctionLinks.length} auction items on first page`);
-    
-    let pageNum = 1;
-    let hasMore = true;
-    
-    while (hasMore && pageNum < 20) {
-      const nextPageUrl = await page.evaluate(() => {
-        const nextLink = document.querySelector('a[rel="next"], .pagination a.next');
-        return nextLink ? nextLink.href : null;
-      });
-      
-      if (nextPageUrl) {
-        console.log(`  Loading page ${pageNum + 1}...`);
-        await page.goto(nextPageUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(2000);
-        
-        const newLinks = await page.evaluate(() => {
-          const links = [];
-          document.querySelectorAll('a[href*="/auction/"]').forEach(link => {
-            const href = link.href;
-            if (href && href.includes('/auction/') && !href.includes('/auction/Montgomery')) {
-              links.push(href);
-            }
-          });
-          return links;
-        });
-        
-        const beforeCount = auctionLinks.length;
-        newLinks.forEach(link => {
-          if (!auctionLinks.includes(link)) {
-            auctionLinks.push(link);
-          }
-        });
-        
-        console.log(`    Found ${newLinks.length} items, total: ${auctionLinks.length}`);
-        
-        if (auctionLinks.length === beforeCount) {
-          hasMore = false;
-        }
-        pageNum++;
-      } else {
-        hasMore = false;
-      }
-    }
-    
-    console.log(`  Total auction links to scrape: ${auctionLinks.length}`);
-    
-    for (let i = 0; i < auctionLinks.length; i++) {
-      const link = auctionLinks[i];
-      console.log(`  Scraping auction ${i + 1}/${auctionLinks.length}...`);
-      
-      try {
-        await page.goto(link, { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(CONFIG.requestDelay);
-        
-        const auctionData = await page.evaluate(() => {
-          const getTextByLabel = (labels) => {
-            const searchLabels = Array.isArray(labels) ? labels : [labels];
-            const bodyText = document.body.innerText;
-            
-            for (const label of searchLabels) {
-              const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
-              const match = bodyText.match(regex);
-              if (match) {
-                return match[1].trim();
-              }
-            }
-            return '';
-          };
-          
-          const title = document.querySelector('h1, .auction-title, .property-title')?.textContent?.trim() || '';
-          
-          return {
-            title: title,
-            sheriffNumber: getTextByLabel(['sheriff', 'sale number', 'writ']),
-            courtCase: getTextByLabel(['case', 'docket']),
-            salesDate: getTextByLabel(['sale date', 'auction date', 'auction ends', 'end date']),
-            plaintiff: getTextByLabel(['plaintiff']),
-            defendant: getTextByLabel(['defendant', 'owner', 'debtor']),
-            address: getTextByLabel(['address', 'property address', 'location']),
-            city: getTextByLabel(['city']),
-            zipCode: getTextByLabel(['zip']),
-            debtAmount: getTextByLabel(['judgment', 'debt', 'upset', 'amount', 'opening bid']),
-            attorney: getTextByLabel(['attorney']),
-            parcelNumber: getTextByLabel(['parcel', 'tax id', 'folio']),
-            status: getTextByLabel(['status']),
-            currentBid: getTextByLabel(['current bid', 'high bid', 'winning bid']),
-            township: getTextByLabel(['township', 'municipality']),
-          };
-        });
-        
-        let address = auctionData.address || auctionData.title || '';
-        let city = auctionData.city || '';
-        let zipCode = auctionData.zipCode || '';
-        let state = 'PA';
-        
-        const addressMatch = address.match(/^(.+?),\s*([^,]+),\s*([A-Z]{2})\s*(\d{5})?/);
-        if (addressMatch) {
-          address = addressMatch[1].trim();
-          city = addressMatch[2].trim();
-          state = addressMatch[3];
-          zipCode = addressMatch[4] || zipCode;
-        }
-        
-        if (address && address.length > 3) {
-          const propertyId = link.match(/\/(\d+)/)?.[1] || `${Date.now()}-${i}`;
-          
-          properties.push({
-            source: 'Bid4Assets',
-            propertyId: `B4A-${propertyId}`,
-            sheriffNumber: auctionData.sheriffNumber,
-            courtCase: auctionData.courtCase,
-            salesDate: auctionData.salesDate,
-            plaintiff: auctionData.plaintiff,
-            defendant: auctionData.defendant,
-            address: address,
-            city: city,
-            state: state,
-            zipCode: zipCode,
-            debtAmount: parseDebtAmount(auctionData.debtAmount),
-            attorney: auctionData.attorney,
-            attorneyPhone: '',
-            parcelNumber: auctionData.parcelNumber,
-            status: auctionData.status || 'Active',
-            currentBid: auctionData.currentBid,
-            township: auctionData.township,
-            county: CONFIG.bid4assets.county,
-            detailUrl: link
-          });
-          
-          console.log(`    ✓ Scraped: ${address}`);
-        }
-        
-      } catch (err) {
-        console.log(`    ✗ Error: ${err.message}`);
-      }
-    }
-    
-  } catch (error) {
-    console.error('  Bid4Assets scraper error:', error.message);
-  } finally {
-    await page.close();
-  }
-  
-  console.log(`  ✅ Bid4Assets complete: ${properties.length} properties scraped`);
-  return properties;
-}
-
 // Main scraper function
 async function runScraper() {
   console.log('🏠 Foreclosure Property Scraper');
@@ -418,15 +254,26 @@ async function runScraper() {
   
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
-  const browser = await getBrowser();
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--single-process',
+      '--no-zygote'
+    ]
+  });
   
   let allProperties = [];
   
   try {
     const civilViewProperties = await scrapeCivilView(browser);
-    const bid4AssetsProperties = await scrapeBid4Assets(browser);
     
-    allProperties = [...civilViewProperties, ...bid4AssetsProperties];
+    allProperties = civilViewProperties;
+    // Sort by debt amount (lowest first)
     allProperties.sort((a, b) => a.debtAmount - b.debtAmount);
     
     const outputPath = path.join(CONFIG.outputDir, CONFIG.outputFile);
@@ -434,8 +281,7 @@ async function runScraper() {
       lastUpdated: new Date().toISOString(),
       totalProperties: allProperties.length,
       sources: {
-        civilView: civilViewProperties.length,
-        bid4Assets: bid4AssetsProperties.length
+        civilView: civilViewProperties.length
       },
       properties: allProperties
     };
