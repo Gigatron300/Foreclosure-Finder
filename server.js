@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const { runScraper, CONFIG } = require('./scraper');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,12 +11,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-const DATA_FILE = './data/properties.json';
+const DATA_FILE = path.join(CONFIG.outputDir, CONFIG.outputFile);
 
 // Ensure data directory exists
 async function ensureDataDir() {
   try {
-    await fs.mkdir('./data', { recursive: true });
+    await fs.mkdir(CONFIG.outputDir, { recursive: true });
   } catch (e) {}
 }
 
@@ -46,7 +47,21 @@ app.get('/api/properties', async (req, res) => {
       properties = properties.filter(p => p.debtAmount >= minDebt);
     }
     
-    properties.sort((a, b) => a.debtAmount - b.debtAmount);
+    const sortBy = req.query.sortBy || 'debtAmount';
+    const sortOrder = req.query.sortOrder === 'desc' ? -1 : 1;
+    
+    properties.sort((a, b) => {
+      if (sortBy === 'debtAmount') {
+        return (a.debtAmount - b.debtAmount) * sortOrder;
+      }
+      if (sortBy === 'salesDate') {
+        return (new Date(a.salesDate) - new Date(b.salesDate)) * sortOrder;
+      }
+      if (sortBy === 'address') {
+        return a.address.localeCompare(b.address) * sortOrder;
+      }
+      return 0;
+    });
     
     res.json({
       lastUpdated: jsonData.lastUpdated,
@@ -62,11 +77,28 @@ app.get('/api/properties', async (req, res) => {
         totalProperties: 0,
         sources: { civilView: 0, bid4Assets: 0 },
         properties: [],
-        message: 'No data yet. Scraper not available on free tier - upgrade to paid to enable.'
+        message: 'No data yet. Click "Refresh Data from Counties" to start scraping.'
       });
     } else {
       res.status(500).json({ error: error.message });
     }
+  }
+});
+
+// Get single property by ID
+app.get('/api/properties/:id', async (req, res) => {
+  try {
+    const data = await fs.readFile(DATA_FILE, 'utf8');
+    const jsonData = JSON.parse(data);
+    const property = jsonData.properties.find(p => p.propertyId === req.params.id);
+    
+    if (property) {
+      res.json(property);
+    } else {
+      res.status(404).json({ error: 'Property not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -77,41 +109,85 @@ app.get('/api/stats', async (req, res) => {
     const jsonData = JSON.parse(data);
     const properties = jsonData.properties;
     
-    res.json({
+    const stats = {
       lastUpdated: jsonData.lastUpdated,
       total: properties.length,
-      bySources: jsonData.sources
+      bySources: jsonData.sources,
+      byCounty: {},
+      byStatus: {},
+      debtRange: properties.length > 0 ? {
+        min: Math.min(...properties.map(p => p.debtAmount)),
+        max: Math.max(...properties.map(p => p.debtAmount)),
+        avg: properties.reduce((sum, p) => sum + p.debtAmount, 0) / properties.length
+      } : { min: 0, max: 0, avg: 0 }
+    };
+    
+    properties.forEach(p => {
+      stats.byCounty[p.county] = (stats.byCounty[p.county] || 0) + 1;
+      stats.byStatus[p.status] = (stats.byStatus[p.status] || 0) + 1;
     });
+    
+    res.json(stats);
   } catch (error) {
     res.json({ lastUpdated: null, total: 0, bySources: {} });
   }
 });
 
-// Scrape endpoint - disabled on lite version
+// Manually trigger a scrape
 let isScrapingInProgress = false;
 let lastScrapeStatus = null;
 
 app.post('/api/scrape', async (req, res) => {
-  res.status(503).json({ 
-    error: 'Scraper requires paid tier. Please upgrade your Render instance to Starter ($7/mo) to enable scraping.',
-    upgradeUrl: 'https://dashboard.render.com'
-  });
+  if (isScrapingInProgress) {
+    return res.status(429).json({ 
+      error: 'Scrape already in progress',
+      status: lastScrapeStatus 
+    });
+  }
+  
+  isScrapingInProgress = true;
+  lastScrapeStatus = { started: new Date().toISOString(), status: 'running' };
+  
+  res.json({ message: 'Scrape started', status: lastScrapeStatus });
+  
+  try {
+    const properties = await runScraper();
+    lastScrapeStatus = {
+      completed: new Date().toISOString(),
+      status: 'completed',
+      propertiesFound: properties.length
+    };
+  } catch (error) {
+    lastScrapeStatus = {
+      completed: new Date().toISOString(),
+      status: 'error',
+      error: error.message
+    };
+  } finally {
+    isScrapingInProgress = false;
+  }
 });
 
+// Get scrape status
 app.get('/api/scrape/status', (req, res) => {
   res.json({
-    inProgress: false,
-    lastStatus: { status: 'Scraper disabled on free tier' }
+    inProgress: isScrapingInProgress,
+    lastStatus: lastScrapeStatus
   });
 });
 
-// Export CSV
+// Export data as CSV
 app.get('/api/export/csv', async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
     
-    const headers = ['Address', 'City', 'State', 'Zip', 'Debt Amount', 'Defendant', 'Plaintiff', 'Sheriff #', 'Court Case', 'Sale Date', 'Status', 'Attorney', 'County', 'Source', 'URL'];
+    const headers = [
+      'Address', 'City', 'State', 'Zip', 'Debt Amount', 'Defendant', 
+      'Plaintiff', 'Sheriff #', 'Court Case', 'Sale Date', 'Status', 
+      'Attorney', 'Attorney Phone', 'Parcel #', 'County', 'Township', 
+      'Source', 'URL'
+    ];
     
     const rows = jsonData.properties.map(p => [
       `"${p.address}"`,
@@ -126,7 +202,10 @@ app.get('/api/export/csv', async (req, res) => {
       p.salesDate,
       p.status,
       `"${(p.attorney || '').replace(/"/g, '""')}"`,
+      p.attorneyPhone,
+      p.parcelNumber,
       p.county,
+      p.township,
       p.source,
       p.detailUrl
     ]);
@@ -142,6 +221,7 @@ app.get('/api/export/csv', async (req, res) => {
   }
 });
 
+// Serve the main app
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -151,6 +231,6 @@ ensureDataDir().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Foreclosure Finder server running on port ${PORT}`);
     console.log(`   Open http://localhost:${PORT} in your browser`);
-    console.log(`   NOTE: This is the lite version. Upgrade to paid tier for scraping.`);
+    console.log(`   API available at http://localhost:${PORT}/api/properties`);
   });
 });
