@@ -8,11 +8,12 @@
     "scrape": "node scraper.js"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "puppeteer": "^21.6.1"
+    "puppeteer-core": "^21.6.1",
+    "@sparticuz/chromium": "^119.0.2"
   }
 }
