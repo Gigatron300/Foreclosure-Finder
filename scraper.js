@@ -44,7 +44,6 @@ async function scrapeCivilView(browser) {
     console.log('  Loading search page...');
     await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     
-    // Wait for content
     await delay(3000);
     
     // Get all property links
@@ -119,7 +118,6 @@ async function scrapeCivilView(browser) {
           const getTextByLabel = (labels) => {
             const searchLabels = Array.isArray(labels) ? labels : [labels];
             
-            // Method 1: Look in table rows
             const rows = document.querySelectorAll('tr');
             for (const row of rows) {
               const cells = row.querySelectorAll('td, th');
@@ -133,7 +131,6 @@ async function scrapeCivilView(browser) {
               }
             }
             
-            // Method 2: Look for label/value patterns
             const allElements = document.querySelectorAll('*');
             for (const el of allElements) {
               const text = el.textContent || '';
@@ -237,14 +234,12 @@ async function scrapeBid4Assets(browser) {
     
     await delay(3000);
     
-    // Scroll to load lazy content
     for (let i = 0; i < 5; i++) {
       await page.evaluate(() => window.scrollBy(0, 1000));
       await delay(1000);
     }
     await page.evaluate(() => window.scrollTo(0, 0));
     
-    // Get auction item links
     let auctionLinks = await page.evaluate(() => {
       const links = [];
       document.querySelectorAll('a[href*="/auction/"]').forEach(link => {
@@ -258,7 +253,6 @@ async function scrapeBid4Assets(browser) {
     
     console.log(`  Found ${auctionLinks.length} auction items on first page`);
     
-    // Check for pagination
     let pageNum = 1;
     let hasMore = true;
     
@@ -304,7 +298,6 @@ async function scrapeBid4Assets(browser) {
     
     console.log(`  Total auction links to scrape: ${auctionLinks.length}`);
     
-    // Visit each auction page
     for (let i = 0; i < auctionLinks.length; i++) {
       const link = auctionLinks[i];
       console.log(`  Scraping auction ${i + 1}/${auctionLinks.length}...`);
@@ -414,6 +407,7 @@ async function runScraper() {
   
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
+  // Launch with Puppeteer's bundled Chrome - no executablePath needed
   const browser = await puppeteer.launch({
     headless: 'new',
     args: [
