@@ -5,8 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "scrape": "node scraper.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "scrape": "node scraper.js"
   },
   "engines": {
     "node": "18.x"
