@@ -1,4 +1,5 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -31,6 +32,18 @@ const parseDebtAmount = (text) => {
   return parseFloat(cleaned) || 0;
 };
 
+// Get browser instance
+async function getBrowser() {
+  const executablePath = await chromium.executablePath();
+  
+  return puppeteer.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: executablePath,
+    headless: chromium.headless,
+  });
+}
+
 // CivilView Scraper (Camden County, NJ)
 async function scrapeCivilView(browser) {
   console.log('\n📍 Starting CivilView scraper (Camden County, NJ)...');
@@ -39,7 +52,6 @@ async function scrapeCivilView(browser) {
   
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1920, height: 1080 });
     
     console.log('  Loading search page...');
     await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -227,7 +239,6 @@ async function scrapeBid4Assets(browser) {
   
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1920, height: 1080 });
     
     console.log('  Loading auction listing...');
     await page.goto(CONFIG.bid4assets.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -407,20 +418,7 @@ async function runScraper() {
   
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
-  // Launch with Puppeteer's bundled Chrome - no executablePath needed
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--window-size=1920,1080',
-      '--single-process',
-      '--no-zygote'
-    ]
-  });
+  const browser = await getBrowser();
   
   let allProperties = [];
   
