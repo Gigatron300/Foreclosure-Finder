@@ -1,11 +1,12 @@
 {
   "name": "foreclosure-scraper",
   "version": "1.0.0",
-  "description": "Scrapes foreclosure listings from CivilView and Bid4Assets",
+  "description": "Scrapes foreclosure listings from CivilView",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "scrape": "node scraper.js"
+    "scrape": "node scraper.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "engines": {
     "node": "20.x"
