@@ -1,10 +1,9 @@
 services:
   - type: web
     name: foreclosure-finder
-    runtime: node
+    runtime: docker
     plan: starter
-    buildCommand: npm install
-    startCommand: npm start
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: NODE_ENV
         value: production
