@@ -49,6 +49,95 @@
             z-index: -1;
         }
 
+        /* Login Screen Styles */
+        .login-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .login-screen.hidden {
+            display: none;
+        }
+
+        .login-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 3rem;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .login-box h1 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .login-box .subtitle {
+            margin-bottom: 2rem;
+        }
+
+        .login-box input {
+            width: 100%;
+            padding: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .login-box input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .login-box button {
+            width: 100%;
+            padding: 1rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .login-box button:hover {
+            background: var(--accent-hover);
+        }
+
+        .login-error {
+            color: var(--danger);
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .login-error.show {
+            display: block;
+        }
+
+        .main-content {
+            display: none;
+        }
+
+        .main-content.visible {
+            display: block;
+        }
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
@@ -816,6 +905,20 @@
 </head>
 <body>
     <div class="bg-pattern"></div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-box">
+            <h1>🏠 Foreclosure Finder</h1>
+            <p class="subtitle">Enter password to access</p>
+            <input type="password" id="loginPassword" placeholder="Password" onkeypress="if(event.key==='Enter')attemptLogin()">
+            <button onclick="attemptLogin()">Login</button>
+            <p id="loginError" class="login-error">Invalid password. Please try again.</p>
+        </div>
+    </div>
+
+    <!-- Main Content (hidden until logged in) -->
+    <div id="mainContent" class="main-content">
     
     <div class="container">
         <header>
@@ -988,6 +1091,7 @@
             <p>Data scraped from official sheriff sale websites. Always verify with county offices.</p>
         </footer>
     </div>
+    </div> <!-- End main-content -->
 
     <script>
         // Configuration
@@ -995,7 +1099,55 @@
         let allProperties = [];
         let filteredProperties = [];
         let googleApiKey = localStorage.getItem('googleApiKey') || '';
+        let authToken = sessionStorage.getItem('authToken') || '';
         let scrapeCheckInterval = null;
+
+        // Login function
+        async function attemptLogin() {
+            const password = document.getElementById('loginPassword').value;
+            const errorEl = document.getElementById('loginError');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/auth`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                
+                if (response.ok) {
+                    authToken = password;
+                    sessionStorage.setItem('authToken', authToken);
+                    document.getElementById('loginScreen').classList.add('hidden');
+                    document.getElementById('mainContent').classList.add('visible');
+                    errorEl.classList.remove('show');
+                    checkDataStatus();
+                    loadProperties();
+                } else {
+                    errorEl.classList.add('show');
+                    document.getElementById('loginPassword').value = '';
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error. Please try again.';
+                errorEl.classList.add('show');
+            }
+        }
+
+        // Check if already logged in
+        function checkExistingAuth() {
+            if (authToken) {
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('mainContent').classList.add('visible');
+                return true;
+            }
+            return false;
+        }
+
+        // Helper to add auth header to fetch requests
+        function authFetch(url, options = {}) {
+            options.headers = options.headers || {};
+            options.headers['X-Auth-Token'] = authToken;
+            return fetch(url, options);
+        }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
@@ -1003,14 +1155,22 @@
                 document.getElementById('googleApiKey').value = googleApiKey;
             }
             updateGoogleApiStatus();
-            checkDataStatus();
-            loadProperties();
+            
+            if (checkExistingAuth()) {
+                checkDataStatus();
+                loadProperties();
+            }
         });
 
         // Check data freshness
         async function checkDataStatus() {
             try {
-                const response = await fetch(`${API_BASE}/api/stats`);
+                const response = await authFetch(`${API_BASE}/api/stats`);
+                if (response.status === 401) {
+                    sessionStorage.removeItem('authToken');
+                    location.reload();
+                    return;
+                }
                 const data = await response.json();
                 
                 const statusDot = document.getElementById('statusDot');
@@ -1064,7 +1224,12 @@
                 if (source) params.append('source', source);
                 if (city) params.append('city', city);
                 
-                const response = await fetch(`${API_BASE}/api/properties?${params}`);
+                const response = await authFetch(`${API_BASE}/api/properties?${params}`);
+                if (response.status === 401) {
+                    sessionStorage.removeItem('authToken');
+                    location.reload();
+                    return;
+                }
                 const data = await response.json();
                 
                 allProperties = data.properties || [];
@@ -1105,7 +1270,7 @@
             }
             
             try {
-                const response = await fetch(`${API_BASE}/api/scrape`, { method: 'POST' });
+                const response = await authFetch(`${API_BASE}/api/scrape`, { method: 'POST' });
                 const data = await response.json();
                 
                 if (response.status === 429) {
@@ -1118,7 +1283,7 @@
                 // Poll for completion
                 scrapeCheckInterval = setInterval(async () => {
                     try {
-                        const statusResponse = await fetch(`${API_BASE}/api/scrape/status`);
+                        const statusResponse = await authFetch(`${API_BASE}/api/scrape/status`);
                         const statusData = await statusResponse.json();
                         
                         if (!statusData.inProgress) {
@@ -1285,7 +1450,20 @@
 
         // Export
         function exportCSV() {
-            window.location.href = `${API_BASE}/api/export/csv`;
+            // Create a temporary link with auth header workaround
+            authFetch(`${API_BASE}/api/export/csv`)
+                .then(response => response.blob())
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'foreclosures.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                })
+                .catch(err => alert('Error exporting CSV'));
         }
 
         // Enter key support
