@@ -16,7 +16,7 @@ const CONFIG = {
   maxRetries: 1,            // Only 1 retry - we have fallback data anyway
   batchSize: 50,            // Pause after this many properties
   batchPause: 2000,         // Pause duration (ms) between batches
-  pageTimeout: 10000        // Timeout for page loads (ms) - fail fast
+  pageTimeout: 15000        // Timeout for page loads (ms)
 };
 
 // Utility functions
@@ -179,8 +179,10 @@ async function scrapeCivilView(browser) {
       
       while (retries < CONFIG.maxRetries && !success) {
         try {
-          await page.goto(listing.detailUrl, { waitUntil: 'domcontentloaded', timeout: CONFIG.pageTimeout });
-          await delay(CONFIG.requestDelay);
+          await page.goto(listing.detailUrl, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
+          
+          // Wait a moment for any dynamic content
+          await delay(500);
           
           // Try to extract data - use multiple strategies
           const propertyData = await page.evaluate((backupData) => {
@@ -215,20 +217,9 @@ async function scrapeCivilView(browser) {
               return '';
             };
             
-            // Strategy 3: Look for any element containing label text followed by value
-            const getFieldFromAnyElement = (labelText) => {
-              const allText = document.body.innerText;
-              const regex = new RegExp(labelText + '[:\\s]*([^\\n]+)', 'i');
-              const match = allText.match(regex);
-              return match ? match[1].trim() : '';
-            };
-            
-            // Combined getter - tries all strategies
+            // Combined getter - only uses reliable strategies (no regex fallback)
             const getField = (labelText) => {
-              return getFieldFromDetailItems(labelText) 
-                  || getFieldFromTableRows(labelText) 
-                  || getFieldFromAnyElement(labelText)
-                  || '';
+              return getFieldFromDetailItems(labelText) || getFieldFromTableRows(labelText) || '';
             };
             
             // Get status history from table
@@ -253,18 +244,20 @@ async function scrapeCivilView(browser) {
               return history;
             };
             
-            // Check if page has any content we expect
-            const hasDetailContent = document.querySelector('.sale-detail-item') !== null 
-                                  || document.body.innerText.includes('Sheriff')
-                                  || document.body.innerText.includes('Plaintiff');
+            // Check if page has the expected detail content
+            const hasDetailContent = document.querySelectorAll('.sale-detail-item').length > 0;
             
-            // Get data with fallbacks to listing data
-            const sheriffNumber = getField('sheriff') || backupData.listingSheriff;
-            const salesDate = getField('sales date') || backupData.listingSalesDate;
-            const plaintiff = getField('plaintiff') || backupData.listingPlaintiff;
-            const defendant = getField('defendant') || backupData.listingDefendant;
-            const fullAddress = getField('address') || backupData.listingAddress;
+            // Get data - only use backup if detail items aren't found
+            const sheriffNumber = getField('sheriff #') || getField('sheriff');
+            const salesDate = getField('sales date');
+            const plaintiff = getField('plaintiff');
+            const defendant = getField('defendant');
+            const fullAddress = getField('address');
             const approxUpset = getField('approx') || getField('upset');
+            const courtCase = getField('court case');
+            const attorney = getField('attorney');
+            const attorneyPhone = getField('attorney phone');
+            const parcelNumber = getField('parcel');
             
             const statusHistory = getStatusHistory();
             const currentStatus = statusHistory.length > 0 
@@ -272,16 +265,16 @@ async function scrapeCivilView(browser) {
               : 'Scheduled';
             
             return {
-              sheriffNumber,
-              courtCase: getField('court case'),
-              salesDate,
-              plaintiff,
-              defendant,
-              fullAddress,
+              sheriffNumber: sheriffNumber || backupData.listingSheriff,
+              courtCase,
+              salesDate: salesDate || backupData.listingSalesDate,
+              plaintiff: plaintiff || backupData.listingPlaintiff,
+              defendant: defendant || backupData.listingDefendant,
+              fullAddress: fullAddress || backupData.listingAddress,
               approxUpset,
-              attorney: getField('attorney'),
-              attorneyPhone: getField('attorney phone') || getField('phone'),
-              parcelNumber: getField('parcel'),
+              attorney,
+              attorneyPhone,
+              parcelNumber,
               propertyNote: getField('property note') || getField('note'),
               currentStatus,
               statusHistory,
