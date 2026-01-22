@@ -12,8 +12,11 @@ const CONFIG = {
     county: 'Camden',
     state: 'NJ'
   },
-  requestDelay: 1000,
-  maxRetries: 3
+  requestDelay: 300,        // Base delay between requests (ms)
+  maxRetries: 1,            // Only 1 retry - we have fallback data anyway
+  batchSize: 50,            // Pause after this many properties
+  batchPause: 2000,         // Pause duration (ms) between batches
+  pageTimeout: 10000        // Timeout for page loads (ms) - fail fast
 };
 
 // Utility functions
@@ -70,9 +73,7 @@ const parseAddress = (fullAddress) => {
     const cityIndex = upperAddress.indexOf(knownCity);
     if (cityIndex !== -1) {
       city = knownCity;
-      // Everything before the city is the street address
       address = fullAddress.substring(0, cityIndex).trim();
-      // Clean up trailing commas
       address = address.replace(/,\s*$/, '');
       break;
     }
@@ -80,7 +81,6 @@ const parseAddress = (fullAddress) => {
   
   // If no known city found, try to extract based on pattern
   if (!city) {
-    // Look for pattern like "123 MAIN ST SOMECITY NJ 08XXX"
     const match = fullAddress.match(/^(.+?)\s+([A-Z\s]+?)\s+(NJ|PA)\s+\d{5}/i);
     if (match) {
       address = match[1].trim();
@@ -88,7 +88,6 @@ const parseAddress = (fullAddress) => {
     }
   }
   
-  // Clean up address
   address = address.replace(/,\s*$/, '').trim();
   
   return { address, city, state, zipCode };
@@ -132,164 +131,247 @@ async function scrapeCivilView(browser) {
       });
     });
     
-    // Scroll back to top and wait a bit more
+    // Scroll back to top and wait
     await page.evaluate(() => window.scrollTo(0, 0));
     await delay(2000);
     
-    // Now get all property links
-    // The table has columns: View Details | Sheriff # | Sales Date | Plaintiff | Defendant | Address
-    const propertyLinks = await page.evaluate(() => {
-      const links = [];
-      // Find all "View Details" links - these go to the detail pages
-      const detailLinks = document.querySelectorAll('a[href*="SaleDetails"]');
-      detailLinks.forEach(link => {
-        const href = link.href;
-        if (href && !links.includes(href)) {
-          links.push(href);
-        }
-      });
-      return links;
-    });
-    
-    // Log the count we found - this helps debug
-    const expectedCount = await page.evaluate(() => {
-      const text = document.body.innerText;
-      const match = text.match(/\((\d+)\s*search results?\)/i);
-      return match ? match[1] : 'unknown';
-    });
-    
-    console.log(`  Found ${propertyLinks.length} properties (page reports ${expectedCount} results)`);
-    
-    for (let i = 0; i < propertyLinks.length; i++) {
-      const link = propertyLinks[i];
-      console.log(`  Scraping property ${i + 1}/${propertyLinks.length}...`);
+    // Get all property data directly from the listing table (as backup)
+    // AND get the detail links
+    const listingData = await page.evaluate(() => {
+      const results = [];
+      const table = document.querySelectorAll('table')[1]; // Main data table
+      if (!table) return results;
       
-      // Retry logic for each property
+      const rows = table.querySelectorAll('tr');
+      for (let i = 1; i < rows.length; i++) { // Skip header
+        const cells = rows[i].querySelectorAll('td');
+        const link = rows[i].querySelector('a[href*="SaleDetails"]');
+        
+        if (cells.length >= 6 && link) {
+          results.push({
+            detailUrl: link.href,
+            // Backup data from listing table
+            listingSheriff: cells[1]?.textContent?.trim() || '',
+            listingSalesDate: cells[2]?.textContent?.trim() || '',
+            listingPlaintiff: cells[3]?.textContent?.trim() || '',
+            listingDefendant: cells[4]?.textContent?.trim() || '',
+            listingAddress: cells[5]?.textContent?.trim() || ''
+          });
+        }
+      }
+      return results;
+    });
+    
+    console.log(`  Found ${listingData.length} properties to scrape`);
+    
+    for (let i = 0; i < listingData.length; i++) {
+      // Smart throttling: pause every batch to avoid rate limiting
+      if (i > 0 && i % CONFIG.batchSize === 0) {
+        console.log(`  ⏸ Pausing briefly to avoid rate limiting...`);
+        await delay(CONFIG.batchPause);
+      }
+      
+      const listing = listingData[i];
+      console.log(`  Scraping property ${i + 1}/${listingData.length}...`);
+      
       let retries = 0;
       let success = false;
       
       while (retries < CONFIG.maxRetries && !success) {
         try {
-          await page.goto(link, { waitUntil: 'networkidle2', timeout: 45000 });
-          
-          // Wait for the detail content to load
-          await page.waitForSelector('.sale-detail-item', { timeout: 15000 });
+          await page.goto(listing.detailUrl, { waitUntil: 'domcontentloaded', timeout: CONFIG.pageTimeout });
           await delay(CONFIG.requestDelay);
-        
-        // Extract data using the CORRECT selectors for CivilView
-        // The page uses: .sale-detail-item > .sale-detail-label + .sale-detail-value
-        const propertyData = await page.evaluate(() => {
-          // Helper to get field value by label text
-          const getFieldValue = (labelText) => {
-            const items = document.querySelectorAll('.sale-detail-item');
-            for (const item of items) {
-              const label = item.querySelector('.sale-detail-label');
-              const value = item.querySelector('.sale-detail-value');
-              if (label && value) {
-                const labelContent = label.textContent.trim().toLowerCase();
-                if (labelContent.includes(labelText.toLowerCase())) {
-                  // Clean up the value - remove extra whitespace and newlines
-                  return value.textContent.trim().replace(/\s+/g, ' ');
-                }
-              }
-            }
-            return '';
-          };
           
-          // Get status history from the table (if present)
-          const getStatusHistory = () => {
-            const history = [];
-            const tables = document.querySelectorAll('table');
-            for (const table of tables) {
-              const headerRow = table.querySelector('tr');
-              if (headerRow && headerRow.textContent.includes('Status') && headerRow.textContent.includes('Date')) {
-                const rows = table.querySelectorAll('tr');
-                for (let i = 1; i < rows.length; i++) {
-                  const cells = rows[i].querySelectorAll('td');
-                  if (cells.length >= 2) {
-                    history.push({
-                      status: cells[0].textContent.trim(),
-                      date: cells[1].textContent.trim()
-                    });
+          // Try to extract data - use multiple strategies
+          const propertyData = await page.evaluate((backupData) => {
+            // Strategy 1: Look for .sale-detail-item elements (standard detail page)
+            const getFieldFromDetailItems = (labelText) => {
+              const items = document.querySelectorAll('.sale-detail-item');
+              for (const item of items) {
+                const label = item.querySelector('.sale-detail-label');
+                const value = item.querySelector('.sale-detail-value');
+                if (label && value) {
+                  const labelContent = label.textContent.trim().toLowerCase();
+                  if (labelContent.includes(labelText.toLowerCase())) {
+                    return value.textContent.trim().replace(/\s+/g, ' ');
                   }
                 }
               }
-            }
-            return history;
-          };
+              return '';
+            };
+            
+            // Strategy 2: Look for table rows with label/value pattern
+            const getFieldFromTableRows = (labelText) => {
+              const rows = document.querySelectorAll('tr');
+              for (const row of rows) {
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 2) {
+                  const label = cells[0].textContent.trim().toLowerCase();
+                  if (label.includes(labelText.toLowerCase())) {
+                    return cells[1].textContent.trim().replace(/\s+/g, ' ');
+                  }
+                }
+              }
+              return '';
+            };
+            
+            // Strategy 3: Look for any element containing label text followed by value
+            const getFieldFromAnyElement = (labelText) => {
+              const allText = document.body.innerText;
+              const regex = new RegExp(labelText + '[:\\s]*([^\\n]+)', 'i');
+              const match = allText.match(regex);
+              return match ? match[1].trim() : '';
+            };
+            
+            // Combined getter - tries all strategies
+            const getField = (labelText) => {
+              return getFieldFromDetailItems(labelText) 
+                  || getFieldFromTableRows(labelText) 
+                  || getFieldFromAnyElement(labelText)
+                  || '';
+            };
+            
+            // Get status history from table
+            const getStatusHistory = () => {
+              const history = [];
+              const tables = document.querySelectorAll('table');
+              for (const table of tables) {
+                const headerRow = table.querySelector('tr');
+                if (headerRow && headerRow.textContent.includes('Status') && headerRow.textContent.includes('Date')) {
+                  const rows = table.querySelectorAll('tr');
+                  for (let i = 1; i < rows.length; i++) {
+                    const cells = rows[i].querySelectorAll('td');
+                    if (cells.length >= 2) {
+                      history.push({
+                        status: cells[0].textContent.trim(),
+                        date: cells[1].textContent.trim()
+                      });
+                    }
+                  }
+                }
+              }
+              return history;
+            };
+            
+            // Check if page has any content we expect
+            const hasDetailContent = document.querySelector('.sale-detail-item') !== null 
+                                  || document.body.innerText.includes('Sheriff')
+                                  || document.body.innerText.includes('Plaintiff');
+            
+            // Get data with fallbacks to listing data
+            const sheriffNumber = getField('sheriff') || backupData.listingSheriff;
+            const salesDate = getField('sales date') || backupData.listingSalesDate;
+            const plaintiff = getField('plaintiff') || backupData.listingPlaintiff;
+            const defendant = getField('defendant') || backupData.listingDefendant;
+            const fullAddress = getField('address') || backupData.listingAddress;
+            const approxUpset = getField('approx') || getField('upset');
+            
+            const statusHistory = getStatusHistory();
+            const currentStatus = statusHistory.length > 0 
+              ? statusHistory[statusHistory.length - 1].status 
+              : 'Scheduled';
+            
+            return {
+              sheriffNumber,
+              courtCase: getField('court case'),
+              salesDate,
+              plaintiff,
+              defendant,
+              fullAddress,
+              approxUpset,
+              attorney: getField('attorney'),
+              attorneyPhone: getField('attorney phone') || getField('phone'),
+              parcelNumber: getField('parcel'),
+              propertyNote: getField('property note') || getField('note'),
+              currentStatus,
+              statusHistory,
+              hasDetailContent,
+              pageTitle: document.title
+            };
+          }, listing);
           
-          // Get the current status (most recent from history, or look for current status indicator)
-          const getCurrentStatus = () => {
-            const history = getStatusHistory();
-            if (history.length > 0) {
-              return history[history.length - 1].status;
-            }
-            return 'Scheduled';
-          };
+          const parsedAddress = parseAddress(propertyData.fullAddress);
           
-          return {
-            sheriffNumber: getFieldValue('sheriff'),
-            courtCase: getFieldValue('court case'),
-            salesDate: getFieldValue('sales date'),
-            plaintiff: getFieldValue('plaintiff'),
-            defendant: getFieldValue('defendant'),
-            fullAddress: getFieldValue('address'),
-            approxUpset: getFieldValue('approx'),
-            attorney: getFieldValue('attorney:') || getFieldValue('attorney'),
-            attorneyPhone: getFieldValue('attorney phone'),
-            parcelNumber: getFieldValue('parcel'),
-            propertyNote: getFieldValue('property note'),
-            currentStatus: getCurrentStatus(),
-            statusHistory: getStatusHistory()
-          };
-        });
-        
-        const parsedAddress = parseAddress(propertyData.fullAddress);
-        
-        // Only add if we have meaningful data
-        if (parsedAddress.address || propertyData.defendant || propertyData.sheriffNumber) {
-          const property = {
-            source: 'CivilView',
-            propertyId: `CV-${propertyData.sheriffNumber || Date.now()}-${i}`,
-            sheriffNumber: propertyData.sheriffNumber,
-            courtCase: propertyData.courtCase,
-            salesDate: propertyData.salesDate,
-            plaintiff: propertyData.plaintiff,
-            defendant: propertyData.defendant,
-            address: parsedAddress.address || propertyData.fullAddress,
-            city: parsedAddress.city,
-            state: parsedAddress.state,
-            zipCode: parsedAddress.zipCode,
-            debtAmount: parseDebtAmount(propertyData.approxUpset),
-            approxUpset: propertyData.approxUpset,
-            attorney: propertyData.attorney,
-            attorneyPhone: propertyData.attorneyPhone,
-            parcelNumber: propertyData.parcelNumber,
-            propertyNote: propertyData.propertyNote,
-            status: propertyData.currentStatus || 'Scheduled',
-            statusHistory: propertyData.statusHistory,
-            county: CONFIG.civilview.county,
-            township: parsedAddress.city, // Use city as township for filtering
-            detailUrl: link
-          };
+          // Accept the property if we have at least some identifying data
+          if (propertyData.sheriffNumber || propertyData.defendant || parsedAddress.address) {
+            const property = {
+              source: 'CivilView',
+              propertyId: `CV-${propertyData.sheriffNumber || Date.now()}-${i}`,
+              sheriffNumber: propertyData.sheriffNumber,
+              courtCase: propertyData.courtCase,
+              salesDate: propertyData.salesDate,
+              plaintiff: propertyData.plaintiff,
+              defendant: propertyData.defendant,
+              address: parsedAddress.address || propertyData.fullAddress,
+              city: parsedAddress.city,
+              state: parsedAddress.state,
+              zipCode: parsedAddress.zipCode,
+              debtAmount: parseDebtAmount(propertyData.approxUpset),
+              approxUpset: propertyData.approxUpset,
+              attorney: propertyData.attorney,
+              attorneyPhone: propertyData.attorneyPhone,
+              parcelNumber: propertyData.parcelNumber,
+              propertyNote: propertyData.propertyNote,
+              status: propertyData.currentStatus || 'Scheduled',
+              statusHistory: propertyData.statusHistory,
+              county: CONFIG.civilview.county,
+              township: parsedAddress.city,
+              detailUrl: listing.detailUrl
+            };
+            
+            properties.push(property);
+            const debtDisplay = property.debtAmount > 0 ? `$${property.debtAmount.toLocaleString()}` : 'N/A';
+            console.log(`    ✓ ${parsedAddress.address || propertyData.sheriffNumber || 'Property'} - ${debtDisplay}`);
+          } else {
+            // Log what we found for debugging
+            console.log(`    ⚠ No data extracted (page: ${propertyData.pageTitle}, hasContent: ${propertyData.hasDetailContent})`);
+          }
           
-          properties.push(property);
-          console.log(`    ✓ ${parsedAddress.address || 'Property'} - $${property.debtAmount.toLocaleString()}`);
-        }
-        
-        success = true;
-        
+          success = true;
+          
         } catch (err) {
           retries++;
           if (retries < CONFIG.maxRetries) {
-            console.log(`    ⚠ Retry ${retries}/${CONFIG.maxRetries} for property...`);
-            await delay(2000);
+            console.log(`    ⚠ Retry ${retries}/${CONFIG.maxRetries}...`);
+            await delay(500);
           } else {
-            console.log(`    ✗ Error scraping property after ${CONFIG.maxRetries} attempts: ${err.message}`);
+            // Even on error, try to use the listing data as fallback
+            const parsedAddress = parseAddress(listing.listingAddress);
+            if (listing.listingSheriff || listing.listingDefendant || parsedAddress.address) {
+              const property = {
+                source: 'CivilView',
+                propertyId: `CV-${listing.listingSheriff || Date.now()}-${i}`,
+                sheriffNumber: listing.listingSheriff,
+                courtCase: '',
+                salesDate: listing.listingSalesDate,
+                plaintiff: listing.listingPlaintiff,
+                defendant: listing.listingDefendant,
+                address: parsedAddress.address || listing.listingAddress,
+                city: parsedAddress.city,
+                state: parsedAddress.state,
+                zipCode: parsedAddress.zipCode,
+                debtAmount: 0,
+                approxUpset: '',
+                attorney: '',
+                attorneyPhone: '',
+                parcelNumber: '',
+                propertyNote: '',
+                status: 'Unknown',
+                statusHistory: [],
+                county: CONFIG.civilview.county,
+                township: parsedAddress.city,
+                detailUrl: listing.detailUrl
+              };
+              properties.push(property);
+              console.log(`    ~ ${parsedAddress.address || listing.listingSheriff} (from listing, detail failed: ${err.message.substring(0, 50)})`);
+            } else {
+              console.log(`    ✗ Failed: ${err.message.substring(0, 60)}`);
+            }
+            success = true; // Move on even if failed
           }
         }
-      } // end while
-    } // end for
+      }
+    }
     
   } catch (error) {
     console.error('  CivilView scraper error:', error.message);
@@ -309,7 +391,6 @@ async function runScraper() {
   
   await fs.mkdir(CONFIG.outputDir, { recursive: true });
   
-  // Use system Chromium if available, otherwise let Puppeteer find its own
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || null;
   console.log(`Using Chrome at: ${executablePath || 'Puppeteer default'}`);
   
