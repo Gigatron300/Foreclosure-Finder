@@ -7,9 +7,11 @@ const { runScraper, CONFIG } = require('./scraper');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Password for site access
+const SITE_PASSWORD = process.env.SITE_PASSWORD || 'Benoro';
+
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
 
 const DATA_FILE = path.join(CONFIG.outputDir, CONFIG.outputFile);
 
@@ -20,8 +22,36 @@ async function ensureDataDir() {
   } catch (e) {}
 }
 
-// Get all properties
-app.get('/api/properties', async (req, res) => {
+// Auth verification endpoint
+app.post('/api/auth', (req, res) => {
+  const { password } = req.body;
+  if (password === SITE_PASSWORD) {
+    res.json({ success: true });
+  } else {
+    res.status(401).json({ success: false, error: 'Invalid password' });
+  }
+});
+
+// Middleware to check auth header on API routes
+const checkAuth = (req, res, next) => {
+  const authHeader = req.headers['x-auth-token'];
+  if (authHeader === SITE_PASSWORD) {
+    next();
+  } else {
+    res.status(401).json({ error: 'Unauthorized' });
+  }
+};
+
+// Serve login page for unauthenticated users
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Serve static files
+app.use(express.static('public'));
+
+// Get all properties (protected)
+app.get('/api/properties', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
@@ -85,8 +115,8 @@ app.get('/api/properties', async (req, res) => {
   }
 });
 
-// Get single property by ID
-app.get('/api/properties/:id', async (req, res) => {
+// Get single property by ID (protected)
+app.get('/api/properties/:id', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
@@ -102,8 +132,8 @@ app.get('/api/properties/:id', async (req, res) => {
   }
 });
 
-// Get stats
-app.get('/api/stats', async (req, res) => {
+// Get stats (protected)
+app.get('/api/stats', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
@@ -133,11 +163,11 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
-// Manually trigger a scrape
+// Manually trigger a scrape (protected)
 let isScrapingInProgress = false;
 let lastScrapeStatus = null;
 
-app.post('/api/scrape', async (req, res) => {
+app.post('/api/scrape', checkAuth, async (req, res) => {
   if (isScrapingInProgress) {
     return res.status(429).json({ 
       error: 'Scrape already in progress',
@@ -168,16 +198,16 @@ app.post('/api/scrape', async (req, res) => {
   }
 });
 
-// Get scrape status
-app.get('/api/scrape/status', (req, res) => {
+// Get scrape status (protected)
+app.get('/api/scrape/status', checkAuth, (req, res) => {
   res.json({
     inProgress: isScrapingInProgress,
     lastStatus: lastScrapeStatus
   });
 });
 
-// Export data as CSV
-app.get('/api/export/csv', async (req, res) => {
+// Export data as CSV (protected)
+app.get('/api/export/csv', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
@@ -219,11 +249,6 @@ app.get('/api/export/csv', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
-
-// Serve the main app
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Start server
