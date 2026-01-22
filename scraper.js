@@ -105,10 +105,38 @@ async function scrapeCivilView(browser) {
     await page.setViewport({ width: 1920, height: 1080 });
     
     console.log('  Loading search page...');
-    await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 90000 });
+    
+    // Wait for the table to appear
+    console.log('  Waiting for table to load...');
+    await page.waitForSelector('a[href*="SaleDetails"]', { timeout: 30000 });
+    
+    // Give extra time for all rows to render
+    await delay(3000);
+    
+    // Scroll down the page to trigger any lazy loading
+    console.log('  Scrolling to load all results...');
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let totalHeight = 0;
+        const distance = 500;
+        const timer = setInterval(() => {
+          const scrollHeight = document.body.scrollHeight;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
+          if (totalHeight >= scrollHeight) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
+    });
+    
+    // Scroll back to top and wait a bit more
+    await page.evaluate(() => window.scrollTo(0, 0));
     await delay(2000);
     
-    // Get all property links from the listing table
+    // Now get all property links
     // The table has columns: View Details | Sheriff # | Sales Date | Plaintiff | Defendant | Address
     const propertyLinks = await page.evaluate(() => {
       const links = [];
@@ -123,15 +151,30 @@ async function scrapeCivilView(browser) {
       return links;
     });
     
-    console.log(`  Found ${propertyLinks.length} properties to scrape`);
+    // Log the count we found - this helps debug
+    const expectedCount = await page.evaluate(() => {
+      const text = document.body.innerText;
+      const match = text.match(/\((\d+)\s*search results?\)/i);
+      return match ? match[1] : 'unknown';
+    });
+    
+    console.log(`  Found ${propertyLinks.length} properties (page reports ${expectedCount} results)`);
     
     for (let i = 0; i < propertyLinks.length; i++) {
       const link = propertyLinks[i];
       console.log(`  Scraping property ${i + 1}/${propertyLinks.length}...`);
       
-      try {
-        await page.goto(link, { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(CONFIG.requestDelay);
+      // Retry logic for each property
+      let retries = 0;
+      let success = false;
+      
+      while (retries < CONFIG.maxRetries && !success) {
+        try {
+          await page.goto(link, { waitUntil: 'networkidle2', timeout: 45000 });
+          
+          // Wait for the detail content to load
+          await page.waitForSelector('.sale-detail-item', { timeout: 15000 });
+          await delay(CONFIG.requestDelay);
         
         // Extract data using the CORRECT selectors for CivilView
         // The page uses: .sale-detail-item > .sale-detail-label + .sale-detail-value
@@ -234,10 +277,19 @@ async function scrapeCivilView(browser) {
           console.log(`    ✓ ${parsedAddress.address || 'Property'} - $${property.debtAmount.toLocaleString()}`);
         }
         
-      } catch (err) {
-        console.log(`    ✗ Error scraping property: ${err.message}`);
-      }
-    }
+        success = true;
+        
+        } catch (err) {
+          retries++;
+          if (retries < CONFIG.maxRetries) {
+            console.log(`    ⚠ Retry ${retries}/${CONFIG.maxRetries} for property...`);
+            await delay(2000);
+          } else {
+            console.log(`    ✗ Error scraping property after ${CONFIG.maxRetries} attempts: ${err.message}`);
+          }
+        }
+      } // end while
+    } // end for
     
   } catch (error) {
     console.error('  CivilView scraper error:', error.message);
