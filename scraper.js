@@ -12,7 +12,7 @@ const CONFIG = {
     county: 'Camden',
     state: 'NJ'
   },
-  requestDelay: 800,
+  requestDelay: 1000,
   maxRetries: 3
 };
 
@@ -29,60 +29,74 @@ const parseDebtAmount = (text) => {
 const parseAddress = (fullAddress) => {
   if (!fullAddress) return { address: '', city: '', state: 'NJ', zipCode: '' };
   
+  // Clean up address - remove extra whitespace and newlines
+  fullAddress = fullAddress.replace(/\s+/g, ' ').trim();
+  
+  // Extract zip code
   const zipMatch = fullAddress.match(/(\d{5})(-\d{4})?/);
   const zipCode = zipMatch ? zipMatch[1] : '';
   
+  // Extract state
   const stateMatch = fullAddress.match(/\b(NJ|PA)\b/i);
   const state = stateMatch ? stateMatch[1].toUpperCase() : 'NJ';
+  
+  // Known cities in Camden County and surrounding areas
+  const knownCities = [
+    'CAMDEN', 'CHERRY HILL', 'VOORHEES', 'SICKLERVILLE', 'HADDONFIELD', 
+    'BLACKWOOD', 'LINDENWOLD', 'GLOUCESTER', 'PENNSAUKEN', 'COLLINGSWOOD',
+    'CLEMENTON', 'ATCO', 'BERLIN', 'MAGNOLIA', 'AUDUBON', 'RUNNEMEDE',
+    'BELLMAWR', 'HADDON', 'WINSLOW', 'PINE HILL', 'GLENDORA', 'ERIAL',
+    'WATERFORD', 'MERCHANTVILLE', 'LAWNSIDE', 'BARRINGTON', 'SOMERDALE',
+    'OAKLYN', 'WOODLYNNE', 'STRATFORD', 'LAUREL SPRINGS', 'CHESILHURST',
+    'MOUNT EPHRAIM', 'BROOKLAWN', 'HADDON HEIGHTS', 'HADDON TOWNSHIP',
+    'GLOUCESTER CITY', 'GLOUCESTER TWP', 'GLOUCESTER TOWNSHIP',
+    'CHERRY HILL TOWNSHIP', 'WINSLOW TOWNSHIP', 'WATERFORD TOWNSHIP',
+    'PINE VALLEY', 'TAVISTOCK', 'HI-NELLA', 'GIBBSBORO', 'BERLIN BOROUGH',
+    'BERLIN TOWNSHIP', 'HAMMONTON'
+  ];
   
   let city = '';
   let address = fullAddress;
   
-  const parts = fullAddress.split(/\s+/);
-  const stateIndex = parts.findIndex(p => /^(NJ|PA)$/i.test(p));
-  
-  if (stateIndex > 0) {
-    const beforeState = parts.slice(0, stateIndex);
-    
-    const knownCities = ['CAMDEN', 'CHERRY HILL', 'VOORHEES', 'SICKLERVILLE', 'HADDONFIELD', 
-                         'BLACKWOOD', 'LINDENWOLD', 'GLOUCESTER', 'PENNSAUKEN', 'COLLINGSWOOD',
-                         'CLEMENTON', 'ATCO', 'BERLIN', 'MAGNOLIA', 'AUDUBON', 'RUNNEMEDE',
-                         'BELLMAWR', 'HADDON', 'WINSLOW', 'PINE HILL', 'GLENDORA', 'ERIAL',
-                         'WATERFORD', 'MERCHANTVILLE', 'LAWNSIDE', 'BARRINGTON', 'SOMERDALE',
-                         'OAKLYN', 'WOODLYNNE', 'STRATFORD', 'LAUREL SPRINGS', 'CHESILHURST',
-                         'MOUNT EPHRAIM', 'BROOKLAWN', 'HADDON HEIGHTS', 'HADDON TOWNSHIP'];
-    
-    const upperAddress = fullAddress.toUpperCase();
-    for (const knownCity of knownCities) {
-      if (upperAddress.includes(knownCity)) {
-        city = knownCity;
-        break;
-      }
-    }
-    
-    if (!city && beforeState.length > 2) {
-      city = beforeState[beforeState.length - 1];
-    }
+  // Handle A/K/A addresses - take the first one
+  if (fullAddress.includes('A/K/A')) {
+    const parts = fullAddress.split('A/K/A');
+    fullAddress = parts[0].trim();
   }
   
-  if (city) {
-    const cityIndex = fullAddress.toUpperCase().indexOf(city.toUpperCase());
-    if (cityIndex > 0) {
+  // Try to find a known city
+  const upperAddress = fullAddress.toUpperCase();
+  for (const knownCity of knownCities) {
+    const cityIndex = upperAddress.indexOf(knownCity);
+    if (cityIndex !== -1) {
+      city = knownCity;
+      // Everything before the city is the street address
       address = fullAddress.substring(0, cityIndex).trim();
+      // Clean up trailing commas
       address = address.replace(/,\s*$/, '');
+      break;
     }
   }
   
-  if (address.includes('A/K/A')) {
-    address = address.split('A/K/A')[0].trim();
+  // If no known city found, try to extract based on pattern
+  if (!city) {
+    // Look for pattern like "123 MAIN ST SOMECITY NJ 08XXX"
+    const match = fullAddress.match(/^(.+?)\s+([A-Z\s]+?)\s+(NJ|PA)\s+\d{5}/i);
+    if (match) {
+      address = match[1].trim();
+      city = match[2].trim();
+    }
   }
+  
+  // Clean up address
+  address = address.replace(/,\s*$/, '').trim();
   
   return { address, city, state, zipCode };
 };
 
 // CivilView Scraper (Camden County, NJ)
 async function scrapeCivilView(browser) {
-  console.log('\n📍 Starting CivilView scraper (Camden County, NJ)...');
+  console.log('\n🔍 Starting CivilView scraper (Camden County, NJ)...');
   const properties = [];
   const page = await browser.newPage();
   
@@ -94,9 +108,13 @@ async function scrapeCivilView(browser) {
     await page.goto(CONFIG.civilview.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     await delay(2000);
     
+    // Get all property links from the listing table
+    // The table has columns: View Details | Sheriff # | Sales Date | Plaintiff | Defendant | Address
     const propertyLinks = await page.evaluate(() => {
       const links = [];
-      document.querySelectorAll('a[href*="SaleDetails"]').forEach(link => {
+      // Find all "View Details" links - these go to the detail pages
+      const detailLinks = document.querySelectorAll('a[href*="SaleDetails"]');
+      detailLinks.forEach(link => {
         const href = link.href;
         if (href && !links.includes(href)) {
           links.push(href);
@@ -115,21 +133,27 @@ async function scrapeCivilView(browser) {
         await page.goto(link, { waitUntil: 'networkidle2', timeout: 30000 });
         await delay(CONFIG.requestDelay);
         
+        // Extract data using the CORRECT selectors for CivilView
+        // The page uses: .sale-detail-item > .sale-detail-label + .sale-detail-value
         const propertyData = await page.evaluate(() => {
+          // Helper to get field value by label text
           const getFieldValue = (labelText) => {
-            const rows = document.querySelectorAll('tr');
-            for (const row of rows) {
-              const cells = row.querySelectorAll('td');
-              if (cells.length >= 2) {
-                const label = cells[0].textContent.trim().toLowerCase();
-                if (label.includes(labelText.toLowerCase())) {
-                  return cells[1].textContent.trim();
+            const items = document.querySelectorAll('.sale-detail-item');
+            for (const item of items) {
+              const label = item.querySelector('.sale-detail-label');
+              const value = item.querySelector('.sale-detail-value');
+              if (label && value) {
+                const labelContent = label.textContent.trim().toLowerCase();
+                if (labelContent.includes(labelText.toLowerCase())) {
+                  // Clean up the value - remove extra whitespace and newlines
+                  return value.textContent.trim().replace(/\s+/g, ' ');
                 }
               }
             }
             return '';
           };
           
+          // Get status history from the table (if present)
           const getStatusHistory = () => {
             const history = [];
             const tables = document.querySelectorAll('table');
@@ -151,12 +175,13 @@ async function scrapeCivilView(browser) {
             return history;
           };
           
+          // Get the current status (most recent from history, or look for current status indicator)
           const getCurrentStatus = () => {
-            const statusHeader = document.body.textContent.match(/Current Status[:\s]*([^-\n]+)/i);
-            if (statusHeader) {
-              return statusHeader[1].trim();
+            const history = getStatusHistory();
+            if (history.length > 0) {
+              return history[history.length - 1].status;
             }
-            return '';
+            return 'Scheduled';
           };
           
           return {
@@ -166,7 +191,7 @@ async function scrapeCivilView(browser) {
             plaintiff: getFieldValue('plaintiff'),
             defendant: getFieldValue('defendant'),
             fullAddress: getFieldValue('address'),
-            approxUpset: getFieldValue('approx. upset') || getFieldValue('approx upset') || getFieldValue('upset'),
+            approxUpset: getFieldValue('approx'),
             attorney: getFieldValue('attorney:') || getFieldValue('attorney'),
             attorneyPhone: getFieldValue('attorney phone'),
             parcelNumber: getFieldValue('parcel'),
@@ -178,6 +203,7 @@ async function scrapeCivilView(browser) {
         
         const parsedAddress = parseAddress(propertyData.fullAddress);
         
+        // Only add if we have meaningful data
         if (parsedAddress.address || propertyData.defendant || propertyData.sheriffNumber) {
           const property = {
             source: 'CivilView',
@@ -200,6 +226,7 @@ async function scrapeCivilView(browser) {
             status: propertyData.currentStatus || 'Scheduled',
             statusHistory: propertyData.statusHistory,
             county: CONFIG.civilview.county,
+            township: parsedAddress.city, // Use city as township for filtering
             detailUrl: link
           };
           
