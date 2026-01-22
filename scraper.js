@@ -12,10 +12,10 @@ const CONFIG = {
     county: 'Camden',
     state: 'NJ'
   },
-  requestDelay: 300,        // Base delay between requests (ms)
+  requestDelay: 400,        // Base delay between requests (ms)
   maxRetries: 1,            // Only 1 retry - we have fallback data anyway
-  batchSize: 50,            // Pause after this many properties
-  batchPause: 2000,         // Pause duration (ms) between batches
+  batchSize: 30,            // Pause after this many properties (smaller batches)
+  batchPause: 3000,         // Pause duration (ms) between batches
   pageTimeout: 15000        // Timeout for page loads (ms)
 };
 
