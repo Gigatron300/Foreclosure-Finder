@@ -1117,8 +1117,7 @@
                 if (response.ok) {
                     authToken = password;
                     sessionStorage.setItem('authToken', authToken);
-                    document.getElementById('loginScreen').classList.add('hidden');
-                    document.getElementById('mainContent').classList.add('visible');
+                    showMainContent();
                     errorEl.classList.remove('show');
                     checkDataStatus();
                     loadProperties();
@@ -1132,14 +1131,43 @@
             }
         }
 
-        // Check if already logged in
-        function checkExistingAuth() {
-            if (authToken) {
-                document.getElementById('loginScreen').classList.add('hidden');
-                document.getElementById('mainContent').classList.add('visible');
+        // Show main content, hide login
+        function showMainContent() {
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('mainContent').classList.add('visible');
+        }
+
+        // Show login, hide main content
+        function showLogin() {
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('mainContent').classList.remove('visible');
+            sessionStorage.removeItem('authToken');
+            authToken = '';
+        }
+
+        // Check if existing token is still valid
+        async function checkExistingAuth() {
+            if (!authToken) {
+                return false;
+            }
+            
+            try {
+                // Validate token with a quick API call
+                const response = await authFetch(`${API_BASE}/api/stats`);
+                if (response.ok) {
+                    showMainContent();
+                    return true;
+                } else {
+                    // Token invalid, clear it
+                    showLogin();
+                    return false;
+                }
+            } catch (err) {
+                // Network error, but token exists - show main content anyway
+                // It will handle errors when making actual requests
+                showMainContent();
                 return true;
             }
-            return false;
         }
 
         // Helper to add auth header to fetch requests
@@ -1150,13 +1178,13 @@
         }
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             if (googleApiKey) {
                 document.getElementById('googleApiKey').value = googleApiKey;
             }
             updateGoogleApiStatus();
             
-            if (checkExistingAuth()) {
+            if (await checkExistingAuth()) {
                 checkDataStatus();
                 loadProperties();
             }
@@ -1167,8 +1195,7 @@
             try {
                 const response = await authFetch(`${API_BASE}/api/stats`);
                 if (response.status === 401) {
-                    sessionStorage.removeItem('authToken');
-                    location.reload();
+                    showLogin();
                     return;
                 }
                 const data = await response.json();
@@ -1226,8 +1253,7 @@
                 
                 const response = await authFetch(`${API_BASE}/api/properties?${params}`);
                 if (response.status === 401) {
-                    sessionStorage.removeItem('authToken');
-                    location.reload();
+                    showLogin();
                     return;
                 }
                 const data = await response.json();
