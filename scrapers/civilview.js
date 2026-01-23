@@ -21,43 +21,104 @@ const KNOWN_CITIES = [
   'OAKLYN', 'WOODLYNNE', 'STRATFORD', 'LAUREL SPRINGS', 'CHESILHURST',
   'MOUNT EPHRAIM', 'BROOKLAWN', 'HADDON HEIGHTS', 'HADDON TOWNSHIP',
   'GLOUCESTER CITY', 'GLOUCESTER TWP', 'WINSLOW TOWNSHIP', 'HAMMONTON',
-  // PA
+  // PA - Montgomery County
   'NORRISTOWN', 'KING OF PRUSSIA', 'LANSDALE', 'POTTSTOWN', 'AMBLER',
   'CONSHOHOCKEN', 'JENKINTOWN', 'HATBORO', 'COLLEGEVILLE', 'ROYERSFORD',
   'TRAPPE', 'SCHWENKSVILLE', 'PENNSBURG', 'SOUDERTON', 'TELFORD', 
   'HATFIELD', 'NORTH WALES', 'ABINGTON', 'CHELTENHAM', 'UPPER MERION',
   'LOWER MERION', 'UPPER DUBLIN', 'HORSHAM', 'WILLOW GROVE', 'BLUE BELL',
   'LIMERICK', 'LIMERICK TOWNSHIP', 'PERKIOMEN TOWNSHIP', 'SPRINGFIELD',
-  'ARDMORE', 'BRYN MAWR', 'GLADWYNE', 'ELKINS PARK', 'GLENSIDE'
+  'ARDMORE', 'BRYN MAWR', 'GLADWYNE', 'ELKINS PARK', 'GLENSIDE',
+  'BRIDGEPORT', 'EAST NORRITON', 'WEST NORRITON', 'PLYMOUTH MEETING',
+  'WHITEMARSH', 'FLOURTOWN', 'FORT WASHINGTON', 'DRESHER', 'MAPLE GLEN',
+  'HARLEYSVILLE', 'SKIPPACK', 'WORCESTER', 'FRANCONIA', 'SALFORD',
+  'LOWER SALFORD', 'UPPER SALFORD', 'MARLBOROUGH', 'GREEN LANE',
+  'RED HILL', 'EAST GREENVILLE', 'UPPER HANOVER', 'LOWER FREDERICK',
+  'UPPER FREDERICK', 'NEW HANOVER', 'DOUGLASS', 'UPPER POTTSGROVE',
+  'LOWER POTTSGROVE', 'WEST POTTSGROVE', 'LOWER PROVIDENCE', 
+  'UPPER PROVIDENCE', 'TOWAMENCIN', 'MONTGOMERY', 'UPPER GWYNEDD',
+  'LOWER GWYNEDD', 'WHITPAIN', 'UPPER MORELAND', 'LOWER MORELAND',
+  'ABINGTON TOWNSHIP', 'BRYN ATHYN', 'ROCKLEDGE', 'WEST CONSHOHOCKEN'
 ];
 
 function parseAddress(fullAddress, defaultState = 'NJ') {
   if (!fullAddress) return { address: '', city: '', state: defaultState, zipCode: '' };
   
+  // Normalize whitespace
   fullAddress = fullAddress.replace(/\s+/g, ' ').trim();
   
+  // Extract zip code
   const zipMatch = fullAddress.match(/(\d{5})(-\d{4})?/);
   const zipCode = zipMatch ? zipMatch[1] : '';
   
+  // Extract state
   const stateMatch = fullAddress.match(/\b(NJ|PA)\b/i);
   const state = stateMatch ? stateMatch[1].toUpperCase() : defaultState;
   
   let city = '';
   let address = fullAddress;
   
+  // Handle A/K/A addresses
   if (fullAddress.includes('A/K/A')) {
     fullAddress = fullAddress.split('A/K/A')[0].trim();
+    address = fullAddress;
   }
   
+  // Try to find city - check for concatenated city names (no space before city)
   const upperAddress = fullAddress.toUpperCase();
-  for (const knownCity of KNOWN_CITIES) {
-    const cityIndex = upperAddress.indexOf(knownCity);
-    if (cityIndex !== -1) {
+  
+  // Sort cities by length (longest first) to match "LOWER MERION" before "MERION"
+  const sortedCities = [...KNOWN_CITIES].sort((a, b) => b.length - a.length);
+  
+  for (const knownCity of sortedCities) {
+    // Look for the city name, possibly concatenated with previous word
+    const cityRegex = new RegExp(`(.+?)\\s*${knownCity}`, 'i');
+    const match = upperAddress.match(cityRegex);
+    
+    if (match) {
       city = knownCity;
-      address = fullAddress.substring(0, cityIndex).trim().replace(/,\s*$/, '');
+      // Extract just the street address part
+      address = fullAddress.substring(0, match[1].length).trim();
+      
+      // Clean up - remove trailing punctuation and extra spaces
+      address = address.replace(/[,\s]+$/, '').trim();
+      
+      // If address ends with a word that looks like start of city name concatenated
+      // e.g., "10 Fraley Street" from "10 Fraley StreetBridgeport"
+      // Check if last word is incomplete (city was concatenated)
+      const lastWord = address.split(' ').pop();
+      if (lastWord && !lastWord.match(/^\d/) && lastWord.length > 2) {
+        // Check if this might be a street type
+        const streetTypes = ['STREET', 'ST', 'AVENUE', 'AVE', 'ROAD', 'RD', 'DRIVE', 'DR', 
+                            'LANE', 'LN', 'COURT', 'CT', 'PLACE', 'PL', 'CIRCLE', 'CIR',
+                            'BOULEVARD', 'BLVD', 'WAY', 'TERRACE', 'TER', 'PIKE', 'TRAIL'];
+        const isStreetType = streetTypes.some(t => lastWord.toUpperCase() === t);
+        if (!isStreetType) {
+          // Last word might be partial - try to clean it
+          // This handles cases like "StreetBridgeport" -> we already captured "Street"
+        }
+      }
       break;
     }
   }
+  
+  // If no city found via known cities, try to parse from format: "123 Main St, City, ST 12345"
+  if (!city && fullAddress.includes(',')) {
+    const parts = fullAddress.split(',');
+    if (parts.length >= 2) {
+      address = parts[0].trim();
+      // Second part might be "City ST 12345" or just "City"
+      const cityPart = parts[1].trim();
+      const cityMatch = cityPart.match(/^([A-Za-z\s]+?)(?:\s+(?:NJ|PA)\s*\d{5})?$/i);
+      if (cityMatch) {
+        city = cityMatch[1].trim().toUpperCase();
+      }
+    }
+  }
+  
+  // Remove state and zip from address if still present
+  address = address.replace(/\s*(NJ|PA)\s*\d{5}(-\d{4})?\s*$/i, '').trim();
+  address = address.replace(/,\s*$/, '').trim();
   
   return { address, city, state, zipCode };
 }
