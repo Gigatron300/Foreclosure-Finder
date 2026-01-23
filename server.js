@@ -62,8 +62,8 @@ app.get('/api/properties', checkAuth, async (req, res) => {
       properties = properties.filter(p => p.debtAmount <= maxDebt);
     }
     
-    if (req.query.source) {
-      properties = properties.filter(p => p.source === req.query.source);
+    if (req.query.county) {
+      properties = properties.filter(p => p.county === req.query.county);
     }
     
     if (req.query.city) {
