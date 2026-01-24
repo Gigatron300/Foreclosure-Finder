@@ -1401,7 +1401,7 @@
                         <div class="property-footer">
                             <span class="source-badge ${sourceClass}">${prop.source} - ${prop.county}</span>
                             <div class="property-links">
-                                <a href="/goto.html?county=${encodeURIComponent(prop.county)}&propertyId=${getPropertyId(prop.detailUrl)}" target="_blank">View Source ↗</a>
+                                <a href="${getCountySearchUrl(prop.county)}" target="_blank">View Source ↗</a>
                             </div>
                         </div>
                     </div>
