@@ -1401,7 +1401,7 @@
                         <div class="property-footer">
                             <span class="source-badge ${sourceClass}">${prop.source} - ${prop.county}</span>
                             <div class="property-links">
-                                <a href="${prop.detailUrl}" target="_blank">View Source ↗</a>
+                                <a href="/goto.html?county=${encodeURIComponent(prop.county)}&propertyId=${getPropertyId(prop.detailUrl)}" target="_blank">View Source ↗</a>
                             </div>
                         </div>
                     </div>
@@ -1440,6 +1440,20 @@
         function getGoogleMapsUrl(address, city, state, zip) {
             const fullAddress = `${address || ''}, ${city || ''}, ${state || ''} ${zip || ''}`;
             return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
+        }
+
+        function getCountySearchUrl(county) {
+            const countyUrls = {
+                'Camden': 'https://salesweb.civilview.com/Sales/SalesSearch?countyId=1',
+                'Montgomery': 'https://salesweb.civilview.com/Sales/SalesSearch?countyId=23'
+            };
+            return countyUrls[county] || 'https://salesweb.civilview.com/';
+        }
+
+        function getPropertyId(detailUrl) {
+            if (!detailUrl) return '';
+            const match = detailUrl.match(/PropertyId=(\d+)/i);
+            return match ? match[1] : '';
         }
 
         // Google API key functions
