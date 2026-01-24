@@ -109,16 +109,16 @@
             
             // Wait for iframe to load (sets the cookie), then redirect
             iframe.onload = function() {
-                // Small delay to ensure cookie is set
+                // Longer delay to ensure cookie is fully set
                 setTimeout(() => {
                     window.location.href = detailUrl;
-                }, 500);
+                }, 2000);
             };
             
-            // Fallback: redirect after 3 seconds even if iframe doesn't load
+            // Fallback: redirect after 5 seconds even if iframe doesn't load
             setTimeout(() => {
                 window.location.href = detailUrl;
-            }, 3000);
+            }, 5000);
         }
     </script>
 </body>
