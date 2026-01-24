@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pre-Foreclosure Pipeline | Foreclosure Finder</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #f3f4f6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-style: italic;
+            background: linear-gradient(135deg, #10b981, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #9ca3af;
+            font-size: 1.1rem;
+        }
+        
+        .nav-links {
+            margin-top: 15px;
+        }
+        
+        .nav-links a {
+            color: #10b981;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: 500;
+        }
+        
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+        
+        .nav-links a.active {
+            color: #34d399;
+            border-bottom: 2px solid #34d399;
+            padding-bottom: 3px;
+        }
+        
+        .status-bar {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 15px 25px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        .status-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+        
+        .status-dot.stale {
+            background: #f59e0b;
+        }
+        
+        .filters-section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+        
+        .filters-section h2 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+        }
+        
+        .filter-icon {
+            background: #10b981;
+            padding: 8px;
+            border-radius: 8px;
+        }
+        
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-group label {
+            display: block;
+            color: #9ca3af;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+        }
+        
+        .filter-group input,
+        .filter-group select {
+            width: 100%;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #f3f4f6;
+            font-size: 0.95rem;
+        }
+        
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: #10b981;
+        }
+        
+        .filter-buttons {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #059669;
+        }
+        
+        .btn-secondary {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #d97706;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #374151;
+            color: #9ca3af;
+        }
+        
+        .btn-outline:hover {
+            border-color: #10b981;
+            color: #10b981;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #10b981;
+        }
+        
+        .stat-label {
+            color: #9ca3af;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .results-header h2 {
+            font-size: 1.3rem;
+        }
+        
+        .cases-grid {
+            display: grid;
+            gap: 20px;
+        }
+        
+        .case-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.2s;
+        }
+        
+        .case-card:hover {
+            border-color: #10b981;
+            transform: translateY(-2px);
+        }
+        
+        .case-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .case-number {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #10b981;
+        }
+        
+        .days-badge {
+            background: #374151;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+        
+        .days-badge.urgent {
+            background: #dc2626;
+            color: white;
+        }
+        
+        .days-badge.warning {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .case-address {
+            font-size: 1.2rem;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        
+        .case-location {
+            color: #9ca3af;
+            margin-bottom: 15px;
+        }
+        
+        .case-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        
+        .detail-item {
+            font-size: 0.9rem;
+        }
+        
+        .detail-label {
+            color: #6b7280;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+        
+        .detail-value {
+            color: #e5e7eb;
+            margin-top: 2px;
+        }
+        
+        .case-tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+        
+        .tag {
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .tag-judgement {
+            background: #7c3aed;
+            color: white;
+        }
+        
+        .tag-lispendens {
+            background: #2563eb;
+            color: white;
+        }
+        
+        .tag-open {
+            background: #059669;
+            color: white;
+        }
+        
+        .case-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .case-footer a {
+            color: #10b981;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .case-footer a:hover {
+            text-decoration: underline;
+        }
+        
+        .plaintiff-info {
+            color: #9ca3af;
+            font-size: 0.85rem;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #9ca3af;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #374151;
+            border-top-color: #10b981;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 60px;
+            color: #9ca3af;
+        }
+        
+        .pipeline-explanation {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .pipeline-explanation h3 {
+            color: #10b981;
+            margin-bottom: 10px;
+        }
+        
+        .pipeline-explanation p {
+            color: #9ca3af;
+            line-height: 1.6;
+        }
+        
+        .timeline-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .timeline-step {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.85rem;
+        }
+        
+        .timeline-step.active {
+            color: #10b981;
+            font-weight: 600;
+        }
+        
+        .timeline-arrow {
+            color: #6b7280;
+        }
+        
+        /* Login form styles */
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            text-align: center;
+        }
+        
+        .login-box {
+            background: rgba(255,255,255,0.05);
+            padding: 40px;
+            border-radius: 16px;
+        }
+        
+        .login-box h2 {
+            margin-bottom: 25px;
+        }
+        
+        .login-box input {
+            width: 100%;
+            padding: 12px 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #f3f4f6;
+        }
+        
+        .login-error {
+            color: #ef4444;
+            margin-bottom: 15px;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8rem; }
+            .status-bar { flex-direction: column; text-align: center; }
+            .filter-buttons { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Form (hidden when authenticated) -->
+        <div id="loginSection" class="login-container">
+            <div class="login-box">
+                <h2>🏛️ Pre-Foreclosure Pipeline</h2>
+                <p style="color: #9ca3af; margin-bottom: 20px;">Enter password to access</p>
+                <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')login()">
+                <p id="loginError" class="login-error">Invalid password</p>
+                <button class="btn btn-primary" style="width: 100%;" onclick="login()">Access Pipeline</button>
+            </div>
+        </div>
+        
+        <!-- Main Content (hidden until authenticated) -->
+        <div id="mainContent" style="display: none;">
+            <header>
+                <h1>Pre-Foreclosure Pipeline</h1>
+                <p class="subtitle">Montgomery County Court Cases - Early Stage Foreclosures</p>
+                <nav class="nav-links">
+                    <a href="/">Sheriff Sales</a>
+                    <a href="/pipeline.html" class="active">Pre-Foreclosure Pipeline</a>
+                </nav>
+            </header>
+            
+            <div class="pipeline-explanation">
+                <h3>📋 What is the Pre-Foreclosure Pipeline?</h3>
+                <p>These are <strong>Complaint in Mortgage Foreclosure</strong> cases filed in Montgomery County courts. They represent properties in the <em>early stages</em> of foreclosure - often months or even years before they reach sheriff sale. This gives you more time to research properties and potentially contact owners before the sale.</p>
+                <div class="timeline-indicator">
+                    <span class="timeline-step active">📄 Complaint Filed</span>
+                    <span class="timeline-arrow">→</span>
+                    <span class="timeline-step">⚖️ Judgement</span>
+                    <span class="timeline-arrow">→</span>
+                    <span class="timeline-step">📢 Lis Pendens</span>
+                    <span class="timeline-arrow">→</span>
+                    <span class="timeline-step">🔨 Sheriff Sale</span>
+                </div>
+            </div>
+            
+            <div class="status-bar">
+                <div class="status-info">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Loading...</span>
+                </div>
+                <div id="sourceInfo"></div>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCases">-</div>
+                    <div class="stat-label">Open Cases</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="avgDaysOpen">-</div>
+                    <div class="stat-label">Avg Days Open</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="withJudgement">-</div>
+                    <div class="stat-label">With Judgement</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="withLisPendens">-</div>
+                    <div class="stat-label">With Lis Pendens</div>
+                </div>
+            </div>
+            
+            <div class="filters-section">
+                <h2>
+                    <span class="filter-icon">🔍</span>
+                    Filter Cases
+                </h2>
+                <div class="filters-grid">
+                    <div class="filter-group">
+                        <label>Min Days Open</label>
+                        <input type="number" id="minDaysOpen" placeholder="e.g. 30">
+                    </div>
+                    <div class="filter-group">
+                        <label>Max Days Open</label>
+                        <input type="number" id="maxDaysOpen" placeholder="e.g. 365">
+                    </div>
+                    <div class="filter-group">
+                        <label>Has Judgement</label>
+                        <select id="hasJudgement">
+                            <option value="">All</option>
+                            <option value="true">Yes - Has Judgement</option>
+                            <option value="false">No - No Judgement Yet</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>City</label>
+                        <input type="text" id="cityFilter" placeholder="Filter by city...">
+                    </div>
+                </div>
+                <div class="filter-buttons">
+                    <button class="btn btn-primary" onclick="searchCases()">
+                        🔍 Search Cases
+                    </button>
+                    <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">
+                        🔄 Refresh Pipeline Data
+                    </button>
+                    <button class="btn btn-outline" onclick="exportCSV()">
+                        📥 Export CSV
+                    </button>
+                </div>
+            </div>
+            
+            <div class="results-header">
+                <h2>Cases <span id="caseCount" style="color: #10b981;"></span></h2>
+                <div>
+                    <label style="color: #9ca3af; margin-right: 10px;">Sort by:</label>
+                    <select id="sortBy" onchange="searchCases()" style="padding: 8px; border-radius: 6px; background: #1f2937; color: #f3f4f6; border: 1px solid #374151;">
+                        <option value="daysOpen">Days Open (Oldest First)</option>
+                        <option value="commencedDate">Date Filed (Newest First)</option>
+                        <option value="caseNumber">Case Number</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="casesGrid" class="cases-grid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading pipeline data...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let authToken = '';
+        
+        // Check for existing auth
+        async function checkExistingAuth() {
+            const savedToken = sessionStorage.getItem('authToken');
+            if (savedToken) {
+                authToken = savedToken;
+                try {
+                    const response = await fetch('/api/pipeline/stats', {
+                        headers: { 'X-Auth-Token': authToken }
+                    });
+                    if (response.ok) {
+                        showMainContent();
+                        loadData();
+                        return;
+                    }
+                } catch (e) {}
+            }
+            showLogin();
+        }
+        
+        function showLogin() {
+            document.getElementById('loginSection').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'none';
+        }
+        
+        function showMainContent() {
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+        }
+        
+        async function login() {
+            const password = document.getElementById('passwordInput').value;
+            try {
+                const response = await fetch('/api/auth', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                
+                if (response.ok) {
+                    authToken = password;
+                    sessionStorage.setItem('authToken', authToken);
+                    showMainContent();
+                    loadData();
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+        
+        async function loadData() {
+            await loadStats();
+            await searchCases();
+        }
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/pipeline/stats', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                const stats = await response.json();
+                
+                document.getElementById('totalCases').textContent = stats.total || 0;
+                document.getElementById('avgDaysOpen').textContent = stats.avgDaysOpen || 0;
+                document.getElementById('withJudgement').textContent = stats.withJudgement || 0;
+                document.getElementById('withLisPendens').textContent = stats.withLisPendens || 0;
+                
+                if (stats.lastUpdated) {
+                    const updated = new Date(stats.lastUpdated);
+                    const ago = getTimeAgo(updated);
+                    document.getElementById('statusText').textContent = `Updated ${ago} • ${stats.total} cases`;
+                    
+                    // Mark as stale if older than 24 hours
+                    const hoursSince = (Date.now() - updated) / (1000 * 60 * 60);
+                    if (hoursSince > 24) {
+                        document.getElementById('statusDot').classList.add('stale');
+                    }
+                } else {
+                    document.getElementById('statusText').textContent = 'No data yet - click Refresh Pipeline Data';
+                    document.getElementById('statusDot').classList.add('stale');
+                }
+                
+                if (stats.sources) {
+                    const sourceText = Object.entries(stats.sources)
+                        .map(([name, count]) => `${name}: ${count}`)
+                        .join(' • ');
+                    document.getElementById('sourceInfo').textContent = sourceText;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        async function searchCases() {
+            const grid = document.getElementById('casesGrid');
+            grid.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>';
+            
+            const params = new URLSearchParams();
+            
+            const minDays = document.getElementById('minDaysOpen').value;
+            const maxDays = document.getElementById('maxDaysOpen').value;
+            const hasJudgement = document.getElementById('hasJudgement').value;
+            const city = document.getElementById('cityFilter').value;
+            const sortBy = document.getElementById('sortBy').value;
+            
+            if (minDays) params.append('minDaysOpen', minDays);
+            if (maxDays) params.append('maxDaysOpen', maxDays);
+            if (hasJudgement) params.append('hasJudgement', hasJudgement);
+            if (city) params.append('city', city);
+            params.append('sortBy', sortBy);
+            params.append('sortOrder', sortBy === 'commencedDate' ? 'desc' : 'desc');
+            
+            try {
+                const response = await fetch(`/api/pipeline?${params.toString()}`, {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                const data = await response.json();
+                
+                document.getElementById('caseCount').textContent = `(${data.cases?.length || 0})`;
+                
+                if (!data.cases || data.cases.length === 0) {
+                    grid.innerHTML = `
+                        <div class="no-results">
+                            <p>No cases found matching your criteria.</p>
+                            <p style="margin-top: 10px;">Try adjusting your filters or click "Refresh Pipeline Data" to scrape new cases.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                grid.innerHTML = data.cases.map(c => createCaseCard(c)).join('');
+                
+            } catch (error) {
+                grid.innerHTML = `<div class="no-results"><p>Error loading cases: ${error.message}</p></div>`;
+            }
+        }
+        
+        function createCaseCard(c) {
+            const daysClass = c.daysOpen > 365 ? 'urgent' : (c.daysOpen > 180 ? 'warning' : '');
+            const address = c.propertyAddress || 'Address not available';
+            const location = [c.propertyCity, c.propertyState, c.propertyZip].filter(Boolean).join(', ') || 'Location unknown';
+            
+            let tags = '';
+            if (c.status.includes('OPEN')) {
+                tags += '<span class="tag tag-open">OPEN</span>';
+            }
+            if (c.hasJudgement) {
+                tags += '<span class="tag tag-judgement">Has Judgement</span>';
+            }
+            if (c.hasLisPendens) {
+                tags += '<span class="tag tag-lispendens">Lis Pendens</span>';
+            }
+            
+            return `
+                <div class="case-card">
+                    <div class="case-header">
+                        <span class="case-number">Case #${c.caseNumber}</span>
+                        <span class="days-badge ${daysClass}">${c.daysOpen || '?'} days open</span>
+                    </div>
+                    <div class="case-address">${address}</div>
+                    <div class="case-location">${location}</div>
+                    <div class="case-tags">${tags}</div>
+                    <div class="case-details">
+                        <div class="detail-item">
+                            <div class="detail-label">Defendant (Owner)</div>
+                            <div class="detail-value">${c.defendant || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Filed Date</div>
+                            <div class="detail-value">${formatDate(c.commencedDate)}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Last Filing</div>
+                            <div class="detail-value">${formatDate(c.lastFilingDate) || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Parcel #</div>
+                            <div class="detail-value">${c.parcelNumber || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div class="case-footer">
+                        <span class="plaintiff-info">Plaintiff: ${truncate(c.plaintiff, 50)}</span>
+                        <a href="${c.detailUrl}" target="_blank">View Court Record ↗</a>
+                    </div>
+                </div>
+            `;
+        }
+        
+        async function refreshData() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Scraping... (this may take several minutes)';
+            
+            try {
+                const response = await fetch('/api/pipeline/scrape', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                
+                if (response.status === 429) {
+                    alert('A scrape is already in progress. Please wait.');
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Refresh Pipeline Data';
+                    return;
+                }
+                
+                // Poll for completion
+                const checkStatus = async () => {
+                    const statusRes = await fetch('/api/pipeline/scrape/status', {
+                        headers: { 'X-Auth-Token': authToken }
+                    });
+                    const status = await statusRes.json();
+                    
+                    if (status.inProgress) {
+                        setTimeout(checkStatus, 5000);
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = '🔄 Refresh Pipeline Data';
+                        loadData();
+                        
+                        if (status.lastStatus?.status === 'completed') {
+                            alert(`Scrape completed! Found ${status.lastStatus.casesFound} cases.`);
+                        } else if (status.lastStatus?.status === 'error') {
+                            alert(`Scrape error: ${status.lastStatus.error}`);
+                        }
+                    }
+                };
+                
+                setTimeout(checkStatus, 5000);
+                
+            } catch (error) {
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Refresh Pipeline Data';
+                alert('Error starting scrape: ' + error.message);
+            }
+        }
+        
+        function exportCSV() {
+            window.location.href = `/api/pipeline/export/csv?token=${encodeURIComponent(authToken)}`;
+        }
+        
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+        
+        function truncate(str, len) {
+            if (!str) return '';
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+        
+        function getTimeAgo(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            const intervals = [
+                { label: 'year', seconds: 31536000 },
+                { label: 'month', seconds: 2592000 },
+                { label: 'day', seconds: 86400 },
+                { label: 'hour', seconds: 3600 },
+                { label: 'minute', seconds: 60 }
+            ];
+            
+            for (const interval of intervals) {
+                const count = Math.floor(seconds / interval.seconds);
+                if (count >= 1) {
+                    return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
+                }
+            }
+            return 'just now';
+        }
+        
+        // Initialize
+        checkExistingAuth();
+    </script>
+</body>
+</html>
