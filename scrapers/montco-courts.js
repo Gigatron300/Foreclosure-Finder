@@ -9,7 +9,7 @@ const CONFIG = {
   requestDelay: 500,
   batchSize: 5,
   batchPause: 2000,
-  resultsPerPage: 50, // Reduced to save memory
+  resultsPerPage: 200, // Get more results to include recent cases
   maxCasesToProcess: 30, // Limit cases to stay under memory
   maxDaysOld: 730, // Include cases up to 2 years old
   
@@ -144,6 +144,18 @@ async function scrapeMontgomeryCourts() {
       let openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
       console.log(`   ${openCases.length} are OPEN`);
       
+      // Sort by date (newest first)
+      openCases.sort((a, b) => {
+        const parseDate = (dateStr) => {
+          if (!dateStr) return new Date(0);
+          const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          if (match) return new Date(match[3], match[1] - 1, match[2]);
+          return new Date(0);
+        };
+        return parseDate(b.commencedDate) - parseDate(a.commencedDate);
+      });
+      console.log(`   Sorted by date (newest first)`);
+      
       // Limit to save memory
       if (openCases.length > CONFIG.maxCasesToProcess) {
         console.log(`   Limiting to ${CONFIG.maxCasesToProcess} cases to save memory`);
@@ -183,55 +195,55 @@ async function scrapeMontgomeryCourts() {
               }
             }
             
-            // Get address from Defendants table
-            const defSection = document.getElementById('table_Defendants');
-            if (defSection) {
-              const table = defSection.querySelector('table');
-              if (table) {
-                const rows = table.querySelectorAll('tr');
-                if (rows.length >= 2) {
-                  const cells = rows[1].querySelectorAll('td');
-                  if (cells[2]) {
-                    const fullAddress = cells[2].textContent.trim();
+            // Get address from Defendants table (it's the 3rd table, index 2)
+            // Tables on page: 0=Case Info, 1=Plaintiffs, 2=Defendants, 3=Docket, 4=Judgements
+            const tables = document.querySelectorAll('table');
+            if (tables.length >= 3) {
+              const defTable = tables[2];
+              const rows = defTable.querySelectorAll('tr');
+              if (rows.length >= 2) {
+                const cells = rows[1].querySelectorAll('td');
+                // Cell 2 is Address (0=Select, 1=Name, 2=Address, 3=Country...)
+                if (cells[2]) {
+                  const fullAddress = cells[2].textContent.trim();
+                  
+                  // Format is: "25 ASPEN WAYSCHWENKSVILLE, PA 19473 UNITED STATES"
+                  // Street and city are concatenated without space
+                  // Look for ", PA" or ", NJ" followed by zip code
+                  const stateZipMatch = fullAddress.match(/,\s*(PA|NJ)\s*(\d{5})/i);
+                  
+                  if (stateZipMatch) {
+                    result.propertyState = stateZipMatch[1].toUpperCase();
+                    result.propertyZip = stateZipMatch[2];
                     
-                    // Format is: "25 ASPEN WAYSCHWENKSVILLE, PA 19473 UNITED STATES"
-                    // Street and city are concatenated without space
-                    // Look for ", PA" or ", NJ" followed by zip code
-                    const stateZipMatch = fullAddress.match(/,\s*(PA|NJ)\s*(\d{5})/i);
+                    // Everything before ", PA 19XXX" is street + city
+                    const beforeStateZip = fullAddress.substring(0, fullAddress.indexOf(stateZipMatch[0]));
                     
-                    if (stateZipMatch) {
-                      result.propertyState = stateZipMatch[1].toUpperCase();
-                      result.propertyZip = stateZipMatch[2];
-                      
-                      // Everything before ", PA 19XXX" is street + city
-                      const beforeStateZip = fullAddress.substring(0, fullAddress.indexOf(stateZipMatch[0]));
-                      
-                      // Find where city starts - look for common PA city names or patterns
-                      // Cities often start with capital letter after lowercase or number
-                      // Pattern: "25 ASPEN WAYSCHWENKSVILLE" -> split at last uppercase sequence before comma
-                      
-                      // Try to find street type (WAY, ST, AVE, etc) to split
-                      const streetTypeMatch = beforeStateZip.match(/^(.+(?:WAY|STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|TERRACE|TER|PIKE|TRAIL|TRL))\s*(.*)$/i);
-                      
-                      if (streetTypeMatch) {
-                        result.propertyAddress = streetTypeMatch[1].trim();
-                        result.propertyCity = streetTypeMatch[2].trim();
-                      } else {
-                        // Fallback: find where numbers end and try to split
-                        // "123 MAIN STCITYNAME" - look for double capital pattern
-                        const doubleCapMatch = beforeStateZip.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
-                        if (doubleCapMatch) {
-                          result.propertyAddress = doubleCapMatch[1].trim();
-                          result.propertyCity = doubleCapMatch[2].trim();
-                        } else {
-                          // Last resort: just use everything before state as address
-                          result.propertyAddress = beforeStateZip.trim();
-                        }
-                      }
+                    // Find where city starts - look for common PA city names or patterns
+                    // Cities often start with capital letter after lowercase or number
+                    // Pattern: "25 ASPEN WAYSCHWENKSVILLE" -> split at last uppercase sequence before comma
+                    
+                    // Try to find street type (WAY, ST, AVE, etc) to split
+                    const streetTypeMatch = beforeStateZip.match(/^(.+(?:WAY|STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|TERRACE|TER|PIKE|TRAIL|TRL))\s*(.*)$/i);
+                    
+                    if (streetTypeMatch) {
+                      result.propertyAddress = streetTypeMatch[1].trim();
+                      result.propertyCity = streetTypeMatch[2].trim();
                     } else {
-                      // No state/zip found, just clean up
-                      result.propertyAddress = fullAddress.replace(/UNITED STATES/i, '').trim();
+                      // Fallback: find where numbers end and try to split
+                      // "123 MAIN STCITYNAME" - look for double capital pattern
+                      const doubleCapMatch = beforeStateZip.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
+                      if (doubleCapMatch) {
+                        result.propertyAddress = doubleCapMatch[1].trim();
+                        result.propertyCity = doubleCapMatch[2].trim();
+                      } else {
+                        // Last resort: just use everything before state as address
+                        result.propertyAddress = beforeStateZip.trim();
+                      }
                     }
+                  } else {
+                    // No state/zip found, just clean up
+                    result.propertyAddress = fullAddress.replace(/UNITED STATES/i, '').trim();
                   }
                 }
               }
