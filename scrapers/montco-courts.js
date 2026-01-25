@@ -11,6 +11,7 @@ const CONFIG = {
   batchPause: 2000,
   resultsPerPage: 50, // Reduced to save memory
   maxCasesToProcess: 30, // Limit cases to stay under memory
+  maxDaysOld: 365, // Only include cases filed within last year
   
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
@@ -136,6 +137,18 @@ async function scrapeMontgomeryCourts() {
       let openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
       console.log(`   ${openCases.length} are OPEN`);
       
+      // Filter out very old cases (likely already at sheriff sale or resolved)
+      const now = new Date();
+      openCases = openCases.filter(c => {
+        if (!c.commencedDate) return true;
+        const match = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (!match) return true;
+        const caseDate = new Date(match[3], match[1] - 1, match[2]);
+        const daysOld = Math.ceil((now - caseDate) / (1000 * 60 * 60 * 24));
+        return daysOld <= CONFIG.maxDaysOld;
+      });
+      console.log(`   ${openCases.length} are within last ${CONFIG.maxDaysOld} days`);
+      
       // Limit to save memory
       if (openCases.length > CONFIG.maxCasesToProcess) {
         console.log(`   Limiting to ${CONFIG.maxCasesToProcess} cases to save memory`);
@@ -186,14 +199,42 @@ async function scrapeMontgomeryCourts() {
                   if (cells[2]) {
                     const fullAddress = cells[2].textContent.trim();
                     
-                    // Parse: "25 ASPEN WAY SCHWENKSVILLE, PA 19473 UNITED STATES"
-                    const match = fullAddress.match(/(.+?)\s+([A-Z\s]+),\s*(PA|NJ)\s*(\d{5})/i);
-                    if (match) {
-                      result.propertyAddress = match[1].trim();
-                      result.propertyCity = match[2].trim();
-                      result.propertyState = match[3].toUpperCase();
-                      result.propertyZip = match[4];
+                    // Format is: "25 ASPEN WAYSCHWENKSVILLE, PA 19473 UNITED STATES"
+                    // Street and city are concatenated without space
+                    // Look for ", PA" or ", NJ" followed by zip code
+                    const stateZipMatch = fullAddress.match(/,\s*(PA|NJ)\s*(\d{5})/i);
+                    
+                    if (stateZipMatch) {
+                      result.propertyState = stateZipMatch[1].toUpperCase();
+                      result.propertyZip = stateZipMatch[2];
+                      
+                      // Everything before ", PA 19XXX" is street + city
+                      const beforeStateZip = fullAddress.substring(0, fullAddress.indexOf(stateZipMatch[0]));
+                      
+                      // Find where city starts - look for common PA city names or patterns
+                      // Cities often start with capital letter after lowercase or number
+                      // Pattern: "25 ASPEN WAYSCHWENKSVILLE" -> split at last uppercase sequence before comma
+                      
+                      // Try to find street type (WAY, ST, AVE, etc) to split
+                      const streetTypeMatch = beforeStateZip.match(/^(.+(?:WAY|STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|TERRACE|TER|PIKE|TRAIL|TRL))\s*(.*)$/i);
+                      
+                      if (streetTypeMatch) {
+                        result.propertyAddress = streetTypeMatch[1].trim();
+                        result.propertyCity = streetTypeMatch[2].trim();
+                      } else {
+                        // Fallback: find where numbers end and try to split
+                        // "123 MAIN STCITYNAME" - look for double capital pattern
+                        const doubleCapMatch = beforeStateZip.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
+                        if (doubleCapMatch) {
+                          result.propertyAddress = doubleCapMatch[1].trim();
+                          result.propertyCity = doubleCapMatch[2].trim();
+                        } else {
+                          // Last resort: just use everything before state as address
+                          result.propertyAddress = beforeStateZip.trim();
+                        }
+                      }
                     } else {
+                      // No state/zip found, just clean up
                       result.propertyAddress = fullAddress.replace(/UNITED STATES/i, '').trim();
                     }
                   }
