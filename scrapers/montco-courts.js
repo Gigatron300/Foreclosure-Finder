@@ -5,15 +5,14 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const CONFIG = {
   requestDelay: 500,
-  batchSize: 20,
+  batchSize: 10,
   batchPause: 3000,
-  pageTimeout: 30000,
-  maxPages: 100, // Safety limit - 100 pages * 20 results = 2000 cases max
+  pageTimeout: 60000,
+  resultsPerPage: 100, // Request more results per page
   
   // Case types to scrape
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
-    // { id: XX, name: 'Lis Pendens' } // Can add later if needed
   ],
   
   baseUrl: 'https://courtsapp.montcopa.org',
@@ -37,10 +36,15 @@ function parseDate(dateStr) {
 // Calculate days since a date
 function daysSince(dateStr) {
   if (!dateStr) return null;
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffTime = Math.abs(now - date);
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return null;
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  } catch (e) {
+    return null;
+  }
 }
 
 // Main scraper function
@@ -52,152 +56,72 @@ async function scrapeMontgomeryCourts(browser) {
   const page = await browser.newPage();
   
   try {
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
     
     for (const caseType of CONFIG.caseTypes) {
       console.log(`\n📋 Scraping: ${caseType.name}`);
       
-      // Build search URL with case type filter
-      const searchParams = new URLSearchParams({
-        Q: '',
-        IncludeSoundsLike: 'false',
-        Count: '20',
-        fromAdv: '1',
-        CaseNumber: '',
-        ParcelNumber: '',
-        CaseType: caseType.id.toString(),
-        DateCommencedFrom: '',
-        DateCommencedTo: '',
-        IncludeInitialFilings: 'false',
-        IncludeInitialEFilings: 'false',
-        FilingType: '',
-        FilingDateFrom: '',
-        FilingDateTo: '',
-        IncludeSubsequentFilings: 'false',
-        IncludeSubsequentEFilings: 'false',
-        Court: 'C',
-        JudgeID: '',
-        Attorney: '',
-        AttorneyID: '',
-        Grid: 'true'
+      // Build search URL - request 100 results per page
+      const searchUrl = `${CONFIG.searchUrl}?Q=&IncludeSoundsLike=false&Count=${CONFIG.resultsPerPage}&fromAdv=1&CaseNumber=&ParcelNumber=&CaseType=${caseType.id}&DateCommencedFrom=&DateCommencedTo=&IncludeInitialFilings=false&IncludeInitialEFilings=false&FilingType=&FilingDateFrom=&FilingDateTo=&IncludeSubsequentFilings=false&IncludeSubsequentEFilings=false&Court=C&Court=F&JudgeID=&Attorney=&AttorneyID=&Grid=true`;
+      
+      console.log('   Loading search results...');
+      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
+      await delay(3000);
+      
+      // Extract cases from results table
+      console.log('   Extracting case data...');
+      const pageCases = await page.evaluate(() => {
+        const cases = [];
+        const rows = document.querySelectorAll('table tr');
+        
+        console.log('Found ' + rows.length + ' table rows');
+        
+        for (let i = 1; i < rows.length; i++) { // Skip header row
+          const cells = rows[i].querySelectorAll('td');
+          if (cells.length < 9) continue;
+          
+          // Get the detail link from first cell
+          const selectLink = cells[0]?.querySelector('a[href*="/detail/Case/"]');
+          const detailUrl = selectLink ? selectLink.href : '';
+          
+          // Extract case ID from URL
+          const caseIdMatch = detailUrl.match(/\/detail\/Case\/(\d+)/);
+          const caseId = caseIdMatch ? caseIdMatch[1] : '';
+          
+          // Cell indices: 0=Select, 1=Case#, 2=Commenced, 3=Type, 4=Plaintiff, 5=Defendant, 6=Parcel, 7=Judgement, 8=LisPendens, 9=Status
+          const caseData = {
+            caseId,
+            caseNumber: cells[1]?.textContent?.trim() || '',
+            commencedDate: cells[2]?.textContent?.trim() || '',
+            caseType: cells[3]?.textContent?.trim() || '',
+            plaintiff: cells[4]?.textContent?.trim() || '',
+            defendant: cells[5]?.textContent?.trim() || '',
+            parcelNumber: cells[6]?.textContent?.trim() || '',
+            hasJudgement: (cells[7]?.textContent?.trim() || '').toLowerCase() === 'yes',
+            hasLisPendens: (cells[8]?.textContent?.trim() || '').toLowerCase() === 'yes',
+            status: cells[9]?.textContent?.trim() || '',
+            detailUrl
+          };
+          
+          cases.push(caseData);
+        }
+        
+        return cases;
       });
       
-      // Add second Court parameter (the site uses multiple)
-      const searchUrl = `${CONFIG.searchUrl}?${searchParams.toString()}&Court=F`;
+      console.log(`   Found ${pageCases.length} total cases on page`);
       
-      await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
-      await delay(2000);
+      // Filter for OPEN cases only
+      const openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
+      console.log(`   ${openCases.length} are OPEN (active foreclosures)`);
       
-      // Get all cases from search results (paginated)
-      let pageNum = 1;
-      let hasMorePages = true;
-      let casesFromType = [];
-      
-      while (hasMorePages && pageNum <= CONFIG.maxPages) {
-        console.log(`   Page ${pageNum}...`);
-        
-        // Extract cases from current page
-        const pageCases = await page.evaluate(() => {
-          const cases = [];
-          const rows = document.querySelectorAll('table tr');
-          
-          for (let i = 1; i < rows.length; i++) { // Skip header row
-            const cells = rows[i].querySelectorAll('td');
-            if (cells.length < 8) continue;
-            
-            // Get the detail link
-            const selectLink = rows[i].querySelector('a[href*="/detail/Case/"]');
-            const detailUrl = selectLink ? selectLink.href : '';
-            
-            // Extract case ID from URL
-            const caseIdMatch = detailUrl.match(/\/detail\/Case\/(\d+)/);
-            const caseId = caseIdMatch ? caseIdMatch[1] : '';
-            
-            const caseData = {
-              caseId,
-              caseNumber: cells[1]?.textContent?.trim() || '',
-              commencedDate: cells[2]?.textContent?.trim() || '',
-              caseType: cells[3]?.textContent?.trim() || '',
-              plaintiff: cells[4]?.textContent?.trim() || '',
-              defendant: cells[5]?.textContent?.trim() || '',
-              parcelNumber: cells[6]?.textContent?.trim() || '',
-              hasJudgement: cells[7]?.textContent?.trim()?.toLowerCase() === 'yes',
-              hasLisPendens: cells[8]?.textContent?.trim()?.toLowerCase() === 'yes',
-              status: cells[9]?.textContent?.trim() || '',
-              detailUrl
-            };
-            
-            cases.push(caseData);
-          }
-          
-          return cases;
-        });
-        
-        // Filter for OPEN cases only
-        const openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
-        console.log(`   Found ${pageCases.length} cases, ${openCases.length} are OPEN`);
-        
-        casesFromType.push(...openCases);
-        
-        // Check if there's a next page
-        const nextPageExists = await page.evaluate(() => {
-          // Look for pagination - this site uses "Next" or page numbers
-          const paginationLinks = document.querySelectorAll('a');
-          for (const link of paginationLinks) {
-            if (link.textContent.includes('Next') || link.textContent.includes('›')) {
-              return true;
-            }
-          }
-          // Also check if we're at max results indicator
-          const displayText = document.body.textContent;
-          if (displayText.includes('more than 1000')) {
-            return true;
-          }
-          return false;
-        });
-        
-        // Try to go to next page
-        if (nextPageExists && pageNum < CONFIG.maxPages) {
-          const clicked = await page.evaluate(() => {
-            const links = document.querySelectorAll('a');
-            for (const link of links) {
-              if (link.textContent.trim() === 'Next' || link.textContent.trim() === '›') {
-                link.click();
-                return true;
-              }
-            }
-            // Try clicking page number
-            const nextNum = document.querySelector(`a[href*="Page=${pageNum + 1}"]`);
-            if (nextNum) {
-              nextNum.click();
-              return true;
-            }
-            return false;
-          });
-          
-          if (clicked) {
-            await delay(2000);
-            pageNum++;
-          } else {
-            hasMorePages = false;
-          }
-        } else {
-          hasMorePages = false;
-        }
-        
-        // Safety check - if no cases found on this page, stop
-        if (pageCases.length === 0) {
-          hasMorePages = false;
-        }
-      }
-      
-      console.log(`   Total OPEN ${caseType.name} cases: ${casesFromType.length}`);
-      allCases.push(...casesFromType);
+      allCases.push(...openCases);
     }
     
     // Now fetch property addresses from detail pages for OPEN cases
     console.log(`\n📍 Fetching property addresses for ${allCases.length} OPEN cases...`);
+    console.log('   (This will take a few minutes)\n');
     
     for (let i = 0; i < allCases.length; i++) {
       const caseData = allCases[i];
