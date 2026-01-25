@@ -11,7 +11,7 @@ const CONFIG = {
   batchPause: 2000,
   resultsPerPage: 50, // Reduced to save memory
   maxCasesToProcess: 30, // Limit cases to stay under memory
-  maxDaysOld: 365, // Only include cases filed within last year
+  maxDaysOld: 730, // Include cases up to 2 years old
   
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
@@ -92,8 +92,15 @@ async function scrapeMontgomeryCourts() {
     for (const caseType of CONFIG.caseTypes) {
       console.log(`📋 Scraping: ${caseType.name}`);
       
-      // Build search URL
-      const searchUrl = `${CONFIG.searchUrl}?Q=&IncludeSoundsLike=false&Count=${CONFIG.resultsPerPage}&fromAdv=1&CaseType=${caseType.id}&Court=C&Court=F&Grid=true`;
+      // Build search URL with date filter for recent cases
+      // Get date from 1 year ago
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      const fromDate = `${oneYearAgo.getMonth() + 1}/${oneYearAgo.getDate()}/${oneYearAgo.getFullYear()}`;
+      
+      const searchUrl = `${CONFIG.searchUrl}?Q=&IncludeSoundsLike=false&Count=${CONFIG.resultsPerPage}&fromAdv=1&CaseType=${caseType.id}&DateCommencedFrom=${encodeURIComponent(fromDate)}&Court=C&Court=F&Grid=true`;
+      
+      console.log(`   Searching for cases since ${fromDate}...`);
       
       console.log('   Loading search page...');
       await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -136,18 +143,6 @@ async function scrapeMontgomeryCourts() {
       // Filter for OPEN cases only
       let openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
       console.log(`   ${openCases.length} are OPEN`);
-      
-      // Filter out very old cases (likely already at sheriff sale or resolved)
-      const now = new Date();
-      openCases = openCases.filter(c => {
-        if (!c.commencedDate) return true;
-        const match = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (!match) return true;
-        const caseDate = new Date(match[3], match[1] - 1, match[2]);
-        const daysOld = Math.ceil((now - caseDate) / (1000 * 60 * 60 * 24));
-        return daysOld <= CONFIG.maxDaysOld;
-      });
-      console.log(`   ${openCases.length} are within last ${CONFIG.maxDaysOld} days`);
       
       // Limit to save memory
       if (openCases.length > CONFIG.maxCasesToProcess) {
