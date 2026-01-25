@@ -1,66 +1,30 @@
 // Montgomery County Courts scraper for pre-foreclosure pipeline
-// Uses lightweight HTTP requests instead of Puppeteer to save memory
+// Uses axios for reliable HTTP requests
 
-const https = require('https');
-const http = require('http');
+const axios = require('axios');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Simple HTTP GET function using built-in https module
-function httpGet(urlString) {
-  return new Promise((resolve, reject) => {
-    try {
-      const url = new URL(urlString);
-      const isHttps = url.protocol === 'https:';
-      const lib = isHttps ? https : http;
-      
-      const options = {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Connection': 'keep-alive'
-        },
-        timeout: 30000
-      };
-      
-      const request = lib.request(options, (response) => {
-        // Handle redirects
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          let redirectUrl = response.headers.location;
-          // Handle relative redirects
-          if (redirectUrl.startsWith('/')) {
-            redirectUrl = `${url.protocol}//${url.hostname}${redirectUrl}`;
-          }
-          return httpGet(redirectUrl).then(resolve).catch(reject);
-        }
-        
-        if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode}`));
-          return;
-        }
-        
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', () => resolve(data));
-        response.on('error', reject);
-      });
-      
-      request.on('error', reject);
-      request.on('timeout', () => {
-        request.destroy();
-        reject(new Error('Request timeout'));
-      });
-      
-      request.end();
-    } catch (e) {
-      reject(new Error(`URL parse error: ${e.message}`));
-    }
-  });
+// Create axios instance with default config
+const client = axios.create({
+  timeout: 60000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Connection': 'keep-alive'
+  },
+  maxRedirects: 5,
+  validateStatus: (status) => status < 500
+});
+
+// Simple HTTP GET
+async function httpGet(url) {
+  const response = await client.get(url);
+  if (response.status !== 200) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.data;
 }
 
 const CONFIG = {
