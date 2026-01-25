@@ -9,9 +9,12 @@ const CONFIG = {
   requestDelay: 500,
   batchSize: 5,
   batchPause: 2000,
-  resultsPerPage: 200, // Get more results to include recent cases
-  maxCasesToProcess: 30, // Limit cases to stay under memory
-  maxDaysOld: 730, // Include cases up to 2 years old
+  resultsPerPage: 300, // Get more results to find best leads
+  maxCasesToProcess: 25, // Process top 25 best leads
+  
+  // Ideal case age range (days)
+  minDaysOld: 30,  // Owner has had time to realize the situation
+  maxDaysOld: 180, // Not too close to sheriff sale
   
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
@@ -144,8 +147,32 @@ async function scrapeMontgomeryCourts() {
       let openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
       console.log(`   ${openCases.length} are OPEN`);
       
-      // Sort by date (newest first)
-      openCases.sort((a, b) => {
+      // EXCLUDE cases with Judgement (too late in process)
+      const noJudgementCases = openCases.filter(c => !c.hasJudgement);
+      console.log(`   ${noJudgementCases.length} have NO Judgement (best leads)`);
+      
+      // Filter for ideal age range: 30-180 days (owner aware but not too late)
+      const now = new Date();
+      const idealCases = noJudgementCases.filter(c => {
+        if (!c.commencedDate) return true;
+        const match = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (!match) return true;
+        const caseDate = new Date(match[3], match[1] - 1, match[2]);
+        const daysOld = Math.ceil((now - caseDate) / (1000 * 60 * 60 * 24));
+        return daysOld >= 30 && daysOld <= 180;
+      });
+      console.log(`   ${idealCases.length} are in sweet spot (30-180 days old)`);
+      
+      // Use ideal cases if we have enough, otherwise use all no-judgement cases
+      let targetCases = idealCases.length >= 10 ? idealCases : noJudgementCases;
+      
+      // Sort: Lis Pendens first (most motivated), then by newest date
+      targetCases.sort((a, b) => {
+        // First priority: Lis Pendens = Yes comes first
+        if (a.hasLisPendens && !b.hasLisPendens) return -1;
+        if (!a.hasLisPendens && b.hasLisPendens) return 1;
+        
+        // Second priority: Newest date first
         const parseDate = (dateStr) => {
           if (!dateStr) return new Date(0);
           const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
@@ -154,7 +181,12 @@ async function scrapeMontgomeryCourts() {
         };
         return parseDate(b.commencedDate) - parseDate(a.commencedDate);
       });
-      console.log(`   Sorted by date (newest first)`);
+      
+      const lisPendensCount = targetCases.filter(c => c.hasLisPendens).length;
+      console.log(`   ${lisPendensCount} have Lis Pendens (earliest stage)`);
+      console.log(`   Sorted: Lis Pendens first, then by newest date`);
+      
+      openCases = targetCases;
       
       // Limit to save memory
       if (openCases.length > CONFIG.maxCasesToProcess) {
