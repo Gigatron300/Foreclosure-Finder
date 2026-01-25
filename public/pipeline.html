@@ -20,7 +20,7 @@
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
         }
         
@@ -116,7 +116,7 @@
         
         .filters-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
@@ -200,7 +200,7 @@
         
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 15px;
             margin-bottom: 25px;
         }
@@ -208,19 +208,25 @@
         .stat-card {
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
-            padding: 20px;
+            padding: 15px;
             text-align: center;
         }
         
         .stat-value {
-            font-size: 1.8rem;
+            font-size: 1.6rem;
             font-weight: 700;
             color: #10b981;
         }
         
+        .stat-value.grade-a { color: #10b981; }
+        .stat-value.grade-b { color: #3b82f6; }
+        .stat-value.grade-c { color: #f59e0b; }
+        .stat-value.grade-d { color: #f97316; }
+        .stat-value.grade-f { color: #ef4444; }
+        
         .stat-label {
             color: #9ca3af;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             margin-top: 5px;
         }
         
@@ -228,17 +234,23 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-            gap: 10px;
+            margin-bottom: 20px;
         }
         
         .results-header h2 {
-            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .case-count {
+            color: #9ca3af;
+            font-weight: normal;
         }
         
         .cases-grid {
             display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
             gap: 20px;
         }
         
@@ -246,7 +258,7 @@
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
             padding: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid transparent;
             transition: all 0.2s;
         }
         
@@ -255,135 +267,228 @@
             transform: translateY(-2px);
         }
         
+        .case-card.grade-a {
+            border-left: 4px solid #10b981;
+        }
+        
+        .case-card.grade-b {
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .case-card.grade-c {
+            border-left: 4px solid #f59e0b;
+        }
+        
+        .case-card.grade-d {
+            border-left: 4px solid #f97316;
+        }
+        
+        .case-card.grade-f {
+            border-left: 4px solid #ef4444;
+        }
+        
         .case-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-            gap: 10px;
+            margin-bottom: 12px;
         }
         
         .case-number {
-            font-size: 1.1rem;
-            font-weight: 600;
+            font-size: 0.85rem;
+            color: #9ca3af;
+        }
+        
+        .lead-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .grade-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+        
+        .grade-badge.grade-a {
+            background: rgba(16, 185, 129, 0.2);
             color: #10b981;
         }
         
-        .days-badge {
-            background: #374151;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
+        .grade-badge.grade-b {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
         }
         
-        .days-badge.urgent {
-            background: #dc2626;
-            color: white;
+        .grade-badge.grade-c {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        
+        .grade-badge.grade-d {
+            background: rgba(249, 115, 22, 0.2);
+            color: #f97316;
+        }
+        
+        .grade-badge.grade-f {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .score-badge {
+            font-size: 0.8rem;
+            color: #9ca3af;
+        }
+        
+        .days-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            background: rgba(255,255,255,0.1);
         }
         
         .days-badge.warning {
-            background: #f59e0b;
-            color: white;
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        
+        .days-badge.urgent {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
         }
         
         .case-address {
-            font-size: 1.2rem;
-            font-weight: 500;
+            font-size: 1.1rem;
+            font-weight: 600;
             margin-bottom: 5px;
         }
         
         .case-location {
             color: #9ca3af;
-            margin-bottom: 15px;
-        }
-        
-        .case-details {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            margin-bottom: 15px;
-        }
-        
-        .detail-item {
             font-size: 0.9rem;
-        }
-        
-        .detail-label {
-            color: #6b7280;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-        }
-        
-        .detail-value {
-            color: #e5e7eb;
-            margin-top: 2px;
+            margin-bottom: 12px;
         }
         
         .case-tags {
             display: flex;
-            gap: 8px;
             flex-wrap: wrap;
+            gap: 6px;
             margin-bottom: 15px;
         }
         
         .tag {
-            padding: 4px 10px;
-            border-radius: 15px;
-            font-size: 0.8rem;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
             font-weight: 500;
         }
         
-        .tag-judgement {
-            background: #7c3aed;
-            color: white;
-        }
-        
-        .tag-lispendens {
-            background: #2563eb;
-            color: white;
-        }
-        
         .tag-open {
-            background: #059669;
-            color: white;
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+        
+        .tag-hot {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .tag-no-response {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        
+        .tag-default {
+            background: rgba(249, 115, 22, 0.2);
+            color: #f97316;
+        }
+        
+        .tag-attorney {
+            background: rgba(156, 163, 175, 0.2);
+            color: #9ca3af;
+        }
+        
+        .tag-inactive {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+        
+        .case-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        
+        .detail-item {
+            font-size: 0.85rem;
+        }
+        
+        .detail-label {
+            color: #9ca3af;
+            font-size: 0.75rem;
+        }
+        
+        .detail-value {
+            color: #f3f4f6;
+            margin-top: 2px;
+        }
+        
+        .case-remarks {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            padding: 10px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 6px;
+            margin-bottom: 12px;
         }
         
         .case-footer {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-top: 15px;
+            padding-top: 12px;
             border-top: 1px solid rgba(255,255,255,0.1);
-            flex-wrap: wrap;
-            gap: 10px;
+            font-size: 0.85rem;
+        }
+        
+        .plaintiff-info {
+            color: #9ca3af;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
         .case-footer a {
             color: #10b981;
             text-decoration: none;
-            font-size: 0.9rem;
         }
         
         .case-footer a:hover {
             text-decoration: underline;
         }
         
-        .plaintiff-info {
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
             color: #9ca3af;
-            font-size: 0.85rem;
         }
         
         .loading {
             text-align: center;
-            padding: 60px;
-            color: #9ca3af;
+            padding: 60px 20px;
         }
         
         .spinner {
             width: 40px;
             height: 40px;
-            border: 3px solid #374151;
+            border: 3px solid rgba(16, 185, 129, 0.2);
             border-top-color: #10b981;
             border-radius: 50%;
             animation: spin 1s linear infinite;
@@ -394,271 +499,301 @@
             to { transform: rotate(360deg); }
         }
         
-        .no-results {
-            text-align: center;
-            padding: 60px;
-            color: #9ca3af;
-        }
-        
-        .pipeline-explanation {
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-        
-        .pipeline-explanation h3 {
-            color: #10b981;
-            margin-bottom: 10px;
-        }
-        
-        .pipeline-explanation p {
-            color: #9ca3af;
-            line-height: 1.6;
-        }
-        
-        .timeline-indicator {
+        /* Login overlay */
+        .login-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
             display: flex;
             align-items: center;
-            gap: 10px;
-            margin-top: 15px;
-            flex-wrap: wrap;
-        }
-        
-        .timeline-step {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.85rem;
-        }
-        
-        .timeline-step.active {
-            color: #10b981;
-            font-weight: 600;
-        }
-        
-        .timeline-arrow {
-            color: #6b7280;
-        }
-        
-        /* Login form styles */
-        .login-container {
-            max-width: 400px;
-            margin: 100px auto;
-            text-align: center;
+            justify-content: center;
+            z-index: 1000;
         }
         
         .login-box {
-            background: rgba(255,255,255,0.05);
+            background: #1f2937;
             padding: 40px;
             border-radius: 16px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
         }
         
         .login-box h2 {
-            margin-bottom: 25px;
+            margin-bottom: 20px;
+            color: #10b981;
         }
         
         .login-box input {
             width: 100%;
-            padding: 12px 15px;
-            margin-bottom: 15px;
+            padding: 15px;
             border-radius: 8px;
             border: 1px solid #374151;
-            background: #1f2937;
-            color: #f3f4f6;
+            background: #111827;
+            color: white;
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+        
+        .login-box button {
+            width: 100%;
+            padding: 15px;
+            border-radius: 8px;
+            border: none;
+            background: #10b981;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
         }
         
         .login-error {
             color: #ef4444;
+            margin-top: 10px;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Quick filters */
+        .quick-filters {
+            display: flex;
+            gap: 10px;
             margin-bottom: 15px;
-            display: none;
+            flex-wrap: wrap;
+        }
+        
+        .quick-filter {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border: 1px solid #374151;
+            background: transparent;
+            color: #9ca3af;
+            transition: all 0.2s;
+        }
+        
+        .quick-filter:hover {
+            border-color: #10b981;
+            color: #10b981;
+        }
+        
+        .quick-filter.active {
+            background: #10b981;
+            border-color: #10b981;
+            color: white;
         }
         
         @media (max-width: 768px) {
-            h1 { font-size: 1.8rem; }
-            .status-bar { flex-direction: column; text-align: center; }
-            .filter-buttons { justify-content: center; }
+            .cases-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .filters-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Login Form (hidden when authenticated) -->
-        <div id="loginSection" class="login-container">
-            <div class="login-box">
-                <h2>🏛️ Pre-Foreclosure Pipeline</h2>
-                <p style="color: #9ca3af; margin-bottom: 20px;">Enter password to access</p>
-                <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')login()">
-                <p id="loginError" class="login-error">Invalid password</p>
-                <button class="btn btn-primary" style="width: 100%;" onclick="login()">Access Pipeline</button>
+    <!-- Login Overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-box">
+            <h2>🏠 Pre-Foreclosure Pipeline</h2>
+            <p style="color: #9ca3af; margin-bottom: 20px;">Enter password to access</p>
+            <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')login()">
+            <button onclick="login()">Enter</button>
+            <div class="login-error hidden" id="loginError">Invalid password</div>
+        </div>
+    </div>
+
+    <div class="container" id="mainContent" style="display: none;">
+        <header>
+            <h1>Pre-Foreclosure Pipeline</h1>
+            <p class="subtitle">Distressed property leads with intelligent scoring</p>
+            <nav class="nav-links">
+                <a href="/">Sheriff Sales</a>
+                <a href="/pipeline.html" class="active">Pre-Foreclosure Pipeline</a>
+            </nav>
+        </header>
+        
+        <div class="status-bar">
+            <div class="status-info">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Loading...</span>
+            </div>
+            <div id="sourceInfo" style="color: #9ca3af; font-size: 0.9rem;"></div>
+        </div>
+        
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalCases">-</div>
+                <div class="stat-label">Total Cases</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value grade-a" id="gradeA">-</div>
+                <div class="stat-label">🔥 Grade A</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value grade-b" id="gradeB">-</div>
+                <div class="stat-label">⭐ Grade B</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value grade-c" id="gradeC">-</div>
+                <div class="stat-label">Grade C</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgScore">-</div>
+                <div class="stat-label">Avg Score</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgDaysOpen">-</div>
+                <div class="stat-label">Avg Days</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="noResponse">-</div>
+                <div class="stat-label">No Response</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="noAttorney">-</div>
+                <div class="stat-label">No Attorney</div>
             </div>
         </div>
         
-        <!-- Main Content (hidden until authenticated) -->
-        <div id="mainContent" style="display: none;">
-            <header>
-                <h1>Pre-Foreclosure Pipeline</h1>
-                <p class="subtitle">Montgomery County Court Cases - Early Stage Foreclosures</p>
-                <nav class="nav-links">
-                    <a href="/">Sheriff Sales</a>
-                    <a href="/pipeline.html" class="active">Pre-Foreclosure Pipeline</a>
-                </nav>
-            </header>
-            
-            <div class="pipeline-explanation">
-                <h3>📋 What is the Pre-Foreclosure Pipeline?</h3>
-                <p>These are <strong>Complaint in Mortgage Foreclosure</strong> cases filed in Montgomery County courts. They represent properties in the <em>early stages</em> of foreclosure - often months or even years before they reach sheriff sale. This gives you more time to research properties and potentially contact owners before the sale.</p>
-                <div class="timeline-indicator">
-                    <span class="timeline-step active">📄 Complaint Filed</span>
-                    <span class="timeline-arrow">→</span>
-                    <span class="timeline-step">⚖️ Judgement</span>
-                    <span class="timeline-arrow">→</span>
-                    <span class="timeline-step">📢 Lis Pendens</span>
-                    <span class="timeline-arrow">→</span>
-                    <span class="timeline-step">🔨 Sheriff Sale</span>
+        <!-- Quick Filters -->
+        <div class="quick-filters">
+            <button class="quick-filter active" onclick="setQuickFilter('all')">All Cases</button>
+            <button class="quick-filter" onclick="setQuickFilter('hot')">🔥 Hot Leads (A)</button>
+            <button class="quick-filter" onclick="setQuickFilter('good')">⭐ Good (A+B)</button>
+            <button class="quick-filter" onclick="setQuickFilter('no-response')">No Response</button>
+            <button class="quick-filter" onclick="setQuickFilter('no-attorney')">No Attorney</button>
+            <button class="quick-filter" onclick="setQuickFilter('default')">Default Motion</button>
+        </div>
+        
+        <!-- Filters Section -->
+        <div class="filters-section">
+            <h2>
+                <span class="filter-icon">🔍</span>
+                Advanced Filters
+            </h2>
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label>Lead Grade</label>
+                    <select id="gradeFilter">
+                        <option value="">All Grades</option>
+                        <option value="A">A - Hot Leads</option>
+                        <option value="A,B">A & B - Good Leads</option>
+                        <option value="B">B Only</option>
+                        <option value="C">C Only</option>
+                        <option value="D,F">D & F - Poor</option>
+                    </select>
                 </div>
-            </div>
-            
-            <div class="status-bar">
-                <div class="status-info">
-                    <span class="status-dot" id="statusDot"></span>
-                    <span id="statusText">Loading...</span>
+                <div class="filter-group">
+                    <label>Min Lead Score</label>
+                    <input type="number" id="minScore" placeholder="e.g., 65">
                 </div>
-                <div id="sourceInfo"></div>
-            </div>
-            
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-value" id="totalCases">-</div>
-                    <div class="stat-label">Open Cases</div>
+                <div class="filter-group">
+                    <label>Min Days Open</label>
+                    <input type="number" id="minDaysOpen" placeholder="e.g., 30">
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="avgDaysOpen">-</div>
-                    <div class="stat-label">Avg Days Open</div>
+                <div class="filter-group">
+                    <label>Max Days Open</label>
+                    <input type="number" id="maxDaysOpen" placeholder="e.g., 180">
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="withJudgement">-</div>
-                    <div class="stat-label">With Judgement</div>
+                <div class="filter-group">
+                    <label>Defendant Attorney</label>
+                    <select id="hasDefendantAttorney">
+                        <option value="">Any</option>
+                        <option value="false">No Attorney ✓</option>
+                        <option value="true">Has Attorney</option>
+                    </select>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value" id="withLisPendens">-</div>
-                    <div class="stat-label">With Lis Pendens</div>
+                <div class="filter-group">
+                    <label>Defendant Response</label>
+                    <select id="hasDefendantResponse">
+                        <option value="">Any</option>
+                        <option value="false">No Response ✓</option>
+                        <option value="true">Has Response</option>
+                    </select>
                 </div>
-            </div>
-            
-            <div class="filters-section">
-                <h2>
-                    <span class="filter-icon">🔍</span>
-                    Filter Cases
-                </h2>
-                <div class="filters-grid">
-                    <div class="filter-group">
-                        <label>Min Days Open</label>
-                        <input type="number" id="minDaysOpen" placeholder="e.g. 30">
-                    </div>
-                    <div class="filter-group">
-                        <label>Max Days Open</label>
-                        <input type="number" id="maxDaysOpen" placeholder="e.g. 365">
-                    </div>
-                    <div class="filter-group">
-                        <label>Has Judgement</label>
-                        <select id="hasJudgement">
-                            <option value="">All</option>
-                            <option value="true">Yes - Has Judgement</option>
-                            <option value="false">No - No Judgement Yet</option>
-                        </select>
-                    </div>
-                    <div class="filter-group">
-                        <label>City</label>
-                        <input type="text" id="cityFilter" placeholder="Filter by city...">
-                    </div>
+                <div class="filter-group">
+                    <label>City</label>
+                    <input type="text" id="cityFilter" placeholder="e.g., Norristown">
                 </div>
-                <div class="filter-buttons">
-                    <button class="btn btn-primary" onclick="searchCases()">
-                        🔍 Search Cases
-                    </button>
-                    <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">
-                        🔄 Refresh Pipeline Data
-                    </button>
-                    <button class="btn btn-outline" onclick="exportCSV()">
-                        📥 Export CSV
-                    </button>
-                </div>
-            </div>
-            
-            <div class="results-header">
-                <h2>Cases <span id="caseCount" style="color: #10b981;"></span></h2>
-                <div>
-                    <label style="color: #9ca3af; margin-right: 10px;">Sort by:</label>
-                    <select id="sortBy" onchange="searchCases()" style="padding: 8px; border-radius: 6px; background: #1f2937; color: #f3f4f6; border: 1px solid #374151;">
-                        <option value="daysOpen">Days Open (Oldest First)</option>
-                        <option value="commencedDate">Date Filed (Newest First)</option>
-                        <option value="caseNumber">Case Number</option>
+                <div class="filter-group">
+                    <label>Sort By</label>
+                    <select id="sortBy">
+                        <option value="leadScore">Lead Score (High→Low)</option>
+                        <option value="daysOpen">Days Open (New→Old)</option>
+                        <option value="commencedDate">Filed Date</option>
                     </select>
                 </div>
             </div>
-            
-            <div id="casesGrid" class="cases-grid">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <p>Loading pipeline data...</p>
-                </div>
+            <div class="filter-buttons">
+                <button class="btn btn-primary" onclick="searchCases()">🔍 Apply Filters</button>
+                <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">🔄 Refresh Pipeline Data</button>
+                <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
+                <button class="btn btn-outline" onclick="resetFilters()">↺ Reset</button>
+            </div>
+        </div>
+        
+        <!-- Results -->
+        <div class="results-header">
+            <h2>
+                📋 Pipeline Cases <span class="case-count" id="caseCount">(0)</span>
+            </h2>
+        </div>
+        
+        <div class="cases-grid" id="casesGrid">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading cases...</p>
             </div>
         </div>
     </div>
-    
+
     <script>
         let authToken = '';
+        let currentFilter = 'all';
         
-        // Check for existing auth
-        async function checkExistingAuth() {
-            const savedToken = sessionStorage.getItem('authToken');
-            if (savedToken) {
-                authToken = savedToken;
-                try {
-                    const response = await fetch('/api/pipeline/stats', {
-                        headers: { 'X-Auth-Token': authToken }
-                    });
-                    if (response.ok) {
-                        showMainContent();
-                        loadData();
-                        return;
-                    }
-                } catch (e) {}
-            }
-            showLogin();
-        }
-        
-        function showLogin() {
-            document.getElementById('loginSection').style.display = 'block';
-            document.getElementById('mainContent').style.display = 'none';
-        }
-        
-        function showMainContent() {
-            document.getElementById('loginSection').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-        }
-        
-        async function login() {
+        function login() {
             const password = document.getElementById('passwordInput').value;
-            try {
-                const response = await fetch('/api/auth', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
-                });
-                
-                if (response.ok) {
+            fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
                     authToken = password;
-                    sessionStorage.setItem('authToken', authToken);
-                    showMainContent();
+                    localStorage.setItem('authToken', password);
+                    document.getElementById('loginOverlay').classList.add('hidden');
+                    document.getElementById('mainContent').style.display = 'block';
                     loadData();
                 } else {
-                    document.getElementById('loginError').style.display = 'block';
+                    document.getElementById('loginError').classList.remove('hidden');
                 }
-            } catch (error) {
-                document.getElementById('loginError').style.display = 'block';
+            });
+        }
+        
+        function checkExistingAuth() {
+            const saved = localStorage.getItem('authToken');
+            if (saved) {
+                authToken = saved;
+                document.getElementById('loginOverlay').classList.add('hidden');
+                document.getElementById('mainContent').style.display = 'block';
+                loadData();
             }
         }
         
@@ -675,16 +810,19 @@
                 const stats = await response.json();
                 
                 document.getElementById('totalCases').textContent = stats.total || 0;
+                document.getElementById('gradeA').textContent = stats.byGrade?.A || 0;
+                document.getElementById('gradeB').textContent = stats.byGrade?.B || 0;
+                document.getElementById('gradeC').textContent = stats.byGrade?.C || 0;
+                document.getElementById('avgScore').textContent = stats.avgLeadScore || 0;
                 document.getElementById('avgDaysOpen').textContent = stats.avgDaysOpen || 0;
-                document.getElementById('withJudgement').textContent = stats.withJudgement || 0;
-                document.getElementById('withLisPendens').textContent = stats.withLisPendens || 0;
+                document.getElementById('noResponse').textContent = stats.noDefendantResponse || '-';
+                document.getElementById('noAttorney').textContent = stats.noDefendantAttorney || '-';
                 
                 if (stats.lastUpdated) {
                     const updated = new Date(stats.lastUpdated);
                     const ago = getTimeAgo(updated);
                     document.getElementById('statusText').textContent = `Updated ${ago} • ${stats.total} cases`;
                     
-                    // Mark as stale if older than 24 hours
                     const hoursSince = (Date.now() - updated) / (1000 * 60 * 60);
                     if (hoursSince > 24) {
                         document.getElementById('statusDot').classList.add('stale');
@@ -705,24 +843,88 @@
             }
         }
         
+        function setQuickFilter(filter) {
+            currentFilter = filter;
+            
+            // Update button states
+            document.querySelectorAll('.quick-filter').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Reset advanced filters
+            document.getElementById('gradeFilter').value = '';
+            document.getElementById('minScore').value = '';
+            document.getElementById('hasDefendantAttorney').value = '';
+            document.getElementById('hasDefendantResponse').value = '';
+            
+            // Apply quick filter
+            switch(filter) {
+                case 'hot':
+                    document.getElementById('gradeFilter').value = 'A';
+                    break;
+                case 'good':
+                    document.getElementById('gradeFilter').value = 'A,B';
+                    break;
+                case 'no-response':
+                    document.getElementById('hasDefendantResponse').value = 'false';
+                    break;
+                case 'no-attorney':
+                    document.getElementById('hasDefendantAttorney').value = 'false';
+                    break;
+                case 'default':
+                    // Will need special handling
+                    break;
+            }
+            
+            searchCases();
+        }
+        
+        function resetFilters() {
+            document.getElementById('gradeFilter').value = '';
+            document.getElementById('minScore').value = '';
+            document.getElementById('minDaysOpen').value = '';
+            document.getElementById('maxDaysOpen').value = '';
+            document.getElementById('hasDefendantAttorney').value = '';
+            document.getElementById('hasDefendantResponse').value = '';
+            document.getElementById('cityFilter').value = '';
+            document.getElementById('sortBy').value = 'leadScore';
+            
+            currentFilter = 'all';
+            document.querySelectorAll('.quick-filter').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector('.quick-filter').classList.add('active');
+            
+            searchCases();
+        }
+        
         async function searchCases() {
             const grid = document.getElementById('casesGrid');
             grid.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>';
             
             const params = new URLSearchParams();
             
+            const grade = document.getElementById('gradeFilter').value;
+            const minScore = document.getElementById('minScore').value;
             const minDays = document.getElementById('minDaysOpen').value;
             const maxDays = document.getElementById('maxDaysOpen').value;
-            const hasJudgement = document.getElementById('hasJudgement').value;
+            const hasAttorney = document.getElementById('hasDefendantAttorney').value;
+            const hasResponse = document.getElementById('hasDefendantResponse').value;
             const city = document.getElementById('cityFilter').value;
             const sortBy = document.getElementById('sortBy').value;
             
+            if (grade) params.append('grade', grade);
+            if (minScore) params.append('minScore', minScore);
             if (minDays) params.append('minDaysOpen', minDays);
             if (maxDays) params.append('maxDaysOpen', maxDays);
-            if (hasJudgement) params.append('hasJudgement', hasJudgement);
+            if (hasAttorney) params.append('hasDefendantAttorney', hasAttorney);
+            if (hasResponse) params.append('hasDefendantResponse', hasResponse);
             if (city) params.append('city', city);
+            if (currentFilter === 'default') params.append('hasDefaultMotion', 'true');
+            
             params.append('sortBy', sortBy);
-            params.append('sortOrder', sortBy === 'commencedDate' ? 'desc' : 'desc');
+            params.append('sortOrder', 'desc');
             
             try {
                 const response = await fetch(`/api/pipeline?${params.toString()}`, {
@@ -750,50 +952,68 @@
         }
         
         function createCaseCard(c) {
+            const gradeClass = `grade-${(c.leadGrade || 'c').toLowerCase()}`;
             const daysClass = c.daysOpen > 365 ? 'urgent' : (c.daysOpen > 180 ? 'warning' : '');
             const address = c.propertyAddress || 'Address not available';
             const location = [c.propertyCity, c.propertyState, c.propertyZip].filter(Boolean).join(', ') || 'Location unknown';
             
+            // Build tags
             let tags = '';
-            if (c.status.includes('OPEN')) {
+            if (c.status?.includes('OPEN')) {
                 tags += '<span class="tag tag-open">OPEN</span>';
             }
-            if (c.hasJudgement) {
-                tags += '<span class="tag tag-judgement">Has Judgement</span>';
+            if (c.leadGrade === 'A') {
+                tags += '<span class="tag tag-hot">🔥 HOT</span>';
             }
-            if (c.hasLisPendens) {
-                tags += '<span class="tag tag-lispendens">Lis Pendens</span>';
+            if (c.docketSummary && !c.docketSummary.hasDefendantResponse) {
+                tags += '<span class="tag tag-no-response">No Response</span>';
+            }
+            if (c.docketSummary?.hasDefaultMotion) {
+                tags += '<span class="tag tag-default">Default Motion</span>';
+            }
+            if (c.docketSummary?.hasDefendantAttorney) {
+                tags += '<span class="tag tag-attorney">Has Attorney</span>';
+            }
+            if (c.daysSinceLastActivity > 60) {
+                tags += '<span class="tag tag-inactive">Inactive ' + c.daysSinceLastActivity + 'd</span>';
             }
             
+            // Remarks
+            const remarks = c.remarks ? `<div class="case-remarks">${c.remarks}</div>` : '';
+            
             return `
-                <div class="case-card">
+                <div class="case-card ${gradeClass}">
                     <div class="case-header">
                         <span class="case-number">Case #${c.caseNumber}</span>
-                        <span class="days-badge ${daysClass}">${c.daysOpen || '?'} days open</span>
+                        <div class="lead-badge">
+                            <span class="grade-badge ${gradeClass}">${c.leadGrade || 'C'}</span>
+                            <span class="score-badge">Score: ${c.leadScore || 0}</span>
+                        </div>
                     </div>
                     <div class="case-address">${address}</div>
                     <div class="case-location">${location}</div>
                     <div class="case-tags">${tags}</div>
+                    ${remarks}
                     <div class="case-details">
                         <div class="detail-item">
                             <div class="detail-label">Defendant (Owner)</div>
-                            <div class="detail-value">${c.defendant || 'N/A'}</div>
+                            <div class="detail-value">${truncate(c.defendant, 30) || 'N/A'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">Days Open</div>
+                            <div class="detail-value"><span class="days-badge ${daysClass}">${c.daysOpen || '?'} days</span></div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">Filed Date</div>
                             <div class="detail-value">${formatDate(c.commencedDate)}</div>
                         </div>
                         <div class="detail-item">
-                            <div class="detail-label">Last Filing</div>
-                            <div class="detail-value">${formatDate(c.lastFilingDate) || 'N/A'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">Parcel #</div>
-                            <div class="detail-value">${c.parcelNumber || 'N/A'}</div>
+                            <div class="detail-label">Last Activity</div>
+                            <div class="detail-value">${c.daysSinceLastActivity ? c.daysSinceLastActivity + ' days ago' : 'N/A'}</div>
                         </div>
                     </div>
                     <div class="case-footer">
-                        <span class="plaintiff-info">Plaintiff: ${truncate(c.plaintiff, 50)}</span>
+                        <span class="plaintiff-info">Plaintiff: ${truncate(c.plaintiff, 40)}</span>
                         <a href="${c.detailUrl}" target="_blank">View Court Record ↗</a>
                     </div>
                 </div>
@@ -808,7 +1028,14 @@
             try {
                 const response = await fetch('/api/pipeline/scrape', {
                     method: 'POST',
-                    headers: { 'X-Auth-Token': authToken }
+                    headers: { 
+                        'X-Auth-Token': authToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enableEnrichment: true,
+                        maxCasesToEnrich: 25
+                    })
                 });
                 
                 if (response.status === 429) {
@@ -833,7 +1060,8 @@
                         loadData();
                         
                         if (status.lastStatus?.status === 'completed') {
-                            alert(`Scrape completed! Found ${status.lastStatus.casesFound} cases.`);
+                            const grades = status.lastStatus.grades || {};
+                            alert(`Scrape completed!\n\nFound ${status.lastStatus.casesFound} cases:\n🔥 Grade A: ${grades.A || 0}\n⭐ Grade B: ${grades.B || 0}\n📋 Grade C: ${grades.C || 0}`);
                         } else if (status.lastStatus?.status === 'error') {
                             alert(`Scrape error: ${status.lastStatus.error}`);
                         }
@@ -850,7 +1078,7 @@
         }
         
         function exportCSV() {
-            window.location.href = `/api/pipeline/export/csv?token=${encodeURIComponent(authToken)}`;
+            window.open(`/api/pipeline/export/csv`, '_blank');
         }
         
         function formatDate(dateStr) {
