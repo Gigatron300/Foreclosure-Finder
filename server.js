@@ -253,7 +253,7 @@ app.get('/api/export/csv', checkAuth, async (req, res) => {
   }
 });
 
-// ============== PIPELINE API ENDPOINTS ==============
+// ============== PIPELINE API ENDPOINTS (ENHANCED) ==============
 
 // Get all pipeline cases (protected)
 app.get('/api/pipeline', checkAuth, async (req, res) => {
@@ -261,6 +261,18 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
     let cases = jsonData.cases;
+    
+    // Filter by lead grade
+    if (req.query.grade) {
+      const grades = req.query.grade.toUpperCase().split(',');
+      cases = cases.filter(c => grades.includes(c.leadGrade));
+    }
+    
+    // Filter by minimum lead score
+    if (req.query.minScore) {
+      const minScore = parseInt(req.query.minScore);
+      cases = cases.filter(c => (c.leadScore || 0) >= minScore);
+    }
     
     // Filter by status
     if (req.query.status) {
@@ -274,11 +286,23 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
       cases = cases.filter(c => !c.hasJudgement);
     }
     
-    // Filter by has lis pendens
-    if (req.query.hasLisPendens === 'true') {
-      cases = cases.filter(c => c.hasLisPendens);
-    } else if (req.query.hasLisPendens === 'false') {
-      cases = cases.filter(c => !c.hasLisPendens);
+    // Filter by has defendant attorney
+    if (req.query.hasDefendantAttorney === 'true') {
+      cases = cases.filter(c => c.docketSummary?.hasDefendantAttorney);
+    } else if (req.query.hasDefendantAttorney === 'false') {
+      cases = cases.filter(c => !c.docketSummary?.hasDefendantAttorney);
+    }
+    
+    // Filter by has defendant response
+    if (req.query.hasDefendantResponse === 'true') {
+      cases = cases.filter(c => c.docketSummary?.hasDefendantResponse);
+    } else if (req.query.hasDefendantResponse === 'false') {
+      cases = cases.filter(c => !c.docketSummary?.hasDefendantResponse);
+    }
+    
+    // Filter by has default motion
+    if (req.query.hasDefaultMotion === 'true') {
+      cases = cases.filter(c => c.docketSummary?.hasDefaultMotion);
     }
     
     // Filter by minimum days open
@@ -296,15 +320,18 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
     // Filter by city
     if (req.query.city) {
       cases = cases.filter(c => 
-        c.propertyCity.toLowerCase().includes(req.query.city.toLowerCase())
+        (c.propertyCity || '').toLowerCase().includes(req.query.city.toLowerCase())
       );
     }
     
     // Sort
-    const sortBy = req.query.sortBy || 'daysOpen';
+    const sortBy = req.query.sortBy || 'leadScore';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
     
     cases.sort((a, b) => {
+      if (sortBy === 'leadScore') {
+        return ((a.leadScore || 0) - (b.leadScore || 0)) * sortOrder;
+      }
       if (sortBy === 'daysOpen') {
         return ((a.daysOpen || 0) - (b.daysOpen || 0)) * sortOrder;
       }
@@ -321,6 +348,7 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
       lastUpdated: jsonData.lastUpdated,
       totalCases: cases.length,
       sources: jsonData.sources,
+      statistics: jsonData.statistics,
       cases
     });
     
@@ -330,6 +358,7 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
         lastUpdated: null,
         totalCases: 0,
         sources: {},
+        statistics: {},
         cases: [],
         message: 'No pipeline data yet. Click "Refresh Pipeline Data" to start scraping.'
       });
@@ -339,36 +368,83 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
   }
 });
 
-// Get pipeline stats (protected)
+// Get pipeline stats (protected) - ENHANCED
 app.get('/api/pipeline/stats', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
-    const cases = jsonData.cases;
+    const cases = jsonData.cases || [];
     
-    const stats = {
-      lastUpdated: jsonData.lastUpdated,
+    // Use pre-calculated stats if available, otherwise calculate
+    const stats = jsonData.statistics || {
       total: cases.length,
-      sources: jsonData.sources,
-      withJudgement: cases.filter(c => c.hasJudgement).length,
-      withLisPendens: cases.filter(c => c.hasLisPendens).length,
-      avgDaysOpen: cases.length > 0 
-        ? Math.round(cases.reduce((sum, c) => sum + (c.daysOpen || 0), 0) / cases.length)
-        : 0,
-      byStatus: {},
-      byCaseType: {}
+      byGrade: { A: 0, B: 0, C: 0, D: 0, F: 0 },
+      avgLeadScore: 0,
+      avgDaysOpen: 0
     };
     
+    // Add additional stats
+    stats.lastUpdated = jsonData.lastUpdated;
+    stats.sources = jsonData.sources;
+    stats.withJudgement = cases.filter(c => c.hasJudgement).length;
+    stats.withLisPendens = cases.filter(c => c.hasLisPendens).length;
+    
+    // Calculate if not present
+    if (!stats.byGrade || Object.keys(stats.byGrade).length === 0) {
+      stats.byGrade = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+      cases.forEach(c => {
+        stats.byGrade[c.leadGrade || 'C']++;
+      });
+    }
+    
+    if (!stats.avgDaysOpen && cases.length > 0) {
+      stats.avgDaysOpen = Math.round(
+        cases.reduce((sum, c) => sum + (c.daysOpen || 0), 0) / cases.length
+      );
+    }
+    
+    if (!stats.avgLeadScore && cases.length > 0) {
+      stats.avgLeadScore = Math.round(
+        cases.reduce((sum, c) => sum + (c.leadScore || 0), 0) / cases.length
+      );
+    }
+    
+    // Top cities
+    const byCity = {};
     cases.forEach(c => {
-      // Simplify status (just OPEN or number)
-      const statusKey = c.status.includes('OPEN') ? 'OPEN' : c.status;
-      stats.byStatus[statusKey] = (stats.byStatus[statusKey] || 0) + 1;
-      stats.byCaseType[c.caseType] = (stats.byCaseType[c.caseType] || 0) + 1;
+      const city = c.propertyCity || 'Unknown';
+      byCity[city] = (byCity[city] || 0) + 1;
     });
+    stats.topCities = Object.entries(byCity)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([city, count]) => ({ city, count }));
     
     res.json(stats);
   } catch (error) {
-    res.json({ lastUpdated: null, total: 0, sources: {} });
+    res.json({ 
+      lastUpdated: null, 
+      total: 0, 
+      sources: {},
+      byGrade: { A: 0, B: 0, C: 0, D: 0, F: 0 }
+    });
+  }
+});
+
+// Get single case details (protected)
+app.get('/api/pipeline/case/:caseNumber', checkAuth, async (req, res) => {
+  try {
+    const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
+    const jsonData = JSON.parse(data);
+    const caseData = jsonData.cases.find(c => c.caseNumber === req.params.caseNumber);
+    
+    if (caseData) {
+      res.json(caseData);
+    } else {
+      res.status(404).json({ error: 'Case not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -390,11 +466,23 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
   res.json({ message: 'Pipeline scrape started', status: lastPipelineScrapeStatus });
   
   try {
-    const cases = await runPipelineScraper();
+    // Get options from request body
+    const options = {
+      enableEnrichment: req.body.enableEnrichment !== false,
+      maxCasesToEnrich: req.body.maxCasesToEnrich || 25
+    };
+    
+    const cases = await runPipelineScraper(options);
+    
+    // Calculate grade distribution
+    const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    cases.forEach(c => grades[c.leadGrade || 'C']++);
+    
     lastPipelineScrapeStatus = {
       completed: new Date().toISOString(),
       status: 'completed',
-      casesFound: cases.length
+      casesFound: cases.length,
+      grades
     };
   } catch (error) {
     lastPipelineScrapeStatus = {
@@ -415,39 +503,53 @@ app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   });
 });
 
-// Export pipeline data as CSV (protected)
+// Export pipeline data as CSV (protected) - ENHANCED
 app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
     
     const headers = [
-      'Case Number', 'Case Type', 'Commenced Date', 'Days Open', 'Last Filing',
+      'Lead Grade', 'Lead Score', 'Case Number', 'Case Type', 'Commenced Date', 
+      'Days Open', 'Last Filing', 'Days Since Activity',
       'Plaintiff (Bank)', 'Defendant (Owner)', 'Property Address', 'City', 
-      'State', 'Zip', 'Parcel #', 'Has Judgement', 'Has Lis Pendens', 
+      'State', 'Zip', 'Parcel #', 'Has Judgement', 
+      'Has Default Motion', 'Has Defendant Attorney', 'Has Defendant Response',
+      'Conciliation Status', 'Service Attempts', 'Failed Service',
       'Status', 'Judge', 'Remarks', 'Detail URL'
     ];
     
-    const rows = jsonData.cases.map(c => [
-      c.caseNumber,
-      `"${c.caseType}"`,
-      c.commencedDate,
-      c.daysOpen,
-      c.lastFilingDate,
-      `"${(c.plaintiff || '').replace(/"/g, '""')}"`,
-      `"${(c.defendant || '').replace(/"/g, '""')}"`,
-      `"${(c.propertyAddress || '').replace(/"/g, '""')}"`,
-      c.propertyCity,
-      c.propertyState,
-      c.propertyZip,
-      c.parcelNumber,
-      c.hasJudgement ? 'Yes' : 'No',
-      c.hasLisPendens ? 'Yes' : 'No',
-      c.status,
-      `"${(c.judge || '').replace(/"/g, '""')}"`,
-      `"${(c.remarks || '').replace(/"/g, '""')}"`,
-      c.detailUrl
-    ]);
+    const rows = jsonData.cases.map(c => {
+      const ds = c.docketSummary || {};
+      return [
+        c.leadGrade || 'C',
+        c.leadScore || 0,
+        c.caseNumber,
+        `"${c.caseType}"`,
+        c.commencedDate,
+        c.daysOpen,
+        c.lastFilingDate || '',
+        c.daysSinceLastActivity || '',
+        `"${(c.plaintiff || '').replace(/"/g, '""')}"`,
+        `"${(c.defendant || '').replace(/"/g, '""')}"`,
+        `"${(c.propertyAddress || '').replace(/"/g, '""')}"`,
+        c.propertyCity,
+        c.propertyState,
+        c.propertyZip,
+        c.parcelNumber,
+        c.hasJudgement ? 'Yes' : 'No',
+        ds.hasDefaultMotion ? 'Yes' : 'No',
+        ds.hasDefendantAttorney ? 'Yes' : 'No',
+        ds.hasDefendantResponse ? 'Yes' : 'No',
+        ds.conciliationStatus || '',
+        ds.serviceAttempts || 0,
+        ds.failedServiceAttempts || 0,
+        c.status,
+        `"${(c.judge || '').replace(/"/g, '""')}"`,
+        `"${(c.remarks || '').replace(/"/g, '""')}"`,
+        c.detailUrl
+      ];
+    });
     
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     
@@ -466,5 +568,6 @@ ensureDataDir().then(() => {
     console.log(`🚀 Foreclosure Finder server running on port ${PORT}`);
     console.log(`   Open http://localhost:${PORT} in your browser`);
     console.log(`   API available at http://localhost:${PORT}/api/properties`);
+    console.log(`   Pipeline API at http://localhost:${PORT}/api/pipeline`);
   });
 });
