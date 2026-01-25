@@ -2,42 +2,64 @@
 // Uses lightweight HTTP requests instead of Puppeteer to save memory
 
 const https = require('https');
+const http = require('http');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Simple HTTP GET function using built-in https module
-function httpGet(url) {
+function httpGet(urlString) {
   return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive'
-      },
-      timeout: 30000
-    }, (response) => {
-      // Handle redirects
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        return httpGet(response.headers.location).then(resolve).catch(reject);
-      }
+    try {
+      const url = new URL(urlString);
+      const isHttps = url.protocol === 'https:';
+      const lib = isHttps ? https : http;
       
-      if (response.statusCode !== 200) {
-        reject(new Error(`HTTP ${response.statusCode}`));
-        return;
-      }
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Connection': 'keep-alive'
+        },
+        timeout: 30000
+      };
       
-      let data = '';
-      response.on('data', chunk => data += chunk);
-      response.on('end', () => resolve(data));
-      response.on('error', reject);
-    });
-    
-    request.on('error', reject);
-    request.on('timeout', () => {
-      request.destroy();
-      reject(new Error('Request timeout'));
-    });
+      const request = lib.request(options, (response) => {
+        // Handle redirects
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          let redirectUrl = response.headers.location;
+          // Handle relative redirects
+          if (redirectUrl.startsWith('/')) {
+            redirectUrl = `${url.protocol}//${url.hostname}${redirectUrl}`;
+          }
+          return httpGet(redirectUrl).then(resolve).catch(reject);
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+        
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => resolve(data));
+        response.on('error', reject);
+      });
+      
+      request.on('error', reject);
+      request.on('timeout', () => {
+        request.destroy();
+        reject(new Error('Request timeout'));
+      });
+      
+      request.end();
+    } catch (e) {
+      reject(new Error(`URL parse error: ${e.message}`));
+    }
   });
 }
 
