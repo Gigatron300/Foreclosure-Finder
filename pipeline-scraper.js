@@ -1,7 +1,6 @@
 // Pipeline scraper - scrapes pre-foreclosure cases from court records
-// Run separately from the main sheriff sale scraper
+// Uses lightweight HTTP requests - no browser needed
 
-const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 const { scrapeMontgomeryCourts } = require('./scrapers/montco-courts');
@@ -13,53 +12,19 @@ async function runPipelineScraper() {
   console.log('🏛️ Pre-Foreclosure Pipeline Scraper');
   console.log('====================================');
   console.log(`Started at: ${new Date().toLocaleString()}`);
-  
-  // Check for Chrome/Chromium
-  const possiblePaths = [
-    '/usr/bin/chromium',
-    '/usr/bin/chromium-browser', 
-    '/usr/bin/google-chrome',
-    process.env.PUPPETEER_EXECUTABLE_PATH
-  ].filter(Boolean);
-  
-  let executablePath = null;
-  for (const p of possiblePaths) {
-    try {
-      await fs.access(p);
-      executablePath = p;
-      break;
-    } catch (e) {}
-  }
-  
-  if (executablePath) {
-    console.log(`Using Chrome at: ${executablePath}`);
-  }
-  
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--window-size=1920,1080'
-    ]
-  });
+  console.log('Using lightweight HTTP requests (no browser)\n');
   
   let allCases = [];
   
   try {
-    // Scrape Montgomery County Courts
-    const montcoCases = await scrapeMontgomeryCourts(browser);
+    // Scrape Montgomery County Courts (no browser needed)
+    const montcoCases = await scrapeMontgomeryCourts();
     allCases.push(...montcoCases);
     
     // Can add more court sources here in the future
     
   } catch (error) {
     console.error('Scraper error:', error);
-  } finally {
-    await browser.close();
   }
   
   // Sort by days open (oldest first - most urgent)
@@ -83,7 +48,7 @@ async function runPipelineScraper() {
   );
   
   console.log(`\n💾 Saved ${allCases.length} pre-foreclosure cases`);
-  console.log(`\nCompleted at: ${new Date().toLocaleString()}`);
+  console.log(`Completed at: ${new Date().toLocaleString()}`);
   
   return allCases;
 }
