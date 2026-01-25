@@ -1,86 +1,16 @@
 // Montgomery County Courts scraper for pre-foreclosure pipeline
-// Uses Node's built-in https module
+// Uses Puppeteer (required for session cookies) with memory optimizations
 
-const https = require('https');
-const http = require('http');
+const puppeteer = require('puppeteer');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Simple HTTP GET function
-function httpGet(urlString) {
-  return new Promise((resolve, reject) => {
-    try {
-      const url = new URL(urlString);
-      const isHttps = url.protocol === 'https:';
-      const lib = isHttps ? https : http;
-      
-      const options = {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'identity',
-          'Connection': 'keep-alive'
-        }
-      };
-      
-      console.log(`   Making request to ${url.hostname}${url.pathname.substring(0, 50)}...`);
-      
-      const request = lib.request(options, (response) => {
-        console.log(`   Response status: ${response.statusCode}`);
-        
-        // Handle redirects
-        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          let redirectUrl = response.headers.location;
-          if (redirectUrl.startsWith('/')) {
-            redirectUrl = `${url.protocol}//${url.hostname}${redirectUrl}`;
-          }
-          console.log(`   Redirecting to: ${redirectUrl.substring(0, 60)}...`);
-          return httpGet(redirectUrl).then(resolve).catch(reject);
-        }
-        
-        if (response.statusCode !== 200) {
-          reject(new Error(`HTTP ${response.statusCode}`));
-          return;
-        }
-        
-        let data = '';
-        response.on('data', chunk => data += chunk);
-        response.on('end', () => {
-          console.log(`   Received ${data.length} bytes`);
-          resolve(data);
-        });
-        response.on('error', reject);
-      });
-      
-      request.on('error', (err) => {
-        console.error(`   Request error: ${err.message}`);
-        reject(err);
-      });
-      
-      // Set socket timeout
-      request.setTimeout(90000, () => {
-        console.error('   Socket timeout after 90s');
-        request.destroy();
-        reject(new Error('Request timeout'));
-      });
-      
-      request.end();
-    } catch (e) {
-      reject(new Error(`URL error: ${e.message}`));
-    }
-  });
-}
-
 const CONFIG = {
-  requestDelay: 300,
-  batchSize: 10,
+  requestDelay: 500,
+  batchSize: 5,
   batchPause: 2000,
-  resultsPerPage: 100,
+  resultsPerPage: 50, // Reduced to save memory
+  maxCasesToProcess: 30, // Limit cases to stay under memory
   
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
@@ -113,176 +43,49 @@ function daysSince(dateStr) {
   }
 }
 
-// Parse HTML table rows from search results
-function parseSearchResults(html) {
-  const cases = [];
-  
-  // Find table rows - look for rows with case data
-  // Pattern: <tr>...<td>Select</td><td>Case#</td>...
-  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-  const linkRegex = /<a[^>]*href="([^"]*\/detail\/Case\/(\d+))"[^>]*>Select<\/a>/i;
-  
-  let rowMatch;
-  while ((rowMatch = rowRegex.exec(html)) !== null) {
-    const rowHtml = rowMatch[1];
-    
-    // Check if this row has a Select link (data row, not header)
-    const linkMatch = rowHtml.match(linkRegex);
-    if (!linkMatch) continue;
-    
-    const detailUrl = CONFIG.baseUrl + linkMatch[1];
-    const caseId = linkMatch[2];
-    
-    // Extract all cell contents
-    const cells = [];
-    let cellMatch;
-    const cellRegexLocal = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    while ((cellMatch = cellRegexLocal.exec(rowHtml)) !== null) {
-      // Strip HTML tags from cell content
-      const content = cellMatch[1].replace(/<[^>]*>/g, '').trim();
-      cells.push(content);
-    }
-    
-    if (cells.length >= 10) {
-      // Cells: 0=Select, 1=Case#, 2=Commenced, 3=Type, 4=Plaintiff, 5=Defendant, 6=Parcel, 7=Judgement, 8=LisPendens, 9=Status
-      cases.push({
-        caseId,
-        caseNumber: cells[1] || '',
-        commencedDate: cells[2] || '',
-        caseType: cells[3] || '',
-        plaintiff: cells[4] || '',
-        defendant: cells[5] || '',
-        parcelNumber: cells[6] || '',
-        hasJudgement: (cells[7] || '').toLowerCase() === 'yes',
-        hasLisPendens: (cells[8] || '').toLowerCase() === 'yes',
-        status: cells[9] || '',
-        detailUrl
-      });
-    }
-  }
-  
-  return cases;
-}
-
-// Parse case detail page to get address
-function parseDetailPage(html) {
-  const result = {
-    propertyAddress: '',
-    propertyCity: '',
-    propertyState: 'PA',
-    propertyZip: '',
-    daysOpen: null,
-    lastFilingDate: '',
-    judge: '',
-    remarks: ''
-  };
-  
-  // Get Days Open - look for pattern like: Days Open</td><td>500
-  const daysMatch = html.match(/Days\s*Open<\/t[dh]>\s*<td[^>]*>\s*(\d+)/i);
-  if (daysMatch) {
-    result.daysOpen = parseInt(daysMatch[1]);
-  }
-  
-  // Get Last Filing Date
-  const lastFilingMatch = html.match(/Last\s*Filing\s*Date<\/t[dh]>\s*<td[^>]*>\s*([^<]+)/i);
-  if (lastFilingMatch) {
-    result.lastFilingDate = lastFilingMatch[1].trim();
-  }
-  
-  // Get Judge
-  const judgeMatch = html.match(/<t[dh][^>]*>\s*Judge\s*<\/t[dh]>\s*<td[^>]*>\s*([^<]+)/i);
-  if (judgeMatch) {
-    result.judge = judgeMatch[1].trim();
-  }
-  
-  // Get Remarks
-  const remarksMatch = html.match(/<t[dh][^>]*>\s*Remarks\s*<\/t[dh]>\s*<td[^>]*>\s*([^<]+)/i);
-  if (remarksMatch) {
-    result.remarks = remarksMatch[1].trim();
-  }
-  
-  // Find Defendants section - it has id="table_Defendants"
-  // The address is in the 3rd column (index 2) of the first data row
-  const defendantsSectionMatch = html.match(/id="table_Defendants"[\s\S]*?<table[^>]*>([\s\S]*?)<\/table>/i);
-  
-  if (defendantsSectionMatch) {
-    const tableHtml = defendantsSectionMatch[1];
-    
-    // Find data rows (skip header row)
-    const rowMatches = tableHtml.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
-    
-    if (rowMatches && rowMatches.length >= 2) {
-      // Second row is first data row
-      const dataRowHtml = rowMatches[1];
-      
-      // Extract all td cells
-      const cells = [];
-      const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      let cellMatch;
-      while ((cellMatch = cellRegex.exec(dataRowHtml)) !== null) {
-        // Strip HTML and clean up whitespace
-        const content = cellMatch[1]
-          .replace(/<[^>]*>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        cells.push(content);
-      }
-      
-      // Address is in column 2 (0-indexed) based on: Select, Name, Address, Country, Counsel, Notify, Sequence, Status
-      if (cells[2]) {
-        const fullAddress = cells[2];
-        
-        // Parse address format: "25 ASPEN WAYSCHWENKSVILLE, PA 19473 UNITED STATES"
-        // or "123 MAIN ST CITY, PA 19XXX UNITED STATES"
-        // The address and city often run together without space
-        
-        // Try to find city, state, zip pattern
-        const cityStateZipMatch = fullAddress.match(/([A-Z][A-Z\s]*),\s*(PA|NJ)\s*(\d{5})/i);
-        
-        if (cityStateZipMatch) {
-          const cityPart = cityStateZipMatch[1].trim();
-          result.propertyState = cityStateZipMatch[2].toUpperCase();
-          result.propertyZip = cityStateZipMatch[3];
-          
-          // Find where city starts in the address
-          const cityIndex = fullAddress.indexOf(cityPart);
-          if (cityIndex > 0) {
-            // Everything before city is the street address
-            let street = fullAddress.substring(0, cityIndex).trim();
-            
-            // Sometimes street and city run together, try to split on common patterns
-            // Look for house number + street name pattern
-            const streetMatch = street.match(/^(\d+\s+[\w\s]+(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|WAY|CT|COURT|BLVD|PL|PLACE|CIR|CIRCLE))\s*/i);
-            if (streetMatch) {
-              result.propertyAddress = streetMatch[1].trim();
-            } else {
-              result.propertyAddress = street;
-            }
-            
-            result.propertyCity = cityPart;
-          }
-        } else {
-          // Fallback: just clean up the address
-          result.propertyAddress = fullAddress
-            .replace(/UNITED STATES/i, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        }
-      }
-    }
-  }
-  
-  return result;
-}
-
-// Main scraper function - uses simple HTTP requests
+// Main scraper function
 async function scrapeMontgomeryCourts() {
   console.log('\n🏛️ Scraping Montgomery County Courts...');
-  console.log('   Using lightweight HTTP requests (no browser)\n');
+  console.log('   (Using Puppeteer for session handling)\n');
   
   const allCases = [];
+  
+  // Launch browser with minimal memory settings
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-first-run',
+      '--safebrowsing-disable-auto-update',
+      '--js-flags=--max-old-space-size=256'
+    ]
+  });
+  
+  const page = await browser.newPage();
+  
+  // Disable images and CSS to save memory
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const resourceType = req.resourceType();
+    if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+  
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
   
   try {
     for (const caseType of CONFIG.caseTypes) {
@@ -291,27 +94,56 @@ async function scrapeMontgomeryCourts() {
       // Build search URL
       const searchUrl = `${CONFIG.searchUrl}?Q=&IncludeSoundsLike=false&Count=${CONFIG.resultsPerPage}&fromAdv=1&CaseType=${caseType.id}&Court=C&Court=F&Grid=true`;
       
-      console.log('   Fetching search results...');
+      console.log('   Loading search page...');
+      await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await delay(2000);
       
-      let searchHtml;
-      try {
-        searchHtml = await httpGet(searchUrl);
-        console.log(`   Got ${searchHtml.length} bytes of HTML`);
-      } catch (fetchError) {
-        console.error(`   Fetch error: ${fetchError.message}`);
-        continue;
-      }
+      // Extract cases from results table
+      console.log('   Extracting case data...');
+      const pageCases = await page.evaluate(() => {
+        const cases = [];
+        const rows = document.querySelectorAll('table tr');
+        
+        for (let i = 1; i < rows.length; i++) {
+          const cells = rows[i].querySelectorAll('td');
+          if (cells.length < 9) continue;
+          
+          const selectLink = cells[0]?.querySelector('a[href*="/detail/Case/"]');
+          const detailUrl = selectLink ? selectLink.href : '';
+          const caseIdMatch = detailUrl.match(/\/detail\/Case\/(\d+)/);
+          const caseId = caseIdMatch ? caseIdMatch[1] : '';
+          
+          cases.push({
+            caseId,
+            caseNumber: cells[1]?.textContent?.trim() || '',
+            commencedDate: cells[2]?.textContent?.trim() || '',
+            caseType: cells[3]?.textContent?.trim() || '',
+            plaintiff: cells[4]?.textContent?.trim() || '',
+            defendant: cells[5]?.textContent?.trim() || '',
+            parcelNumber: cells[6]?.textContent?.trim() || '',
+            hasJudgement: (cells[7]?.textContent?.trim() || '').toLowerCase() === 'yes',
+            hasLisPendens: (cells[8]?.textContent?.trim() || '').toLowerCase() === 'yes',
+            status: cells[9]?.textContent?.trim() || '',
+            detailUrl
+          });
+        }
+        return cases;
+      });
       
-      // Parse search results
-      const pageCases = parseSearchResults(searchHtml);
       console.log(`   Found ${pageCases.length} total cases`);
       
       // Filter for OPEN cases only
-      const openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
-      console.log(`   ${openCases.length} are OPEN (active foreclosures)\n`);
+      let openCases = pageCases.filter(c => c.status.toUpperCase().includes('OPEN'));
+      console.log(`   ${openCases.length} are OPEN`);
+      
+      // Limit to save memory
+      if (openCases.length > CONFIG.maxCasesToProcess) {
+        console.log(`   Limiting to ${CONFIG.maxCasesToProcess} cases to save memory`);
+        openCases = openCases.slice(0, CONFIG.maxCasesToProcess);
+      }
       
       // Fetch details for each open case
-      console.log(`📍 Fetching addresses for ${openCases.length} cases...`);
+      console.log(`\n📍 Fetching addresses for ${openCases.length} cases...`);
       
       for (let i = 0; i < openCases.length; i++) {
         const caseData = openCases[i];
@@ -323,23 +155,67 @@ async function scrapeMontgomeryCourts() {
         
         try {
           await delay(CONFIG.requestDelay);
+          await page.goto(caseData.detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           
-          const detailHtml = await httpGet(caseData.detailUrl);
-          const details = parseDetailPage(detailHtml);
+          const details = await page.evaluate(() => {
+            const result = {
+              propertyAddress: '',
+              propertyCity: '',
+              propertyState: 'PA',
+              propertyZip: '',
+              daysOpen: null
+            };
             
-            caseData.propertyAddress = details.propertyAddress;
-            caseData.propertyCity = details.propertyCity;
-            caseData.propertyState = details.propertyState;
-            caseData.propertyZip = details.propertyZip;
-            caseData.daysOpen = details.daysOpen || daysSince(parseDate(caseData.commencedDate));
-            caseData.lastFilingDate = details.lastFilingDate;
-            caseData.judge = details.judge;
-            caseData.remarks = details.remarks;
+            // Get Days Open
+            const allTds = document.querySelectorAll('td');
+            for (const td of allTds) {
+              if (td.textContent.trim() === 'Days Open' && td.nextElementSibling) {
+                result.daysOpen = parseInt(td.nextElementSibling.textContent.trim()) || null;
+                break;
+              }
+            }
             
-          const addr = details.propertyAddress || 'No address found';
+            // Get address from Defendants table
+            const defSection = document.getElementById('table_Defendants');
+            if (defSection) {
+              const table = defSection.querySelector('table');
+              if (table) {
+                const rows = table.querySelectorAll('tr');
+                if (rows.length >= 2) {
+                  const cells = rows[1].querySelectorAll('td');
+                  if (cells[2]) {
+                    const fullAddress = cells[2].textContent.trim();
+                    
+                    // Parse: "25 ASPEN WAY SCHWENKSVILLE, PA 19473 UNITED STATES"
+                    const match = fullAddress.match(/(.+?)\s+([A-Z\s]+),\s*(PA|NJ)\s*(\d{5})/i);
+                    if (match) {
+                      result.propertyAddress = match[1].trim();
+                      result.propertyCity = match[2].trim();
+                      result.propertyState = match[3].toUpperCase();
+                      result.propertyZip = match[4];
+                    } else {
+                      result.propertyAddress = fullAddress.replace(/UNITED STATES/i, '').trim();
+                    }
+                  }
+                }
+              }
+            }
+            
+            return result;
+          });
+          
+          caseData.propertyAddress = details.propertyAddress;
+          caseData.propertyCity = details.propertyCity;
+          caseData.propertyState = details.propertyState;
+          caseData.propertyZip = details.propertyZip;
+          caseData.daysOpen = details.daysOpen || daysSince(parseDate(caseData.commencedDate));
+          
+          const addr = details.propertyAddress || 'No address';
           console.log(`   ${i + 1}/${openCases.length} ✓ ${caseData.caseNumber} - ${addr}`);
+          
         } catch (err) {
           console.log(`   ${i + 1}/${openCases.length} ~ ${caseData.caseNumber} (${err.message})`);
+          caseData.daysOpen = daysSince(parseDate(caseData.commencedDate));
         }
       }
       
@@ -347,6 +223,8 @@ async function scrapeMontgomeryCourts() {
     }
   } catch (error) {
     console.error(`Error: ${error.message}`);
+  } finally {
+    await browser.close();
   }
   
   // Format final data
@@ -356,7 +234,7 @@ async function scrapeMontgomeryCourts() {
     caseType: c.caseType,
     commencedDate: parseDate(c.commencedDate),
     daysOpen: c.daysOpen || daysSince(parseDate(c.commencedDate)),
-    lastFilingDate: parseDate(c.lastFilingDate),
+    lastFilingDate: null,
     plaintiff: c.plaintiff,
     defendant: c.defendant,
     propertyAddress: c.propertyAddress || '',
@@ -367,8 +245,8 @@ async function scrapeMontgomeryCourts() {
     hasJudgement: c.hasJudgement,
     hasLisPendens: c.hasLisPendens,
     status: c.status,
-    judge: c.judge || '',
-    remarks: c.remarks || '',
+    judge: '',
+    remarks: '',
     detailUrl: c.detailUrl,
     county: 'Montgomery',
     state: 'PA'
