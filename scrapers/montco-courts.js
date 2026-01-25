@@ -1,7 +1,45 @@
 // Montgomery County Courts scraper for pre-foreclosure pipeline
 // Uses lightweight HTTP requests instead of Puppeteer to save memory
 
+const https = require('https');
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Simple HTTP GET function using built-in https module
+function httpGet(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive'
+      },
+      timeout: 30000
+    }, (response) => {
+      // Handle redirects
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        return httpGet(response.headers.location).then(resolve).catch(reject);
+      }
+      
+      if (response.statusCode !== 200) {
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+      
+      let data = '';
+      response.on('data', chunk => data += chunk);
+      response.on('end', () => resolve(data));
+      response.on('error', reject);
+    });
+    
+    request.on('error', reject);
+    request.on('timeout', () => {
+      request.destroy();
+      reject(new Error('Request timeout'));
+    });
+  });
+}
 
 const CONFIG = {
   requestDelay: 300,
@@ -219,20 +257,15 @@ async function scrapeMontgomeryCourts() {
       const searchUrl = `${CONFIG.searchUrl}?Q=&IncludeSoundsLike=false&Count=${CONFIG.resultsPerPage}&fromAdv=1&CaseType=${caseType.id}&Court=C&Court=F&Grid=true`;
       
       console.log('   Fetching search results...');
-      const searchResponse = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml'
-        }
-      });
       
-      if (!searchResponse.ok) {
-        console.log(`   Error: HTTP ${searchResponse.status}`);
+      let searchHtml;
+      try {
+        searchHtml = await httpGet(searchUrl);
+        console.log(`   Got ${searchHtml.length} bytes of HTML`);
+      } catch (fetchError) {
+        console.error(`   Fetch error: ${fetchError.message}`);
         continue;
       }
-      
-      const searchHtml = await searchResponse.text();
-      console.log(`   Got ${searchHtml.length} bytes of HTML`);
       
       // Parse search results
       const pageCases = parseSearchResults(searchHtml);
@@ -256,16 +289,8 @@ async function scrapeMontgomeryCourts() {
         try {
           await delay(CONFIG.requestDelay);
           
-          const detailResponse = await fetch(caseData.detailUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'text/html,application/xhtml+xml'
-            }
-          });
-          
-          if (detailResponse.ok) {
-            const detailHtml = await detailResponse.text();
-            const details = parseDetailPage(detailHtml);
+          const detailHtml = await httpGet(caseData.detailUrl);
+          const details = parseDetailPage(detailHtml);
             
             caseData.propertyAddress = details.propertyAddress;
             caseData.propertyCity = details.propertyCity;
@@ -276,11 +301,8 @@ async function scrapeMontgomeryCourts() {
             caseData.judge = details.judge;
             caseData.remarks = details.remarks;
             
-            const addr = details.propertyAddress || 'No address found';
-            console.log(`   ${i + 1}/${openCases.length} ✓ ${caseData.caseNumber} - ${addr}`);
-          } else {
-            console.log(`   ${i + 1}/${openCases.length} ~ ${caseData.caseNumber} (HTTP ${detailResponse.status})`);
-          }
+          const addr = details.propertyAddress || 'No address found';
+          console.log(`   ${i + 1}/${openCases.length} ✓ ${caseData.caseNumber} - ${addr}`);
         } catch (err) {
           console.log(`   ${i + 1}/${openCases.length} ~ ${caseData.caseNumber} (${err.message})`);
         }
