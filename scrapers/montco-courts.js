@@ -1,30 +1,79 @@
 // Montgomery County Courts scraper for pre-foreclosure pipeline
-// Uses axios for reliable HTTP requests
+// Uses Node's built-in https module
 
-const axios = require('axios');
+const https = require('https');
+const http = require('http');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Create axios instance with default config
-const client = axios.create({
-  timeout: 60000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Connection': 'keep-alive'
-  },
-  maxRedirects: 5,
-  validateStatus: (status) => status < 500
-});
-
-// Simple HTTP GET
-async function httpGet(url) {
-  const response = await client.get(url);
-  if (response.status !== 200) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.data;
+// Simple HTTP GET function
+function httpGet(urlString) {
+  return new Promise((resolve, reject) => {
+    try {
+      const url = new URL(urlString);
+      const isHttps = url.protocol === 'https:';
+      const lib = isHttps ? https : http;
+      
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'identity',
+          'Connection': 'keep-alive'
+        }
+      };
+      
+      console.log(`   Making request to ${url.hostname}${url.pathname.substring(0, 50)}...`);
+      
+      const request = lib.request(options, (response) => {
+        console.log(`   Response status: ${response.statusCode}`);
+        
+        // Handle redirects
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          let redirectUrl = response.headers.location;
+          if (redirectUrl.startsWith('/')) {
+            redirectUrl = `${url.protocol}//${url.hostname}${redirectUrl}`;
+          }
+          console.log(`   Redirecting to: ${redirectUrl.substring(0, 60)}...`);
+          return httpGet(redirectUrl).then(resolve).catch(reject);
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+        
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          console.log(`   Received ${data.length} bytes`);
+          resolve(data);
+        });
+        response.on('error', reject);
+      });
+      
+      request.on('error', (err) => {
+        console.error(`   Request error: ${err.message}`);
+        reject(err);
+      });
+      
+      // Set socket timeout
+      request.setTimeout(90000, () => {
+        console.error('   Socket timeout after 90s');
+        request.destroy();
+        reject(new Error('Request timeout'));
+      });
+      
+      request.end();
+    } catch (e) {
+      reject(new Error(`URL error: ${e.message}`));
+    }
+  });
 }
 
 const CONFIG = {
