@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pre-Foreclosure Pipeline | Foreclosure Finder</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
@@ -18,17 +13,8 @@
             color: #f3f4f6;
             padding: 20px;
         }
-        
-        .container {
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-        
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
+        .container { max-width: 1600px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 30px; }
         h1 {
             font-size: 2.5rem;
             font-style: italic;
@@ -37,32 +23,11 @@
             -webkit-text-fill-color: transparent;
             margin-bottom: 10px;
         }
-        
-        .subtitle {
-            color: #9ca3af;
-            font-size: 1.1rem;
-        }
-        
-        .nav-links {
-            margin-top: 15px;
-        }
-        
-        .nav-links a {
-            color: #10b981;
-            text-decoration: none;
-            margin: 0 15px;
-            font-weight: 500;
-        }
-        
-        .nav-links a:hover {
-            text-decoration: underline;
-        }
-        
-        .nav-links a.active {
-            color: #34d399;
-            border-bottom: 2px solid #34d399;
-            padding-bottom: 3px;
-        }
+        .subtitle { color: #9ca3af; font-size: 1.1rem; }
+        .nav-links { margin-top: 15px; }
+        .nav-links a { color: #10b981; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .nav-links a:hover { text-decoration: underline; }
+        .nav-links a.active { color: #34d399; border-bottom: 2px solid #34d399; padding-bottom: 3px; }
         
         .status-bar {
             background: rgba(255,255,255,0.05);
@@ -75,23 +40,47 @@
             flex-wrap: wrap;
             gap: 15px;
         }
+        .status-info { display: flex; align-items: center; gap: 10px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #10b981; }
+        .status-dot.stale { background: #f59e0b; }
+        .status-dot.error { background: #ef4444; }
         
-        .status-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+        /* Upload Section */
+        .upload-section {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(52, 211, 153, 0.05));
+            border: 2px dashed #10b981;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            text-align: center;
         }
-        
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
+        .upload-section.drag-over {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: #34d399;
+        }
+        .upload-section h3 { color: #10b981; margin-bottom: 10px; }
+        .upload-section p { color: #9ca3af; margin-bottom: 15px; font-size: 0.95rem; }
+        .upload-input { display: none; }
+        .upload-label {
+            display: inline-block;
+            padding: 12px 30px;
             background: #10b981;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
         }
-        
-        .status-dot.stale {
-            background: #f59e0b;
+        .upload-label:hover { background: #059669; }
+        .csv-status {
+            margin-top: 15px;
+            padding: 10px 15px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            font-size: 0.9rem;
         }
+        .csv-status.has-file { color: #10b981; }
+        .csv-status.no-file { color: #f59e0b; }
         
         .filters-section {
             background: rgba(255,255,255,0.05);
@@ -99,37 +88,16 @@
             padding: 25px;
             margin-bottom: 25px;
         }
-        
-        .filters-section h2 {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
-            font-size: 1.2rem;
-        }
-        
-        .filter-icon {
-            background: #10b981;
-            padding: 8px;
-            border-radius: 8px;
-        }
-        
+        .filters-section h2 { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; font-size: 1.2rem; }
+        .filter-icon { background: #10b981; padding: 8px; border-radius: 8px; }
         .filters-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
-        
-        .filter-group label {
-            display: block;
-            color: #9ca3af;
-            font-size: 0.85rem;
-            margin-bottom: 5px;
-        }
-        
-        .filter-group input,
-        .filter-group select {
+        .filter-group label { display: block; color: #9ca3af; font-size: 0.85rem; margin-bottom: 5px; }
+        .filter-group input, .filter-group select {
             width: 100%;
             padding: 10px 15px;
             border-radius: 8px;
@@ -138,18 +106,8 @@
             color: #f3f4f6;
             font-size: 0.95rem;
         }
-        
-        .filter-group input:focus,
-        .filter-group select:focus {
-            outline: none;
-            border-color: #10b981;
-        }
-        
-        .filter-buttons {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
+        .filter-group input:focus, .filter-group select:focus { outline: none; border-color: #10b981; }
+        .filter-buttons { display: flex; gap: 15px; flex-wrap: wrap; }
         
         .btn {
             padding: 12px 25px;
@@ -163,40 +121,13 @@
             font-size: 0.95rem;
             transition: all 0.2s;
         }
-        
-        .btn-primary {
-            background: #10b981;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #059669;
-        }
-        
-        .btn-secondary {
-            background: #f59e0b;
-            color: white;
-        }
-        
-        .btn-secondary:hover {
-            background: #d97706;
-        }
-        
-        .btn-outline {
-            background: transparent;
-            border: 1px solid #374151;
-            color: #9ca3af;
-        }
-        
-        .btn-outline:hover {
-            border-color: #10b981;
-            color: #10b981;
-        }
-        
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
+        .btn-primary { background: #10b981; color: white; }
+        .btn-primary:hover { background: #059669; }
+        .btn-secondary { background: #f59e0b; color: white; }
+        .btn-secondary:hover { background: #d97706; }
+        .btn-outline { background: transparent; border: 1px solid #374151; color: #9ca3af; }
+        .btn-outline:hover { border-color: #10b981; color: #10b981; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .stats-grid {
             display: grid;
@@ -204,369 +135,14 @@
             gap: 15px;
             margin-bottom: 25px;
         }
-        
-        .stat-card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 15px;
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #10b981;
-        }
-        
+        .stat-card { background: rgba(255,255,255,0.05); border-radius: 12px; padding: 15px; text-align: center; }
+        .stat-value { font-size: 1.6rem; font-weight: 700; color: #10b981; }
         .stat-value.grade-a { color: #10b981; }
         .stat-value.grade-b { color: #3b82f6; }
         .stat-value.grade-c { color: #f59e0b; }
-        .stat-value.grade-d { color: #f97316; }
-        .stat-value.grade-f { color: #ef4444; }
+        .stat-label { color: #9ca3af; font-size: 0.8rem; margin-top: 5px; }
         
-        .stat-label {
-            color: #9ca3af;
-            font-size: 0.8rem;
-            margin-top: 5px;
-        }
-        
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .results-header h2 {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .case-count {
-            color: #9ca3af;
-            font-weight: normal;
-        }
-        
-        .cases-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-            gap: 20px;
-        }
-        
-        .case-card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 20px;
-            border: 1px solid transparent;
-            transition: all 0.2s;
-        }
-        
-        .case-card:hover {
-            border-color: #10b981;
-            transform: translateY(-2px);
-        }
-        
-        .case-card.grade-a {
-            border-left: 4px solid #10b981;
-        }
-        
-        .case-card.grade-b {
-            border-left: 4px solid #3b82f6;
-        }
-        
-        .case-card.grade-c {
-            border-left: 4px solid #f59e0b;
-        }
-        
-        .case-card.grade-d {
-            border-left: 4px solid #f97316;
-        }
-        
-        .case-card.grade-f {
-            border-left: 4px solid #ef4444;
-        }
-        
-        .case-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 12px;
-        }
-        
-        .case-number {
-            font-size: 0.85rem;
-            color: #9ca3af;
-        }
-        
-        .lead-badge {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .grade-badge {
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 700;
-        }
-        
-        .grade-badge.grade-a {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-        }
-        
-        .grade-badge.grade-b {
-            background: rgba(59, 130, 246, 0.2);
-            color: #3b82f6;
-        }
-        
-        .grade-badge.grade-c {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
-        
-        .grade-badge.grade-d {
-            background: rgba(249, 115, 22, 0.2);
-            color: #f97316;
-        }
-        
-        .grade-badge.grade-f {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-        }
-        
-        .score-badge {
-            font-size: 0.8rem;
-            color: #9ca3af;
-        }
-        
-        .days-badge {
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            background: rgba(255,255,255,0.1);
-        }
-        
-        .days-badge.warning {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
-        
-        .days-badge.urgent {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-        }
-        
-        .case-address {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-        
-        .case-location {
-            color: #9ca3af;
-            font-size: 0.9rem;
-            margin-bottom: 12px;
-        }
-        
-        .case-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-bottom: 15px;
-        }
-        
-        .tag {
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-        
-        .tag-open {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
-        }
-        
-        .tag-hot {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
-        }
-        
-        .tag-no-response {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
-        
-        .tag-default {
-            background: rgba(249, 115, 22, 0.2);
-            color: #f97316;
-        }
-        
-        .tag-attorney {
-            background: rgba(156, 163, 175, 0.2);
-            color: #9ca3af;
-        }
-        
-        .tag-inactive {
-            background: rgba(59, 130, 246, 0.2);
-            color: #3b82f6;
-        }
-        
-        .case-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 15px;
-            padding: 12px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 8px;
-        }
-        
-        .detail-item {
-            font-size: 0.85rem;
-        }
-        
-        .detail-label {
-            color: #9ca3af;
-            font-size: 0.75rem;
-        }
-        
-        .detail-value {
-            color: #f3f4f6;
-            margin-top: 2px;
-        }
-        
-        .case-remarks {
-            font-size: 0.85rem;
-            color: #9ca3af;
-            padding: 10px;
-            background: rgba(0,0,0,0.15);
-            border-radius: 6px;
-            margin-bottom: 12px;
-        }
-        
-        .case-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 12px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-            font-size: 0.85rem;
-        }
-        
-        .plaintiff-info {
-            color: #9ca3af;
-            max-width: 60%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        .case-footer a {
-            color: #10b981;
-            text-decoration: none;
-        }
-        
-        .case-footer a:hover {
-            text-decoration: underline;
-        }
-        
-        .no-results {
-            text-align: center;
-            padding: 60px 20px;
-            color: #9ca3af;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 60px 20px;
-        }
-        
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid rgba(16, 185, 129, 0.2);
-            border-top-color: #10b981;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Login overlay */
-        .login-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-        
-        .login-box {
-            background: #1f2937;
-            padding: 40px;
-            border-radius: 16px;
-            text-align: center;
-            max-width: 400px;
-            width: 90%;
-        }
-        
-        .login-box h2 {
-            margin-bottom: 20px;
-            color: #10b981;
-        }
-        
-        .login-box input {
-            width: 100%;
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid #374151;
-            background: #111827;
-            color: white;
-            font-size: 1rem;
-            margin-bottom: 15px;
-        }
-        
-        .login-box button {
-            width: 100%;
-            padding: 15px;
-            border-radius: 8px;
-            border: none;
-            background: #10b981;
-            color: white;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        
-        .login-error {
-            color: #ef4444;
-            margin-top: 10px;
-        }
-        
-        .hidden {
-            display: none !important;
-        }
-        
-        /* Quick filters */
-        .quick-filters {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-            flex-wrap: wrap;
-        }
-        
+        .quick-filters { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
         .quick-filter {
             padding: 8px 16px;
             border-radius: 20px;
@@ -577,35 +153,133 @@
             color: #9ca3af;
             transition: all 0.2s;
         }
+        .quick-filter:hover { border-color: #10b981; color: #10b981; }
+        .quick-filter.active { background: #10b981; border-color: #10b981; color: white; }
         
-        .quick-filter:hover {
-            border-color: #10b981;
-            color: #10b981;
-        }
+        .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .results-header h2 { display: flex; align-items: center; gap: 10px; }
+        .case-count { color: #9ca3af; font-weight: normal; }
         
-        .quick-filter.active {
-            background: #10b981;
-            border-color: #10b981;
-            color: white;
+        .cases-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 20px; }
+        .case-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
         }
+        .case-card:hover { border-color: #10b981; transform: translateY(-2px); }
+        .case-card.grade-a { border-left: 4px solid #10b981; }
+        .case-card.grade-b { border-left: 4px solid #3b82f6; }
+        .case-card.grade-c { border-left: 4px solid #f59e0b; }
+        .case-card.grade-d { border-left: 4px solid #f97316; }
+        .case-card.grade-f { border-left: 4px solid #ef4444; }
+        
+        .case-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .case-number { font-size: 0.85rem; color: #9ca3af; }
+        .lead-badge { display: flex; align-items: center; gap: 8px; }
+        .grade-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 700; }
+        .grade-badge.grade-a { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .grade-badge.grade-b { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .grade-badge.grade-c { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .grade-badge.grade-d { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+        .grade-badge.grade-f { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .score-badge { font-size: 0.8rem; color: #9ca3af; }
+        
+        .case-address { font-size: 1.1rem; font-weight: 600; margin-bottom: 5px; }
+        .case-location { color: #9ca3af; font-size: 0.9rem; margin-bottom: 12px; }
+        .case-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 15px; }
+        .tag { padding: 3px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }
+        .tag-open { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .tag-hot { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .tag-no-response { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .tag-default { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+        .tag-attorney { background: rgba(156, 163, 175, 0.2); color: #9ca3af; }
+        
+        .case-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .detail-item { font-size: 0.85rem; }
+        .detail-label { color: #9ca3af; font-size: 0.75rem; }
+        .detail-value { color: #f3f4f6; margin-top: 2px; }
+        .days-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; background: rgba(255,255,255,0.1); }
+        .days-badge.warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .days-badge.urgent { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        
+        .case-remarks {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            padding: 10px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+        .case-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 0.85rem;
+        }
+        .plaintiff-info { color: #9ca3af; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .case-footer a { color: #10b981; text-decoration: none; }
+        .case-footer a:hover { text-decoration: underline; }
+        
+        .no-results { text-align: center; padding: 60px 20px; color: #9ca3af; }
+        .loading { text-align: center; padding: 60px 20px; }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid rgba(16, 185, 129, 0.2);
+            border-top-color: #10b981;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .login-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000;
+        }
+        .login-box {
+            background: #1f2937;
+            padding: 40px;
+            border-radius: 16px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+        .login-box h2 { margin-bottom: 20px; color: #10b981; }
+        .login-box input {
+            width: 100%; padding: 15px; border-radius: 8px;
+            border: 1px solid #374151; background: #111827;
+            color: white; font-size: 1rem; margin-bottom: 15px;
+        }
+        .login-box button {
+            width: 100%; padding: 15px; border-radius: 8px;
+            border: none; background: #10b981;
+            color: white; font-size: 1rem; font-weight: 600; cursor: pointer;
+        }
+        .login-error { color: #ef4444; margin-top: 10px; }
+        .hidden { display: none !important; }
         
         @media (max-width: 768px) {
-            .cases-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .filters-grid {
-                grid-template-columns: 1fr 1fr;
-            }
-            
-            .stats-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
+            .cases-grid { grid-template-columns: 1fr; }
+            .filters-grid { grid-template-columns: 1fr 1fr; }
+            .stats-grid { grid-template-columns: repeat(3, 1fr); }
         }
     </style>
 </head>
 <body>
-    <!-- Login Overlay -->
     <div class="login-overlay" id="loginOverlay">
         <div class="login-box">
             <h2>🏠 Pre-Foreclosure Pipeline</h2>
@@ -634,6 +308,15 @@
             <div id="sourceInfo" style="color: #9ca3af; font-size: 0.9rem;"></div>
         </div>
         
+        <!-- CSV Upload Section -->
+        <div class="upload-section" id="uploadSection" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+            <h3>📁 Step 1: Upload Court Data CSV</h3>
+            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: #10b981;">Montgomery County Courts</a>, then upload the CSV here.</p>
+            <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
+            <label for="csvUpload" class="upload-label">📤 Choose CSV File</label>
+            <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
+        </div>
+        
         <!-- Stats Grid -->
         <div class="stats-grid">
             <div class="stat-card">
@@ -660,14 +343,6 @@
                 <div class="stat-value" id="avgDaysOpen">-</div>
                 <div class="stat-label">Avg Days</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value" id="noResponse">-</div>
-                <div class="stat-label">No Response</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="noAttorney">-</div>
-                <div class="stat-label">No Attorney</div>
-            </div>
         </div>
         
         <!-- Quick Filters -->
@@ -677,54 +352,28 @@
             <button class="quick-filter" onclick="setQuickFilter('good')">⭐ Good (A+B)</button>
             <button class="quick-filter" onclick="setQuickFilter('no-response')">No Response</button>
             <button class="quick-filter" onclick="setQuickFilter('no-attorney')">No Attorney</button>
-            <button class="quick-filter" onclick="setQuickFilter('default')">Default Motion</button>
         </div>
         
         <!-- Filters Section -->
         <div class="filters-section">
-            <h2>
-                <span class="filter-icon">🔍</span>
-                Advanced Filters
-            </h2>
+            <h2><span class="filter-icon">🔍</span> Filters & Actions</h2>
             <div class="filters-grid">
                 <div class="filter-group">
                     <label>Lead Grade</label>
                     <select id="gradeFilter">
                         <option value="">All Grades</option>
                         <option value="A">A - Hot Leads</option>
-                        <option value="A,B">A & B - Good Leads</option>
-                        <option value="B">B Only</option>
+                        <option value="A,B">A & B - Good</option>
                         <option value="C">C Only</option>
-                        <option value="D,F">D & F - Poor</option>
                     </select>
                 </div>
                 <div class="filter-group">
-                    <label>Min Lead Score</label>
-                    <input type="number" id="minScore" placeholder="e.g., 65">
-                </div>
-                <div class="filter-group">
                     <label>Min Days Open</label>
-                    <input type="number" id="minDaysOpen" placeholder="e.g., 30">
+                    <input type="number" id="minDaysOpen" placeholder="e.g., 45">
                 </div>
                 <div class="filter-group">
                     <label>Max Days Open</label>
                     <input type="number" id="maxDaysOpen" placeholder="e.g., 180">
-                </div>
-                <div class="filter-group">
-                    <label>Defendant Attorney</label>
-                    <select id="hasDefendantAttorney">
-                        <option value="">Any</option>
-                        <option value="false">No Attorney ✓</option>
-                        <option value="true">Has Attorney</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Defendant Response</label>
-                    <select id="hasDefendantResponse">
-                        <option value="">Any</option>
-                        <option value="false">No Response ✓</option>
-                        <option value="true">Has Response</option>
-                    </select>
                 </div>
                 <div class="filter-group">
                     <label>City</label>
@@ -734,24 +383,21 @@
                     <label>Sort By</label>
                     <select id="sortBy">
                         <option value="leadScore">Lead Score (High→Low)</option>
-                        <option value="daysOpen">Days Open (New→Old)</option>
+                        <option value="daysOpen">Days Open</option>
                         <option value="commencedDate">Filed Date</option>
                     </select>
                 </div>
             </div>
             <div class="filter-buttons">
                 <button class="btn btn-primary" onclick="searchCases()">🔍 Apply Filters</button>
-                <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">🔄 Refresh Pipeline Data</button>
+                <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">🔄 Process Pipeline Data</button>
                 <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
                 <button class="btn btn-outline" onclick="resetFilters()">↺ Reset</button>
             </div>
         </div>
         
-        <!-- Results -->
         <div class="results-header">
-            <h2>
-                📋 Pipeline Cases <span class="case-count" id="caseCount">(0)</span>
-            </h2>
+            <h2>📋 Pipeline Cases <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
         
         <div class="cases-grid" id="casesGrid">
@@ -798,8 +444,91 @@
         }
         
         async function loadData() {
+            await checkCsvStatus();
             await loadStats();
             await searchCases();
+        }
+        
+        async function checkCsvStatus() {
+            try {
+                const response = await fetch('/api/pipeline/csv-status', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                const data = await response.json();
+                const statusEl = document.getElementById('csvStatus');
+                
+                if (data.exists) {
+                    const date = new Date(data.lastModified).toLocaleDateString();
+                    statusEl.className = 'csv-status has-file';
+                    statusEl.innerHTML = `✅ CSV loaded: <strong>${data.rowCount} cases</strong> (uploaded ${date})`;
+                } else {
+                    statusEl.className = 'csv-status no-file';
+                    statusEl.innerHTML = '⚠️ No CSV uploaded yet. Please upload a CSV export from the court website.';
+                }
+            } catch (error) {
+                console.error('Error checking CSV status:', error);
+            }
+        }
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            document.getElementById('uploadSection').classList.add('drag-over');
+        }
+        
+        function handleDragLeave(e) {
+            e.preventDefault();
+            document.getElementById('uploadSection').classList.remove('drag-over');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            document.getElementById('uploadSection').classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.csv')) {
+                uploadFile(file);
+            } else {
+                alert('Please drop a CSV file.');
+            }
+        }
+        
+        function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (file) uploadFile(file);
+        }
+        
+        async function uploadFile(file) {
+            const statusEl = document.getElementById('csvStatus');
+            statusEl.className = 'csv-status';
+            statusEl.innerHTML = '⏳ Uploading CSV...';
+            
+            try {
+                const text = await file.text();
+                
+                const response = await fetch('/api/pipeline/upload-csv', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': authToken
+                    },
+                    body: JSON.stringify({
+                        csvData: text,
+                        filename: file.name
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    statusEl.className = 'csv-status has-file';
+                    statusEl.innerHTML = `✅ Uploaded: <strong>${result.rowCount} cases</strong> - Click "Process Pipeline Data" to analyze`;
+                } else {
+                    statusEl.className = 'csv-status no-file';
+                    statusEl.innerHTML = `❌ Error: ${result.error}`;
+                }
+            } catch (error) {
+                statusEl.className = 'csv-status no-file';
+                statusEl.innerHTML = `❌ Upload failed: ${error.message}`;
+            }
         }
         
         async function loadStats() {
@@ -815,28 +544,16 @@
                 document.getElementById('gradeC').textContent = stats.byGrade?.C || 0;
                 document.getElementById('avgScore').textContent = stats.avgLeadScore || 0;
                 document.getElementById('avgDaysOpen').textContent = stats.avgDaysOpen || 0;
-                document.getElementById('noResponse').textContent = stats.noDefendantResponse || '-';
-                document.getElementById('noAttorney').textContent = stats.noDefendantAttorney || '-';
                 
                 if (stats.lastUpdated) {
                     const updated = new Date(stats.lastUpdated);
                     const ago = getTimeAgo(updated);
-                    document.getElementById('statusText').textContent = `Updated ${ago} • ${stats.total} cases`;
-                    
+                    document.getElementById('statusText').textContent = `Pipeline processed ${ago}`;
                     const hoursSince = (Date.now() - updated) / (1000 * 60 * 60);
-                    if (hoursSince > 24) {
-                        document.getElementById('statusDot').classList.add('stale');
-                    }
+                    document.getElementById('statusDot').className = hoursSince > 24 ? 'status-dot stale' : 'status-dot';
                 } else {
-                    document.getElementById('statusText').textContent = 'No data yet - click Refresh Pipeline Data';
-                    document.getElementById('statusDot').classList.add('stale');
-                }
-                
-                if (stats.sources) {
-                    const sourceText = Object.entries(stats.sources)
-                        .map(([name, count]) => `${name}: ${count}`)
-                        .join(' • ');
-                    document.getElementById('sourceInfo').textContent = sourceText;
+                    document.getElementById('statusText').textContent = 'No data yet - upload CSV and click Process';
+                    document.getElementById('statusDot').className = 'status-dot stale';
                 }
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -845,84 +562,47 @@
         
         function setQuickFilter(filter) {
             currentFilter = filter;
-            
-            // Update button states
-            document.querySelectorAll('.quick-filter').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            document.querySelectorAll('.quick-filter').forEach(btn => btn.classList.remove('active'));
             event.target.classList.add('active');
             
-            // Reset advanced filters
             document.getElementById('gradeFilter').value = '';
-            document.getElementById('minScore').value = '';
-            document.getElementById('hasDefendantAttorney').value = '';
-            document.getElementById('hasDefendantResponse').value = '';
             
-            // Apply quick filter
             switch(filter) {
-                case 'hot':
-                    document.getElementById('gradeFilter').value = 'A';
-                    break;
-                case 'good':
-                    document.getElementById('gradeFilter').value = 'A,B';
-                    break;
-                case 'no-response':
-                    document.getElementById('hasDefendantResponse').value = 'false';
-                    break;
-                case 'no-attorney':
-                    document.getElementById('hasDefendantAttorney').value = 'false';
-                    break;
-                case 'default':
-                    // Will need special handling
-                    break;
+                case 'hot': document.getElementById('gradeFilter').value = 'A'; break;
+                case 'good': document.getElementById('gradeFilter').value = 'A,B'; break;
             }
-            
             searchCases();
         }
         
         function resetFilters() {
             document.getElementById('gradeFilter').value = '';
-            document.getElementById('minScore').value = '';
             document.getElementById('minDaysOpen').value = '';
             document.getElementById('maxDaysOpen').value = '';
-            document.getElementById('hasDefendantAttorney').value = '';
-            document.getElementById('hasDefendantResponse').value = '';
             document.getElementById('cityFilter').value = '';
             document.getElementById('sortBy').value = 'leadScore';
-            
             currentFilter = 'all';
-            document.querySelectorAll('.quick-filter').forEach(btn => {
-                btn.classList.remove('active');
-            });
+            document.querySelectorAll('.quick-filter').forEach(btn => btn.classList.remove('active'));
             document.querySelector('.quick-filter').classList.add('active');
-            
             searchCases();
         }
         
         async function searchCases() {
             const grid = document.getElementById('casesGrid');
-            grid.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>';
+            grid.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading...</p></div>';
             
             const params = new URLSearchParams();
-            
             const grade = document.getElementById('gradeFilter').value;
-            const minScore = document.getElementById('minScore').value;
             const minDays = document.getElementById('minDaysOpen').value;
             const maxDays = document.getElementById('maxDaysOpen').value;
-            const hasAttorney = document.getElementById('hasDefendantAttorney').value;
-            const hasResponse = document.getElementById('hasDefendantResponse').value;
             const city = document.getElementById('cityFilter').value;
             const sortBy = document.getElementById('sortBy').value;
             
             if (grade) params.append('grade', grade);
-            if (minScore) params.append('minScore', minScore);
             if (minDays) params.append('minDaysOpen', minDays);
             if (maxDays) params.append('maxDaysOpen', maxDays);
-            if (hasAttorney) params.append('hasDefendantAttorney', hasAttorney);
-            if (hasResponse) params.append('hasDefendantResponse', hasResponse);
             if (city) params.append('city', city);
-            if (currentFilter === 'default') params.append('hasDefaultMotion', 'true');
-            
+            if (currentFilter === 'no-response') params.append('hasDefendantResponse', 'false');
+            if (currentFilter === 'no-attorney') params.append('hasDefendantAttorney', 'false');
             params.append('sortBy', sortBy);
             params.append('sortOrder', 'desc');
             
@@ -935,50 +615,29 @@
                 document.getElementById('caseCount').textContent = `(${data.cases?.length || 0})`;
                 
                 if (!data.cases || data.cases.length === 0) {
-                    grid.innerHTML = `
-                        <div class="no-results">
-                            <p>No cases found matching your criteria.</p>
-                            <p style="margin-top: 10px;">Try adjusting your filters or click "Refresh Pipeline Data" to scrape new cases.</p>
-                        </div>
-                    `;
+                    grid.innerHTML = '<div class="no-results"><p>No cases found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
                     return;
                 }
                 
                 grid.innerHTML = data.cases.map(c => createCaseCard(c)).join('');
-                
             } catch (error) {
-                grid.innerHTML = `<div class="no-results"><p>Error loading cases: ${error.message}</p></div>`;
+                grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;
             }
         }
         
         function createCaseCard(c) {
             const gradeClass = `grade-${(c.leadGrade || 'c').toLowerCase()}`;
-            const daysClass = c.daysOpen > 365 ? 'urgent' : (c.daysOpen > 180 ? 'warning' : '');
+            const daysClass = c.daysOpen > 270 ? 'urgent' : (c.daysOpen > 180 ? 'warning' : '');
             const address = c.propertyAddress || 'Address not available';
-            const location = [c.propertyCity, c.propertyState, c.propertyZip].filter(Boolean).join(', ') || 'Location unknown';
+            const location = [c.propertyCity, c.propertyState, c.propertyZip].filter(Boolean).join(', ') || 'PA';
             
-            // Build tags
             let tags = '';
-            if (c.status?.includes('OPEN')) {
-                tags += '<span class="tag tag-open">OPEN</span>';
-            }
-            if (c.leadGrade === 'A') {
-                tags += '<span class="tag tag-hot">🔥 HOT</span>';
-            }
-            if (c.docketSummary && !c.docketSummary.hasDefendantResponse) {
-                tags += '<span class="tag tag-no-response">No Response</span>';
-            }
-            if (c.docketSummary?.hasDefaultMotion) {
-                tags += '<span class="tag tag-default">Default Motion</span>';
-            }
-            if (c.docketSummary?.hasDefendantAttorney) {
-                tags += '<span class="tag tag-attorney">Has Attorney</span>';
-            }
-            if (c.daysSinceLastActivity > 60) {
-                tags += '<span class="tag tag-inactive">Inactive ' + c.daysSinceLastActivity + 'd</span>';
-            }
+            if (c.status?.includes('OPEN')) tags += '<span class="tag tag-open">OPEN</span>';
+            if (c.leadGrade === 'A') tags += '<span class="tag tag-hot">🔥 HOT</span>';
+            if (c.docketSummary && !c.docketSummary.hasDefendantResponse) tags += '<span class="tag tag-no-response">No Response</span>';
+            if (c.docketSummary?.hasDefaultMotion) tags += '<span class="tag tag-default">Default Motion</span>';
+            if (c.docketSummary?.hasDefendantAttorney) tags += '<span class="tag tag-attorney">Has Attorney</span>';
             
-            // Remarks
             const remarks = c.remarks ? `<div class="case-remarks">${c.remarks}</div>` : '';
             
             return `
@@ -1009,12 +668,12 @@
                         </div>
                         <div class="detail-item">
                             <div class="detail-label">Last Activity</div>
-                            <div class="detail-value">${c.daysSinceLastActivity ? c.daysSinceLastActivity + ' days ago' : 'N/A'}</div>
+                            <div class="detail-value">${c.daysSinceLastActivity ? c.daysSinceLastActivity + 'd ago' : 'N/A'}</div>
                         </div>
                     </div>
                     <div class="case-footer">
-                        <span class="plaintiff-info">Plaintiff: ${truncate(c.plaintiff, 40)}</span>
-                        <a href="${c.detailUrl}" target="_blank">View Court Record ↗</a>
+                        <span class="plaintiff-info">${truncate(c.plaintiff, 35)}</span>
+                        <a href="${c.detailUrl}" target="_blank">View Record ↗</a>
                     </div>
                 </div>
             `;
@@ -1023,68 +682,65 @@
         async function refreshData() {
             const btn = document.getElementById('refreshBtn');
             btn.disabled = true;
-            btn.innerHTML = '⏳ Scraping... (this may take several minutes)';
+            btn.innerHTML = '⏳ Processing... (may take a few minutes)';
             
             try {
                 const response = await fetch('/api/pipeline/scrape', {
                     method: 'POST',
-                    headers: { 
-                        'X-Auth-Token': authToken,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        enableEnrichment: true,
-                        maxCasesToEnrich: 25
-                    })
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enableEnrichment: false })
                 });
                 
-                if (response.status === 429) {
-                    alert('A scrape is already in progress. Please wait.');
+                const result = await response.json();
+                
+                if (result.needsCsv) {
+                    alert('Please upload a CSV file first!');
                     btn.disabled = false;
-                    btn.innerHTML = '🔄 Refresh Pipeline Data';
+                    btn.innerHTML = '🔄 Process Pipeline Data';
+                    return;
+                }
+                
+                if (response.status === 429) {
+                    alert('Processing already in progress. Please wait.');
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Process Pipeline Data';
                     return;
                 }
                 
                 // Poll for completion
                 const checkStatus = async () => {
-                    const statusRes = await fetch('/api/pipeline/scrape/status', {
-                        headers: { 'X-Auth-Token': authToken }
-                    });
+                    const statusRes = await fetch('/api/pipeline/scrape/status', { headers: { 'X-Auth-Token': authToken } });
                     const status = await statusRes.json();
                     
                     if (status.inProgress) {
-                        setTimeout(checkStatus, 5000);
+                        setTimeout(checkStatus, 3000);
                     } else {
                         btn.disabled = false;
-                        btn.innerHTML = '🔄 Refresh Pipeline Data';
+                        btn.innerHTML = '🔄 Process Pipeline Data';
                         loadData();
                         
                         if (status.lastStatus?.status === 'completed') {
-                            const grades = status.lastStatus.grades || {};
-                            alert(`Scrape completed!\n\nFound ${status.lastStatus.casesFound} cases:\n🔥 Grade A: ${grades.A || 0}\n⭐ Grade B: ${grades.B || 0}\n📋 Grade C: ${grades.C || 0}`);
-                        } else if (status.lastStatus?.status === 'error') {
-                            alert(`Scrape error: ${status.lastStatus.error}`);
+                            const g = status.lastStatus.grades || {};
+                            alert(`Done! Found ${status.lastStatus.casesFound} cases:\n🔥 A: ${g.A || 0}\n⭐ B: ${g.B || 0}\n📋 C: ${g.C || 0}`);
+                        } else if (status.lastStatus?.error) {
+                            alert('Error: ' + status.lastStatus.error);
                         }
                     }
                 };
-                
-                setTimeout(checkStatus, 5000);
+                setTimeout(checkStatus, 3000);
                 
             } catch (error) {
                 btn.disabled = false;
-                btn.innerHTML = '🔄 Refresh Pipeline Data';
-                alert('Error starting scrape: ' + error.message);
+                btn.innerHTML = '🔄 Process Pipeline Data';
+                alert('Error: ' + error.message);
             }
         }
         
-        function exportCSV() {
-            window.open(`/api/pipeline/export/csv`, '_blank');
-        }
+        function exportCSV() { window.open('/api/pipeline/export/csv', '_blank'); }
         
         function formatDate(dateStr) {
             if (!dateStr) return '';
-            const date = new Date(dateStr);
-            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         }
         
         function truncate(str, len) {
@@ -1101,17 +757,13 @@
                 { label: 'hour', seconds: 3600 },
                 { label: 'minute', seconds: 60 }
             ];
-            
-            for (const interval of intervals) {
-                const count = Math.floor(seconds / interval.seconds);
-                if (count >= 1) {
-                    return `${count} ${interval.label}${count > 1 ? 's' : ''} ago`;
-                }
+            for (const i of intervals) {
+                const count = Math.floor(seconds / i.seconds);
+                if (count >= 1) return `${count} ${i.label}${count > 1 ? 's' : ''} ago`;
             }
             return 'just now';
         }
         
-        // Initialize
         checkExistingAuth();
     </script>
 </body>
