@@ -1,10 +1,6 @@
-// Montgomery County Courts scraper for pre-foreclosure pipeline
-// CSV-based version - upload the CSV export from the court website
-// Then scrapes individual case pages for addresses and docket analysis
-
+// Montgomery County Courts scraper - CSV-based with improved matching
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
-const path = require('path');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -13,17 +9,14 @@ const CONFIG = {
   batchSize: 10,
   batchPause: 2000,
   maxCasesToProcess: 100,
-  
   minDaysOld: 45,
   maxDaysOld: 270,
-  
   baseUrl: 'https://courtsapp.montcopa.org',
   csvPath: './data/montco-cases.csv',
-  
   distressKeywords: {
-    high: ['default judgment', 'motion for default', 'judgment entered', 'writ of execution', 'sheriff sale', 'praecipe for writ', 'rule to show cause', 'failure to appear'],
-    medium: ['conciliation', 'mediation', 'service accepted', 'answer filed', 'motion to dismiss denied', 'discovery'],
-    positive: ['motion to dismiss', 'answer and new matter', 'counterclaim', 'preliminary objections', 'counsel appearance', 'attorney appearance']
+    high: ['default judgment', 'motion for default', 'judgment entered', 'writ of execution', 'sheriff sale', 'praecipe for writ'],
+    medium: ['conciliation', 'mediation', 'service accepted', 'answer filed'],
+    positive: ['motion to dismiss', 'answer and new matter', 'counterclaim', 'attorney appearance', 'counsel appearance']
   }
 };
 
@@ -135,9 +128,9 @@ function analyzeDocket(entries) {
         if (kw.includes('answer') || kw.includes('counterclaim')) a.hasDefendantResponse = true;
       }
     }
-    if (desc.includes('service') || desc.includes('served')) {
+    if (desc.includes('served')) {
       a.serviceAttempts++;
-      if (desc.includes('fail') || desc.includes('not found')) a.failedServiceAttempts++;
+      if (desc.includes('not found')) a.failedServiceAttempts++;
     }
   }
   return a;
@@ -200,7 +193,6 @@ async function scrapeMontgomeryCourts(options = {}) {
     console.log(`   Found ${allCases.length} cases in CSV`);
   } catch (err) {
     console.error(`   Error: ${err.message}`);
-    console.log('   Export CSV from court website and save to:', csvPath);
     return [];
   }
   
@@ -247,64 +239,159 @@ async function scrapeMontgomeryCourts(options = {}) {
       
       try {
         await delay(CONFIG.requestDelay);
+        
+        // Search for case - use exact case number
         const searchUrl = `${CONFIG.baseUrl}/psi/v/search/case?Q=${encodeURIComponent(c.caseNumber)}&Grid=true`;
         await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await delay(500);
+        await delay(800);
         
-        const detailUrl = await page.evaluate(cn => {
-          const links = document.querySelectorAll('a[href*="/detail/Case/"]');
-          for (const l of links) if (l.closest('tr')?.textContent.includes(cn)) return l.href;
-          return links[0]?.href || null;
+        // Find the EXACT case number match and get its detail URL
+        const detailUrl = await page.evaluate((targetCaseNum) => {
+          const rows = document.querySelectorAll('tr');
+          for (const row of rows) {
+            const cells = row.querySelectorAll('td');
+            for (const cell of cells) {
+              const text = cell.textContent?.trim();
+              // Exact match on case number
+              if (text === targetCaseNum) {
+                const link = row.querySelector('a[href*="/detail/Case/"]');
+                return link?.href || null;
+              }
+            }
+          }
+          return null;
         }, c.caseNumber);
         
-        if (!detailUrl) { console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (not found)`); continue; }
+        if (!detailUrl) { 
+          console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (not found)`); 
+          continue; 
+        }
         
+        // Go to detail page
         await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await delay(500);
+        await delay(800);
         
+        // Extract all data from detail page
         const details = await page.evaluate(() => {
-          const r = { propertyAddress: '', propertyCity: '', propertyState: 'PA', propertyZip: '', judge: '', docketEntries: [] };
-          const parseAddr = addr => {
-            if (!addr) return { address: '', city: '', state: 'PA', zip: '' };
-            addr = addr.replace(/UNITED STATES/gi, '').trim();
-            const m = addr.match(/,?\s*(PA|NJ)\s*(\d{5})/i);
-            if (!m) return { address: addr, city: '', state: 'PA', zip: '' };
-            const before = addr.substring(0, addr.indexOf(m[0])).trim();
-            const suffixMatch = before.match(/(.+(?:WAY|ST|AVE|RD|DR|LN|CT|CIR|BLVD|PL|TER|PIKE|TRL|HWY|PKWY))\s*(.*)$/i);
-            if (suffixMatch) return { address: suffixMatch[1], city: suffixMatch[2], state: m[1].toUpperCase(), zip: m[2] };
-            const caseMatch = before.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
-            if (caseMatch) return { address: caseMatch[1], city: caseMatch[2], state: m[1].toUpperCase(), zip: m[2] };
-            return { address: before, city: '', state: m[1].toUpperCase(), zip: m[2] };
+          const result = {
+            propertyAddress: '',
+            propertyCity: '',
+            propertyState: 'PA',
+            propertyZip: '',
+            judge: '',
+            docketEntries: []
           };
           
-          const text = document.body.innerText;
-          const jm = text.match(/Judge[:\s]+([A-Z][A-Z\s\.]+)/);
-          if (jm) r.judge = jm[1].trim();
+          // Get judge from the case info table
+          const pageText = document.body.innerText;
+          const judgeMatch = pageText.match(/Judge[:\s]+([A-Z][A-Z\.\s]+[A-Z])/);
+          if (judgeMatch) result.judge = judgeMatch[1].trim();
           
-          for (const cell of document.querySelectorAll('[role="gridcell"], td')) {
-            const t = cell.textContent?.trim() || '';
-            if (t.match(/\b(PA|NJ)\s+\d{5}\b/i) && t.length < 200 && t.match(/^\d/)) {
-              const p = parseAddr(t);
-              if (p.address) { Object.assign(r, { propertyAddress: p.address, propertyCity: p.city, propertyState: p.state, propertyZip: p.zip }); break; }
+          // Find the Defendants section and extract address
+          // Look for the heading "Defendants" then find the grid below it
+          const allText = document.body.innerHTML;
+          const defendantsMatch = allText.match(/Defendants[\s\S]*?<table[\s\S]*?<\/table>/i);
+          
+          // Alternative: find all tables and look for one with Address column
+          const tables = document.querySelectorAll('table');
+          for (const table of tables) {
+            const headerRow = table.querySelector('tr');
+            if (!headerRow) continue;
+            
+            const headers = Array.from(headerRow.querySelectorAll('th, td')).map(h => h.textContent?.trim().toLowerCase() || '');
+            const addressIdx = headers.findIndex(h => h === 'address');
+            
+            if (addressIdx === -1) continue;
+            
+            // Found a table with Address column - get first data row
+            const rows = table.querySelectorAll('tr');
+            for (let ri = 1; ri < rows.length; ri++) {
+              const cells = rows[ri].querySelectorAll('td');
+              if (cells.length > addressIdx) {
+                const addrCell = cells[addressIdx];
+                const addrText = addrCell?.textContent?.trim() || '';
+                
+                // Check if this looks like a PA/NJ address
+                if (addrText.match(/(PA|NJ)\s*\d{5}/i)) {
+                  // Parse the address
+                  let addr = addrText.replace(/UNITED STATES/gi, '').trim();
+                  
+                  // Extract state and zip
+                  const szMatch = addr.match(/,?\s*(PA|NJ)\s*(\d{5})(-\d{4})?/i);
+                  if (szMatch) {
+                    result.propertyState = szMatch[1].toUpperCase();
+                    result.propertyZip = szMatch[2];
+                    
+                    // Everything before state/zip
+                    const beforeSZ = addr.substring(0, addr.indexOf(szMatch[0])).trim();
+                    
+                    // Try to split street and city
+                    // Common pattern: "123 MAIN STREETCITYNAME" or "123 MAIN STREET CITYNAME"
+                    const streetSuffixes = /(.*(?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))\s*(.*)$/i;
+                    const streetMatch = beforeSZ.match(streetSuffixes);
+                    
+                    if (streetMatch) {
+                      result.propertyAddress = streetMatch[1].trim();
+                      result.propertyCity = streetMatch[2].trim();
+                    } else {
+                      // Try case-change split: "123 Main StCityName"
+                      const caseMatch = beforeSZ.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
+                      if (caseMatch) {
+                        result.propertyAddress = caseMatch[1].trim();
+                        result.propertyCity = caseMatch[2].trim();
+                      } else {
+                        result.propertyAddress = beforeSZ;
+                      }
+                    }
+                  }
+                  break;
+                }
+              }
             }
+            
+            // If we found an address, stop searching tables
+            if (result.propertyAddress) break;
           }
           
-          for (const row of document.querySelectorAll('[role="row"], tr')) {
-            const cells = row.querySelectorAll('[role="gridcell"], td');
-            if (cells.length >= 4) {
-              let date = '', type = '', txt = '';
+          // Get docket entries
+          for (const table of tables) {
+            const headerRow = table.querySelector('tr');
+            if (!headerRow) continue;
+            
+            const headerText = headerRow.textContent?.toLowerCase() || '';
+            if (!headerText.includes('filing date') && !headerText.includes('docket')) continue;
+            
+            const rows = table.querySelectorAll('tr');
+            for (let ri = 1; ri < rows.length; ri++) {
+              const cells = rows[ri].querySelectorAll('td');
+              if (cells.length < 3) continue;
+              
+              // Find date cell and description
+              let dateText = '', descText = '';
               for (const cell of cells) {
                 const t = cell.textContent?.trim() || '';
-                if (!date && t.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) date = t;
-                else if (date && !type && t.length > 3 && !t.match(/^\d+$/)) type = t;
-                else if (date && type && t.length > 3) { txt = t; break; }
+                if (!dateText && t.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+                  dateText = t;
+                } else if (dateText && t.length > 5 && !t.match(/^\d+$/) && !descText) {
+                  descText = t;
+                } else if (dateText && descText && t.length > 5) {
+                  descText += ' - ' + t;
+                  break;
+                }
               }
-              if (date && type) r.docketEntries.push({ date, description: type + (txt ? ' - ' + txt : '') });
+              
+              if (dateText) {
+                result.docketEntries.push({ date: dateText, description: descText });
+              }
             }
+            
+            if (result.docketEntries.length > 0) break;
           }
-          return r;
+          
+          return result;
         });
         
+        // Analyze docket
         const docket = analyzeDocket(details.docketEntries);
         c.propertyAddress = details.propertyAddress;
         c.propertyCity = details.propertyCity;
@@ -331,7 +418,8 @@ async function scrapeMontgomeryCourts(options = {}) {
           remarks: generateRemarks(c, docket, ls), detailUrl, county: 'Montgomery', state: 'PA'
         });
         
-        console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${ls.grade}:${ls.score}] - ${c.propertyAddress || 'No addr'}`);
+        const addr = c.propertyAddress ? `${c.propertyAddress}, ${c.propertyCity}` : 'No addr';
+        console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${ls.grade}:${ls.score}] - ${addr}`);
       } catch (err) {
         console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${err.message})`);
       }
