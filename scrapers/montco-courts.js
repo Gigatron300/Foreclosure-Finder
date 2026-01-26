@@ -14,8 +14,8 @@ const CONFIG = {
   maxCasesToProcess: 50, // Process more cases for better lead quality
   
   // Ideal case age range (days)
-  minDaysOld: 30,   // Owner has had time to realize the situation
-  maxDaysOld: 365,  // Expand window - PA foreclosures take a long time
+  minDaysOld: 45,   // Owner has had time to realize the situation
+  maxDaysOld: 270,  // Focus on cases not too close to sheriff sale
   
   caseTypes: [
     { id: 58, name: 'Complaint In Mortgage Foreclosure' },
@@ -216,22 +216,34 @@ function calculateLeadScore(caseData, docketAnalysis) {
   let score = 50; // Start at neutral
   const factors = [];
   
+  // Check if we have docket data - if not, be more conservative with scoring
+  const hasDocketData = docketAnalysis.totalEntries > 0;
+  
   // === POSITIVE FACTORS (increase score - better lead) ===
   
-  // Case age sweet spot (30-180 days is ideal)
+  // Case age sweet spot (60-180 days is ideal)
   const daysOpen = caseData.daysOpen || 0;
-  if (daysOpen >= 30 && daysOpen <= 90) {
+  if (daysOpen >= 60 && daysOpen <= 120) {
     score += 15;
-    factors.push({ factor: 'Ideal age (30-90 days)', points: 15 });
-  } else if (daysOpen > 90 && daysOpen <= 180) {
+    factors.push({ factor: 'Ideal age (60-120 days)', points: 15 });
+  } else if (daysOpen >= 30 && daysOpen < 60) {
     score += 10;
-    factors.push({ factor: 'Good age (90-180 days)', points: 10 });
-  } else if (daysOpen > 180 && daysOpen <= 365) {
-    score += 5;
-    factors.push({ factor: 'Acceptable age (180-365 days)', points: 5 });
+    factors.push({ factor: 'Early stage (30-60 days)', points: 10 });
+  } else if (daysOpen > 120 && daysOpen <= 180) {
+    score += 10;
+    factors.push({ factor: 'Good age (120-180 days)', points: 10 });
+  } else if (daysOpen > 180 && daysOpen <= 270) {
+    score += 0;
+    factors.push({ factor: 'Aging case (180-270 days)', points: 0 });
+  } else if (daysOpen > 270 && daysOpen <= 365) {
+    score -= 10;
+    factors.push({ factor: 'Old case (270-365 days)', points: -10 });
   } else if (daysOpen > 365) {
+    score -= 20;
+    factors.push({ factor: 'Very old case (365+ days)', points: -20 });
+  } else if (daysOpen < 30) {
     score -= 5;
-    factors.push({ factor: 'Old case (365+ days)', points: -5 });
+    factors.push({ factor: 'Too new (<30 days)', points: -5 });
   }
   
   // No judgment yet = early stage, more opportunity
@@ -243,22 +255,28 @@ function calculateLeadScore(caseData, docketAnalysis) {
     factors.push({ factor: 'Judgment already entered', points: -15 });
   }
   
-  // No defendant attorney = owner not fighting with legal help
-  if (!docketAnalysis.hasDefendantAttorney) {
-    score += 10;
-    factors.push({ factor: 'No defendant attorney', points: 10 });
-  }
-  
-  // No defendant response = owner may be overwhelmed/checked out
-  if (!docketAnalysis.hasDefendantResponse && daysOpen > 45) {
-    score += 15;
-    factors.push({ factor: 'No defendant response filed', points: 15 });
-  }
-  
-  // Default motion filed = lender moving forward, owner not responding
-  if (docketAnalysis.hasDefaultMotion && !docketAnalysis.hasDefaultJudgment) {
-    score += 10;
-    factors.push({ factor: 'Default motion pending', points: 10 });
+  // Only score attorney/response factors if we actually have docket data
+  if (hasDocketData) {
+    // No defendant attorney = owner not fighting with legal help
+    if (!docketAnalysis.hasDefendantAttorney) {
+      score += 10;
+      factors.push({ factor: 'No defendant attorney', points: 10 });
+    }
+    
+    // No defendant response = owner may be overwhelmed/checked out
+    if (!docketAnalysis.hasDefendantResponse && daysOpen > 45) {
+      score += 15;
+      factors.push({ factor: 'No defendant response filed', points: 15 });
+    }
+    
+    // Default motion filed = lender moving forward, owner not responding
+    if (docketAnalysis.hasDefaultMotion && !docketAnalysis.hasDefaultJudgment) {
+      score += 10;
+      factors.push({ factor: 'Default motion pending', points: 10 });
+    }
+  } else {
+    // No docket data - add a note but don't assume anything
+    factors.push({ factor: 'Limited docket data', points: 0 });
   }
   
   // Failed service attempts = owner may be avoiding
@@ -439,7 +457,8 @@ async function scrapeMontgomeryCourts() {
       });
       console.log(`   ${targetCases.length} are in target range (${CONFIG.minDaysOld}-${CONFIG.maxDaysOld} days)`);
       
-      // Sort by date (oldest first - they need the most urgent attention)
+      // Sort by date - prioritize cases in the sweet spot (60-180 days)
+      // These are ideal: owner is aware of problem but not yet at sheriff sale
       targetCases.sort((a, b) => {
         const parseDate = (dateStr) => {
           if (!dateStr) return new Date(0);
@@ -447,7 +466,20 @@ async function scrapeMontgomeryCourts() {
           if (match) return new Date(match[3], match[1] - 1, match[2]);
           return new Date(0);
         };
-        return parseDate(a.commencedDate) - parseDate(b.commencedDate);
+        const now = new Date();
+        const daysA = Math.ceil((now - parseDate(a.commencedDate)) / (1000 * 60 * 60 * 24));
+        const daysB = Math.ceil((now - parseDate(b.commencedDate)) / (1000 * 60 * 60 * 24));
+        
+        // Score based on ideal range (60-180 days is best)
+        const scoreAge = (days) => {
+          if (days >= 60 && days <= 180) return 100; // Ideal
+          if (days >= 30 && days < 60) return 80;    // Good - early
+          if (days > 180 && days <= 270) return 70;  // Acceptable
+          if (days > 270 && days <= 365) return 50;  // Getting old
+          return 30; // Too new or too old
+        };
+        
+        return scoreAge(daysB) - scoreAge(daysA); // Higher score first
       });
       
       // Limit to save memory
@@ -473,6 +505,7 @@ async function scrapeMontgomeryCourts() {
           await page.goto(caseData.detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           
           // Extract case details AND docket entries
+          // Note: Montgomery County uses role="grid" elements, not traditional tables
           const details = await page.evaluate(() => {
             const result = {
               propertyAddress: '',
@@ -484,72 +517,171 @@ async function scrapeMontgomeryCourts() {
               docketEntries: []
             };
             
-            // Get Days Open
-            const allTds = document.querySelectorAll('td');
-            for (const td of allTds) {
-              if (td.textContent.trim() === 'Days Open' && td.nextElementSibling) {
-                result.daysOpen = parseInt(td.nextElementSibling.textContent.trim()) || null;
+            // Helper: parse address like "1002 MEADOW VIEW CIRCLECOLLEGEVILLE, PA 19426 UNITED STATES"
+            const parseAddress = (fullAddress) => {
+              if (!fullAddress) return { address: '', city: '', state: 'PA', zip: '' };
+              
+              // Remove "UNITED STATES" suffix
+              fullAddress = fullAddress.replace(/\s*UNITED STATES\s*/i, '').trim();
+              
+              // Match state and zip: ", PA 19426" or "PA 19426"
+              const stateZipMatch = fullAddress.match(/,?\s*(PA|NJ)\s*(\d{5})(-\d{4})?\s*$/i);
+              if (!stateZipMatch) {
+                return { address: fullAddress, city: '', state: 'PA', zip: '' };
               }
-              if (td.textContent.trim() === 'Judge' && td.nextElementSibling) {
-                result.judge = td.nextElementSibling.textContent.trim();
+              
+              const state = stateZipMatch[1].toUpperCase();
+              const zip = stateZipMatch[2];
+              const beforeStateZip = fullAddress.substring(0, fullAddress.indexOf(stateZipMatch[0])).trim();
+              
+              // Common street suffixes
+              const suffixPattern = /(.*(?:WAY|STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY|SQUARE|SQ|PATH|WALK|RUN|RIDGE|HILL|CROSSING|XING|POINT|PT|MANOR|COMMONS|MEWS|ROW|ALLEY|HEIGHTS|SPRING|SPRINGS|VIEW|CREST|VALLEY|HOLLOW|GLEN|GROVE|KNOLL|MEADOW|PARK|GARDENS|LANDING|WOODS|ACRES|VILLAGE|ESTATES|GREEN|FIELD|FIELDS))\s*(.*)$/i;
+              
+              const match = beforeStateZip.match(suffixPattern);
+              if (match) {
+                return {
+                  address: match[1].trim(),
+                  city: match[2].trim(),
+                  state,
+                  zip
+                };
               }
+              
+              // Try to split on case change (lowercase followed by uppercase)
+              // e.g., "123 Main StreetNorristown" -> "123 Main Street" + "Norristown"
+              const caseChangeMatch = beforeStateZip.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
+              if (caseChangeMatch) {
+                return {
+                  address: caseChangeMatch[1].trim(),
+                  city: caseChangeMatch[2].trim(),
+                  state,
+                  zip
+                };
+              }
+              
+              // Last resort: just return the whole thing as address
+              return { address: beforeStateZip, city: '', state, zip };
+            };
+            
+            // Get case info from the first table/generic elements
+            const allText = document.body.innerText;
+            
+            // Extract Days Open - look for the pattern in text
+            const daysOpenMatch = allText.match(/Days Open[:\s]+(\d+)/i);
+            if (daysOpenMatch) {
+              result.daysOpen = parseInt(daysOpenMatch[1]);
             }
             
-            // Get address from Defendants table
-            const tables = document.querySelectorAll('table');
-            if (tables.length >= 3) {
-              const defTable = tables[2];
-              const rows = defTable.querySelectorAll('tr');
-              if (rows.length >= 2) {
-                const cells = rows[1].querySelectorAll('td');
-                if (cells[2]) {
-                  const fullAddress = cells[2].textContent.trim();
-                  const stateZipMatch = fullAddress.match(/,\s*(PA|NJ)\s*(\d{5})/i);
+            // Extract Judge
+            const judgeMatch = allText.match(/Judge[:\s]+([A-Z][A-Z\s\.]+)/);
+            if (judgeMatch) {
+              result.judge = judgeMatch[1].trim();
+            }
+            
+            // Find Defendants section and get address
+            // The page uses role="grid" elements
+            const grids = document.querySelectorAll('[role="grid"]');
+            
+            for (const grid of grids) {
+              // Check if this is the Defendants grid by looking at nearby heading
+              const prevHeading = grid.previousElementSibling?.previousElementSibling;
+              const isDefendantsGrid = prevHeading?.textContent?.includes('Defendants') || 
+                                       grid.closest('section')?.querySelector('h2, h3, [role="heading"]')?.textContent?.includes('Defendants');
+              
+              // Also check the grid's header row for "Address" column
+              const headerRow = grid.querySelector('[role="row"]:first-child, tr:first-child');
+              const hasAddressColumn = headerRow?.textContent?.includes('Address');
+              
+              if (hasAddressColumn) {
+                // Get the first data row (skip header)
+                const rows = grid.querySelectorAll('[role="row"], tr');
+                for (let i = 1; i < rows.length; i++) {
+                  const row = rows[i];
+                  const cells = row.querySelectorAll('[role="gridcell"], td, [class*="cell"]');
                   
-                  if (stateZipMatch) {
-                    result.propertyState = stateZipMatch[1].toUpperCase();
-                    result.propertyZip = stateZipMatch[2];
-                    const beforeStateZip = fullAddress.substring(0, fullAddress.indexOf(stateZipMatch[0]));
-                    
-                    const streetTypeMatch = beforeStateZip.match(/^(.+(?:WAY|STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|TERRACE|TER|PIKE|TRAIL|TRL))\s*(.*)$/i);
-                    
-                    if (streetTypeMatch) {
-                      result.propertyAddress = streetTypeMatch[1].trim();
-                      result.propertyCity = streetTypeMatch[2].trim();
-                    } else {
-                      const doubleCapMatch = beforeStateZip.match(/^(.+[a-z])([A-Z][A-Za-z\s]+)$/);
-                      if (doubleCapMatch) {
-                        result.propertyAddress = doubleCapMatch[1].trim();
-                        result.propertyCity = doubleCapMatch[2].trim();
-                      } else {
-                        result.propertyAddress = beforeStateZip.trim();
+                  // Find the Address cell - it should contain state/zip pattern
+                  for (const cell of cells) {
+                    const text = cell.textContent?.trim() || '';
+                    if (text.match(/\b(PA|NJ)\s+\d{5}\b/i)) {
+                      const parsed = parseAddress(text);
+                      if (parsed.address) {
+                        result.propertyAddress = parsed.address;
+                        result.propertyCity = parsed.city;
+                        result.propertyState = parsed.state;
+                        result.propertyZip = parsed.zip;
+                        break;
                       }
                     }
-                  } else {
-                    result.propertyAddress = fullAddress.replace(/UNITED STATES/i, '').trim();
+                  }
+                  if (result.propertyAddress) break;
+                }
+              }
+              
+              // Check if this is the Docket Entries grid
+              const hasDocketColumn = headerRow?.textContent?.includes('Docket') || 
+                                      headerRow?.textContent?.includes('Filing Date');
+              
+              if (hasDocketColumn && !result.docketEntries.length) {
+                const rows = grid.querySelectorAll('[role="row"], tr');
+                for (let i = 1; i < rows.length; i++) {
+                  const row = rows[i];
+                  const cells = row.querySelectorAll('[role="gridcell"], td, [class*="cell"]');
+                  
+                  if (cells.length >= 4) {
+                    // Find the date cell (format: M/D/YYYY)
+                    let dateText = '';
+                    let docketType = '';
+                    let docketText = '';
+                    
+                    for (const cell of cells) {
+                      const text = cell.textContent?.trim() || '';
+                      if (text.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+                        dateText = text;
+                      } else if (text.length > 10 && !dateText) {
+                        // Skip until we find the date
+                      } else if (dateText && !docketType && text.length > 3) {
+                        docketType = text;
+                      } else if (dateText && docketType && text.length > 3) {
+                        docketText = text;
+                        break;
+                      }
+                    }
+                    
+                    if (dateText) {
+                      result.docketEntries.push({
+                        date: dateText,
+                        description: docketType + (docketText ? ' - ' + docketText : ''),
+                        filer: ''
+                      });
+                    }
                   }
                 }
               }
             }
             
-            // Get docket entries (usually table index 3 or 4)
-            for (let t = 3; t < tables.length; t++) {
-              const table = tables[t];
-              const headerRow = table.querySelector('tr');
-              if (headerRow && headerRow.textContent.toLowerCase().includes('date') && 
-                  headerRow.textContent.toLowerCase().includes('filing')) {
-                const docketRows = table.querySelectorAll('tr');
-                for (let r = 1; r < docketRows.length; r++) {
-                  const cells = docketRows[r].querySelectorAll('td');
-                  if (cells.length >= 2) {
-                    result.docketEntries.push({
-                      date: cells[0]?.textContent?.trim() || '',
-                      description: cells[1]?.textContent?.trim() || '',
-                      filer: cells[2]?.textContent?.trim() || ''
-                    });
+            // Fallback: try traditional table approach if grids didn't work
+            if (!result.propertyAddress) {
+              const tables = document.querySelectorAll('table');
+              for (const table of tables) {
+                const rows = table.querySelectorAll('tr');
+                for (let i = 1; i < rows.length; i++) {
+                  const cells = rows[i].querySelectorAll('td');
+                  for (const cell of cells) {
+                    const text = cell.textContent?.trim() || '';
+                    if (text.match(/\b(PA|NJ)\s+\d{5}\b/i) && text.length < 200) {
+                      const parsed = parseAddress(text);
+                      if (parsed.address && parsed.address.match(/^\d/)) { // Starts with number = likely street address
+                        result.propertyAddress = parsed.address;
+                        result.propertyCity = parsed.city;
+                        result.propertyState = parsed.state;
+                        result.propertyZip = parsed.zip;
+                        break;
+                      }
+                    }
                   }
+                  if (result.propertyAddress) break;
                 }
-                break;
+                if (result.propertyAddress) break;
               }
             }
             
