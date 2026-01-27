@@ -468,7 +468,8 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    authToken = data.token;
+                    // The server expects the password itself as the auth token
+                    authToken = password;
                     localStorage.setItem('pipelineAuth', authToken);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
@@ -501,28 +502,33 @@
             const file = event.target.files[0];
             if (!file) return;
             
-            const formData = new FormData();
-            formData.append('csv', file);
-            
             const statusEl = document.getElementById('csvStatus');
-            statusEl.textContent = '⏳ Uploading...';
+            statusEl.textContent = '⏳ Reading file...';
             
             try {
+                // Read file as text
+                const csvData = await file.text();
+                
+                statusEl.textContent = '⏳ Uploading...';
+                
                 const response = await fetch('/api/pipeline/upload-csv', {
                     method: 'POST',
-                    headers: { 'X-Auth-Token': authToken },
-                    body: formData
+                    headers: { 
+                        'X-Auth-Token': authToken,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ csvData, filename: file.name })
                 });
                 const result = await response.json();
                 if (result.success) {
-                    statusEl.textContent = `✓ Uploaded! ${result.caseCount} cases found. Click "Process Pipeline Data" to scrape.`;
+                    statusEl.textContent = `✓ Uploaded! ${result.rowCount} cases found. Click "Process Pipeline Data" to scrape.`;
                     statusEl.className = 'csv-status has-file';
                 } else {
                     statusEl.textContent = '❌ Error: ' + result.error;
                     statusEl.className = 'csv-status no-file';
                 }
             } catch (e) {
-                statusEl.textContent = '❌ Upload failed';
+                statusEl.textContent = '❌ Upload failed: ' + e.message;
                 statusEl.className = 'csv-status no-file';
             }
         }
