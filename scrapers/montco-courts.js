@@ -1,4 +1,4 @@
-// Montgomery County Courts scraper - Fixed address parsing
+// Montgomery County Courts scraper - Fixed regex for Puppeteer context
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
@@ -100,10 +100,7 @@ function parseDate(dateStr) {
 function isInMontgomeryCounty(city) {
   if (!city) return false;
   const upperCity = city.toUpperCase().replace(/\s+/g, ' ').trim();
-  return MONTCO_TOWNS.some(town => {
-    const upperTown = town.toUpperCase();
-    return upperCity.includes(upperTown) || upperTown.includes(upperCity);
-  });
+  return MONTCO_TOWNS.some(town => upperCity.includes(town));
 }
 
 function calculateScore(c) {
@@ -128,7 +125,7 @@ function calculateScore(c) {
 
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
-  console.log('\n🏛️ Montgomery County Scraper (Fixed Parsing)');
+  console.log('\n🏛️ Montgomery County Scraper (Regex Fixed)');
   console.log('='.repeat(50));
   
   let allCases;
@@ -230,7 +227,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         continue;
       }
       
-      // Extract addresses using innerHTML to preserve line breaks
+      // Extract addresses - FIXED: use [0-9] instead of \d, and literal space instead of \s
       const data = await page.evaluate((montcoTowns) => {
         const addresses = [];
         const tables = document.querySelectorAll('table');
@@ -251,59 +248,73 @@ async function scrapeMontgomeryCourts(options = {}) {
             if (cells.length <= addrIdx) continue;
             
             const addrCell = cells[addrIdx];
-            // Get innerHTML and split by <br> tags to separate street from city
             const html = addrCell?.innerHTML || '';
             const text = addrCell?.textContent?.trim() || '';
             
-            // Only process PA addresses
-            if (!text.match(/PA\s*\d{5}/i)) continue;
+            // FIXED: Use [0-9] instead of \d, use . instead of \s
+            // Check for PA followed by space and 5 digits
+            if (!text.includes('PA ')) continue;
             
-            // Split by <br> tag to get street and city/state/zip separately
+            // Find zip code using indexOf instead of regex
+            const paIdx = text.indexOf('PA ');
+            if (paIdx === -1) continue;
+            
+            const afterPA = text.substring(paIdx + 3);
+            const zipMatch = afterPA.match(/^([0-9]{5})/);
+            if (!zipMatch) continue;
+            
+            const zip = zipMatch[1];
+            
+            // Split by <br> to get street vs city
             const parts = html.split(/<br\s*\/?>/i).map(p => 
               p.replace(/<[^>]+>/g, '').trim()
             ).filter(p => p);
             
             let street = '';
-            let cityStateZip = '';
+            let city = '';
             
             if (parts.length >= 2) {
+              // First part is street, rest contains city
               street = parts[0];
-              cityStateZip = parts.slice(1).join(' ');
+              // Find city from the part containing PA
+              for (const part of parts.slice(1)) {
+                if (part.includes('PA ')) {
+                  // Extract city - everything before "PA"
+                  const cityMatch = part.match(/^([A-Za-z\s]+),?\s*PA/i);
+                  if (cityMatch) {
+                    city = cityMatch[1].trim();
+                  }
+                  break;
+                }
+              }
             } else {
-              // No <br> - try to parse the concatenated string
-              // Look for pattern: STREETSUFFIXCITY, STATE ZIP
-              const match = text.match(/^(.+?)((?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))(.+)$/i);
-              if (match) {
-                street = match[1] + match[2];
-                cityStateZip = match[3];
+              // Single line - need to split street from city
+              // Format: "STREET SUFFIXCITY, PA ZIP"
+              const beforePA = text.substring(0, paIdx);
+              const commaIdx = beforePA.lastIndexOf(',');
+              if (commaIdx > 0) {
+                street = beforePA.substring(0, commaIdx).trim();
+                city = beforePA.substring(commaIdx + 1).trim();
               } else {
-                cityStateZip = text;
+                // No comma - try to find city by looking for suffix
+                const suffixMatch = beforePA.match(/^(.+?)(ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY)(.*)$/i);
+                if (suffixMatch) {
+                  street = (suffixMatch[1] + suffixMatch[2]).trim();
+                  city = suffixMatch[3].trim();
+                } else {
+                  street = beforePA.trim();
+                }
               }
             }
             
-            // Parse city, state, zip from cityStateZip
-            // Format: "CITY, PA 19XXX UNITED STATES" or "CITYPA 19XXX"
-            const stateZipMatch = cityStateZip.match(/(.+?),?\s*(PA)\s*(\d{5})/i);
-            if (stateZipMatch) {
-              let city = stateZipMatch[1]
-                .replace(/UNITED STATES/gi, '')
-                .replace(/,/g, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-              
-              // Check if city is in Montgomery County
-              const inMontCo = montcoTowns.some(town => 
-                city.toUpperCase().includes(town) || town.includes(city.toUpperCase())
-              );
-              
-              addresses.push({
-                street: street.trim(),
-                city: city,
-                state: stateZipMatch[2].toUpperCase(),
-                zip: stateZipMatch[3],
-                inMontCo
-              });
-            }
+            // Clean up city
+            city = city.replace(/,/g, '').replace(/\s+/g, ' ').trim();
+            
+            // Check if in Montgomery County
+            const upperCity = city.toUpperCase();
+            const inMontCo = montcoTowns.some(town => upperCity.includes(town));
+            
+            addresses.push({ street, city, state: 'PA', zip, inMontCo });
           }
         }
         
