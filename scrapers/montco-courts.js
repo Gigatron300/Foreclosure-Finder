@@ -1,10 +1,10 @@
-// Montgomery County Courts scraper - With town prioritization
+// Montgomery County Courts scraper - Fixed address parsing
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Montgomery County townships/boroughs for address prioritization
+// Montgomery County townships/boroughs
 const MONTCO_TOWNS = [
   'ABINGTON', 'AMBLER', 'BRIDGEPORT', 'BRYN ATHYN', 'CHELTENHAM', 'COLLEGEVILLE',
   'CONSHOHOCKEN', 'DOUGLASS', 'EAST GREENVILLE', 'EAST NORRITON', 'FRANCONIA',
@@ -18,7 +18,6 @@ const MONTCO_TOWNS = [
   'UPPER HANOVER', 'UPPER MERION', 'UPPER MORELAND', 'UPPER POTTSGROVE',
   'UPPER PROVIDENCE', 'UPPER SALFORD', 'WEST CONSHOHOCKEN', 'WEST NORRITON',
   'WEST POTTSGROVE', 'WHITEMARSH', 'WHITPAIN', 'WORCESTER',
-  // Common variations
   'GLENSIDE', 'ARDMORE', 'WILLOW GROVE', 'KING OF PRUSSIA', 'BLUE BELL',
   'FORT WASHINGTON', 'FLOURTOWN', 'ORELAND', 'WYNDMOOR', 'ELKINS PARK',
   'GLADWYNE', 'BALA CYNWYD', 'MERION', 'WYNNEWOOD', 'HAVERFORD'
@@ -98,6 +97,15 @@ function parseDate(dateStr) {
   return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
 }
 
+function isInMontgomeryCounty(city) {
+  if (!city) return false;
+  const upperCity = city.toUpperCase().replace(/\s+/g, ' ').trim();
+  return MONTCO_TOWNS.some(town => {
+    const upperTown = town.toUpperCase();
+    return upperCity.includes(upperTown) || upperTown.includes(upperCity);
+  });
+}
+
 function calculateScore(c) {
   let score = 50;
   const factors = [];
@@ -111,8 +119,6 @@ function calculateScore(c) {
   else { score -= 15; factors.push('Has judgment'); }
   
   if (c.propertyAddress) { score += 5; factors.push('Has address'); }
-  
-  // Bonus for Montgomery County address
   if (c.inMontgomeryCounty) { score += 5; factors.push('In MontCo'); }
   
   score = Math.max(0, Math.min(100, score));
@@ -120,50 +126,9 @@ function calculateScore(c) {
   return { score, grade, factors };
 }
 
-// Check if address is in Montgomery County
-function isInMontgomeryCounty(city) {
-  if (!city) return false;
-  const upperCity = city.toUpperCase().trim();
-  return MONTCO_TOWNS.some(town => upperCity.includes(town) || town.includes(upperCity));
-}
-
-// Parse a single address string
-function parseAddress(addrText) {
-  if (!addrText) return null;
-  
-  // Clean up
-  let addr = addrText.replace(/UNITED STATES/gi, '').trim();
-  
-  // Must have PA (we're in Montgomery County PA)
-  const match = addr.match(/(.+?),?\s*(PA)\s*(\d{5})(-\d{4})?/i);
-  if (!match) return null;
-  
-  let street = match[1].trim();
-  const state = match[2].toUpperCase();
-  const zip = match[3];
-  let city = '';
-  
-  // Try to split street and city
-  // Pattern 1: Street suffix followed by city (e.g., "123 MAIN STREET NORRISTOWN")
-  const suffixMatch = street.match(/(.+(?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))\s+(.+)$/i);
-  if (suffixMatch) {
-    street = suffixMatch[1].trim();
-    city = suffixMatch[2].replace(/,/g, '').trim();
-  } else {
-    // Pattern 2: Newline or multiple spaces
-    const parts = street.split(/\n|(?<=[A-Za-z])\s{2,}(?=[A-Z])/);
-    if (parts.length >= 2) {
-      street = parts[0].trim();
-      city = parts[parts.length - 1].replace(/,/g, '').trim();
-    }
-  }
-  
-  return { street, city, state, zip, inMontCo: isInMontgomeryCounty(city) };
-}
-
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
-  console.log('\n🏛️ Montgomery County Scraper (Town Priority)');
+  console.log('\n🏛️ Montgomery County Scraper (Fixed Parsing)');
   console.log('='.repeat(50));
   
   let allCases;
@@ -176,7 +141,6 @@ async function scrapeMontgomeryCourts(options = {}) {
     return [];
   }
   
-  // Filter
   const now = new Date();
   let targets = allCases
     .filter(c => c.status.toUpperCase().includes('OPEN') && !c.hasJudgement)
@@ -227,35 +191,22 @@ async function scrapeMontgomeryCourts(options = {}) {
     try {
       await delay(CONFIG.requestDelay);
       
-      // Go to search page and use Case # filter
       await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
       await delay(500);
       
-      // Type case number into Case # field
+      // Type case number
       await page.evaluate((caseNum) => {
         const inputs = document.querySelectorAll('input[type="text"]');
         for (const input of inputs) {
           const label = input.closest('div')?.querySelector('label') || 
                         input.previousElementSibling ||
                         document.querySelector(`label[for="${input.id}"]`);
-          const labelText = label?.textContent || '';
-          if (labelText.includes('Case #') || labelText.includes('Case Number')) {
+          if (label?.textContent?.includes('Case #')) {
             input.value = caseNum;
             input.dispatchEvent(new Event('input', { bubbles: true }));
-            return true;
+            return;
           }
         }
-        // Fallback: first text input after "Case #:" text
-        const allText = document.body.innerHTML;
-        const caseMatch = allText.match(/Case\s*#[:\s]*<[^>]*input/i);
-        if (caseMatch) {
-          const firstInput = document.querySelector('input[type="text"]');
-          if (firstInput) {
-            firstInput.value = caseNum;
-            return true;
-          }
-        }
-        return false;
       }, c.caseNumber);
       
       // Click search
@@ -279,12 +230,11 @@ async function scrapeMontgomeryCourts(options = {}) {
         continue;
       }
       
-      // Extract all addresses and pick the best one
+      // Extract addresses using innerHTML to preserve line breaks
       const data = await page.evaluate((montcoTowns) => {
         const addresses = [];
-        
-        // Get all defendant addresses
         const tables = document.querySelectorAll('table');
+        
         for (const table of tables) {
           const headerRow = table.querySelector('tr');
           if (!headerRow) continue;
@@ -292,55 +242,76 @@ async function scrapeMontgomeryCourts(options = {}) {
           const headers = Array.from(headerRow.querySelectorAll('th, td'))
             .map(h => h.textContent?.trim().toLowerCase() || '');
           const addrIdx = headers.indexOf('address');
-          const nameIdx = headers.indexOf('name');
           
           if (addrIdx === -1) continue;
-          
-          // Check if this is the Defendants table (should be after Plaintiffs)
-          const prevHeading = table.previousElementSibling?.textContent || '';
-          const isDefendants = prevHeading.toLowerCase().includes('defendant');
           
           const rows = table.querySelectorAll('tr');
           for (let ri = 1; ri < rows.length; ri++) {
             const cells = rows[ri].querySelectorAll('td');
             if (cells.length <= addrIdx) continue;
             
-            const addrText = cells[addrIdx]?.textContent?.trim() || '';
-            const name = nameIdx >= 0 ? cells[nameIdx]?.textContent?.trim() || '' : '';
+            const addrCell = cells[addrIdx];
+            // Get innerHTML and split by <br> tags to separate street from city
+            const html = addrCell?.innerHTML || '';
+            const text = addrCell?.textContent?.trim() || '';
             
-            // Only PA addresses
-            if (addrText.match(/PA\s*\d{5}/i)) {
-              addresses.push({ 
-                text: addrText, 
-                name,
-                isDefendant: isDefendants 
+            // Only process PA addresses
+            if (!text.match(/PA\s*\d{5}/i)) continue;
+            
+            // Split by <br> tag to get street and city/state/zip separately
+            const parts = html.split(/<br\s*\/?>/i).map(p => 
+              p.replace(/<[^>]+>/g, '').trim()
+            ).filter(p => p);
+            
+            let street = '';
+            let cityStateZip = '';
+            
+            if (parts.length >= 2) {
+              street = parts[0];
+              cityStateZip = parts.slice(1).join(' ');
+            } else {
+              // No <br> - try to parse the concatenated string
+              // Look for pattern: STREETSUFFIXCITY, STATE ZIP
+              const match = text.match(/^(.+?)((?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))(.+)$/i);
+              if (match) {
+                street = match[1] + match[2];
+                cityStateZip = match[3];
+              } else {
+                cityStateZip = text;
+              }
+            }
+            
+            // Parse city, state, zip from cityStateZip
+            // Format: "CITY, PA 19XXX UNITED STATES" or "CITYPA 19XXX"
+            const stateZipMatch = cityStateZip.match(/(.+?),?\s*(PA)\s*(\d{5})/i);
+            if (stateZipMatch) {
+              let city = stateZipMatch[1]
+                .replace(/UNITED STATES/gi, '')
+                .replace(/,/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+              
+              // Check if city is in Montgomery County
+              const inMontCo = montcoTowns.some(town => 
+                city.toUpperCase().includes(town) || town.includes(city.toUpperCase())
+              );
+              
+              addresses.push({
+                street: street.trim(),
+                city: city,
+                state: stateZipMatch[2].toUpperCase(),
+                zip: stateZipMatch[3],
+                inMontCo
               });
             }
           }
         }
         
-        // Also check Remarks field for property location
-        const remarks = document.body.innerText.match(/Remarks[:\s]+([^\n]+)/i);
-        
-        return { addresses, remarks: remarks ? remarks[1] : '' };
+        return addresses;
       }, MONTCO_TOWNS);
       
-      // Pick the best address
-      let bestAddr = null;
-      
-      // First priority: Montgomery County address from defendant
-      for (const addr of data.addresses) {
-        const parsed = parseAddress(addr.text);
-        if (parsed && parsed.inMontCo) {
-          bestAddr = parsed;
-          break;
-        }
-      }
-      
-      // Second priority: Any PA address
-      if (!bestAddr && data.addresses.length > 0) {
-        bestAddr = parseAddress(data.addresses[0].text);
-      }
+      // Pick best address: prefer Montgomery County
+      let bestAddr = data.find(a => a.inMontCo) || data[0] || null;
       
       c.propertyAddress = bestAddr?.street || '';
       c.propertyCity = bestAddr?.city || '';
@@ -348,7 +319,6 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.propertyZip = bestAddr?.zip || '';
       c.inMontgomeryCounty = bestAddr?.inMontCo || false;
       c.detailUrl = currentUrl;
-      c.remarks = data.remarks;
       
       const ls = calculateScore(c);
       
