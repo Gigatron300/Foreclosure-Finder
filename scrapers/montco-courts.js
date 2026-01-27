@@ -1,10 +1,9 @@
-// Montgomery County Courts scraper - NO REGEX in page.evaluate
+// Montgomery County Courts scraper - DEBUG VERSION
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Montgomery County townships/boroughs
 const MONTCO_TOWNS = [
   'ABINGTON', 'AMBLER', 'BRIDGEPORT', 'BRYN ATHYN', 'CHELTENHAM', 'COLLEGEVILLE',
   'CONSHOHOCKEN', 'DOUGLASS', 'EAST GREENVILLE', 'EAST NORRITON', 'FRANCONIA',
@@ -27,7 +26,7 @@ const CONFIG = {
   requestDelay: 800,
   batchSize: 20,
   batchPause: 3000,
-  maxCasesToProcess: 75,
+  maxCasesToProcess: 10, // Reduced for debugging
   minDaysOld: 45,
   maxDaysOld: 270,
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
@@ -97,12 +96,6 @@ function parseDate(dateStr) {
   return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
 }
 
-function isInMontgomeryCounty(city) {
-  if (!city) return false;
-  const upperCity = city.toUpperCase().replace(/  +/g, ' ').trim();
-  return MONTCO_TOWNS.some(town => upperCity.includes(town));
-}
-
 function calculateScore(c) {
   let score = 50;
   const factors = [];
@@ -125,7 +118,7 @@ function calculateScore(c) {
 
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
-  console.log('\n🏛️ Montgomery County Scraper (No Regex)');
+  console.log('\n🏛️ Montgomery County Scraper (DEBUG VERSION)');
   console.log('='.repeat(50));
   
   let allCases;
@@ -157,14 +150,14 @@ async function scrapeMontgomeryCourts(options = {}) {
   
   if (targets.length > CONFIG.maxCasesToProcess) {
     targets = targets.slice(0, CONFIG.maxCasesToProcess);
-    console.log(`   Limited to ${CONFIG.maxCasesToProcess} cases`);
+    console.log(`   Limited to ${CONFIG.maxCasesToProcess} cases (DEBUG)`);
   }
   
   const results = [];
   let browser = null;
   let page = null;
   
-  console.log(`\n🌐 Scraping ${targets.length} cases...`);
+  console.log(`\n🌐 Scraping ${targets.length} cases with DEBUG output...`);
   
   for (let i = 0; i < targets.length; i++) {
     if (i % CONFIG.batchSize === 0) {
@@ -191,7 +184,7 @@ async function scrapeMontgomeryCourts(options = {}) {
       await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
       await delay(500);
       
-      // Type case number into Case # field
+      // Type case number
       await page.evaluate((caseNum) => {
         const inputs = document.querySelectorAll('input[type="text"]');
         for (const input of inputs) {
@@ -222,101 +215,87 @@ async function scrapeMontgomeryCourts(options = {}) {
       await delay(800);
       
       const currentUrl = page.url();
+      console.log(`      DEBUG URL: ${currentUrl}`);
+      
       if (!currentUrl.includes('/detail/Case/')) {
-        console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
+        console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail page)`);
         continue;
       }
       
-      // Extract addresses - NO REGEX AT ALL - pure string methods only
+      // DEBUG: Get raw page content
+      const debugInfo = await page.evaluate(() => {
+        const result = {
+          tableCount: document.querySelectorAll('table').length,
+          tables: []
+        };
+        
+        const tables = document.querySelectorAll('table');
+        for (let ti = 0; ti < tables.length && ti < 5; ti++) {
+          const table = tables[ti];
+          const headerRow = table.querySelector('tr');
+          const headers = [];
+          if (headerRow) {
+            const cells = headerRow.querySelectorAll('th, td');
+            for (let ci = 0; ci < cells.length; ci++) {
+              headers.push(cells[ci].textContent?.trim()?.substring(0, 20) || '');
+            }
+          }
+          
+          const tableInfo = {
+            index: ti,
+            headers: headers,
+            hasAddressHeader: headers.some(h => h.toLowerCase() === 'address'),
+            rowCount: table.querySelectorAll('tr').length
+          };
+          
+          // If has address header, get cell contents
+          if (tableInfo.hasAddressHeader) {
+            const addrIdx = headers.findIndex(h => h.toLowerCase() === 'address');
+            const rows = table.querySelectorAll('tr');
+            tableInfo.addressCells = [];
+            for (let ri = 1; ri < rows.length && ri < 4; ri++) {
+              const cells = rows[ri].querySelectorAll('td');
+              if (cells.length > addrIdx && cells[addrIdx]) {
+                tableInfo.addressCells.push({
+                  text: cells[addrIdx].textContent?.substring(0, 80) || 'EMPTY',
+                  html: cells[addrIdx].innerHTML?.substring(0, 100) || 'EMPTY'
+                });
+              }
+            }
+          }
+          
+          result.tables.push(tableInfo);
+        }
+        
+        return result;
+      });
+      
+      console.log(`      DEBUG: ${debugInfo.tableCount} tables found`);
+      for (const t of debugInfo.tables) {
+        console.log(`      Table ${t.index}: headers=[${t.headers.join(', ')}] hasAddr=${t.hasAddressHeader}`);
+        if (t.addressCells) {
+          for (const cell of t.addressCells) {
+            console.log(`        Cell text: "${cell.text}"`);
+          }
+        }
+      }
+      
+      // Now try to extract addresses
       const data = await page.evaluate((montcoTowns) => {
-        // Helper: check if char is digit
-        function isDigit(c) {
-          return c === '0' || c === '1' || c === '2' || c === '3' || c === '4' ||
-                 c === '5' || c === '6' || c === '7' || c === '8' || c === '9';
-        }
+        const addresses = [];
+        const debug = [];
+        const tables = document.querySelectorAll('table');
         
-        // Helper: check if string starts with 5 digits
-        function startsWithZip(s) {
-          if (!s || s.length < 5) return false;
-          for (var i = 0; i < 5; i++) {
-            if (!isDigit(s.charAt(i))) return false;
-          }
-          return true;
-        }
-        
-        // Helper: extract 5 digit zip
-        function extractZip(s) {
-          if (!startsWithZip(s)) return null;
-          return s.substring(0, 5);
-        }
-        
-        // Helper: simple split by substring (case insensitive)
-        function splitByBr(html) {
-          var result = [];
-          var lower = html.toLowerCase();
-          var lastIdx = 0;
-          var brIdx = lower.indexOf('<br');
-          
-          while (brIdx !== -1) {
-            // Add part before <br
-            var part = html.substring(lastIdx, brIdx).trim();
-            if (part.length > 0) {
-              // Remove any remaining HTML tags
-              part = part.split('<')[0].trim();
-              if (part.length > 0) result.push(part);
-            }
-            
-            // Find end of br tag
-            var endBr = html.indexOf('>', brIdx);
-            lastIdx = endBr + 1;
-            brIdx = lower.indexOf('<br', lastIdx);
-          }
-          
-          // Add remaining part
-          if (lastIdx < html.length) {
-            var remaining = html.substring(lastIdx).trim();
-            // Remove HTML tags
-            var tagStart = remaining.indexOf('<');
-            if (tagStart > 0) remaining = remaining.substring(0, tagStart).trim();
-            if (remaining.length > 0) result.push(remaining);
-          }
-          
-          return result;
-        }
-        
-        // Helper: extract city before "PA "
-        function extractCity(part) {
-          var paIdx = part.indexOf('PA ');
-          if (paIdx === -1) paIdx = part.indexOf('Pa ');
-          if (paIdx === -1) paIdx = part.indexOf('pa ');
-          if (paIdx === -1) return '';
-          
-          var beforePA = part.substring(0, paIdx);
-          // Remove trailing comma and spaces
-          while (beforePA.length > 0) {
-            var last = beforePA.charAt(beforePA.length - 1);
-            if (last === ',' || last === ' ') {
-              beforePA = beforePA.substring(0, beforePA.length - 1);
-            } else {
-              break;
-            }
-          }
-          return beforePA;
-        }
-        
-        var addresses = [];
-        var tables = document.querySelectorAll('table');
-        
-        for (var ti = 0; ti < tables.length; ti++) {
-          var table = tables[ti];
-          var headerRow = table.querySelector('tr');
+        for (let ti = 0; ti < tables.length; ti++) {
+          const table = tables[ti];
+          const headerRow = table.querySelector('tr');
           if (!headerRow) continue;
           
-          var headerCells = headerRow.querySelectorAll('th, td');
-          var addrIdx = -1;
-          for (var hi = 0; hi < headerCells.length; hi++) {
-            var hText = headerCells[hi].textContent || '';
-            if (hText.toLowerCase().trim() === 'address') {
+          const headerCells = headerRow.querySelectorAll('th, td');
+          let addrIdx = -1;
+          for (let hi = 0; hi < headerCells.length; hi++) {
+            const hText = (headerCells[hi].textContent || '').trim().toLowerCase();
+            if (hText === 'address') {
               addrIdx = hi;
               break;
             }
@@ -324,101 +303,90 @@ async function scrapeMontgomeryCourts(options = {}) {
           
           if (addrIdx === -1) continue;
           
-          var rows = table.querySelectorAll('tr');
-          for (var ri = 1; ri < rows.length; ri++) {
-            var cells = rows[ri].querySelectorAll('td');
+          const rows = table.querySelectorAll('tr');
+          for (let ri = 1; ri < rows.length; ri++) {
+            const cells = rows[ri].querySelectorAll('td');
             if (cells.length <= addrIdx) continue;
             
-            var addrCell = cells[addrIdx];
-            var html = addrCell ? addrCell.innerHTML : '';
-            var text = addrCell ? addrCell.textContent : '';
-            if (!text) continue;
-            text = text.trim();
+            const addrCell = cells[addrIdx];
+            const text = (addrCell.textContent || '').trim();
+            const html = addrCell.innerHTML || '';
             
-            // Check for PA followed by space
-            var paIdx = text.indexOf('PA ');
-            if (paIdx === -1) paIdx = text.indexOf('Pa ');
-            if (paIdx === -1) continue;
+            debug.push('Processing: ' + text.substring(0, 50));
             
-            var afterPA = text.substring(paIdx + 3);
-            var zip = extractZip(afterPA);
-            if (!zip) continue;
+            // Check for "PA " in text
+            const paIdx = text.indexOf('PA ');
+            if (paIdx === -1) {
+              debug.push('  -> No "PA " found');
+              continue;
+            }
             
-            // Split HTML by <br> tags
-            var parts = splitByBr(html);
+            debug.push('  -> Found PA at index ' + paIdx);
             
-            var street = '';
-            var city = '';
-            
-            if (parts.length >= 2) {
-              street = parts[0];
-              // Find the part with PA and extract city
-              for (var pi = 1; pi < parts.length; pi++) {
-                if (parts[pi].indexOf('PA ') !== -1 || parts[pi].indexOf('Pa ') !== -1) {
-                  city = extractCity(parts[pi]);
-                  break;
-                }
-              }
-            } else if (parts.length === 1) {
-              // Single line - street is before city
-              var beforePA = text.substring(0, paIdx);
-              // Find last comma
-              var commaIdx = beforePA.lastIndexOf(',');
-              if (commaIdx > 0) {
-                street = beforePA.substring(0, commaIdx).trim();
-                city = beforePA.substring(commaIdx + 1).trim();
+            // Get zip (5 digits after "PA ")
+            const afterPA = text.substring(paIdx + 3);
+            let zip = '';
+            for (let di = 0; di < 5 && di < afterPA.length; di++) {
+              const ch = afterPA.charAt(di);
+              if (ch >= '0' && ch <= '9') {
+                zip += ch;
               } else {
-                // Try common street suffixes
-                var suffixes = ['ROAD', 'RD', 'STREET', 'ST', 'AVENUE', 'AVE', 'DRIVE', 'DR', 
-                               'LANE', 'LN', 'COURT', 'CT', 'WAY', 'PIKE', 'TRAIL', 'TRL'];
-                var upperBefore = beforePA.toUpperCase();
-                var foundSuffix = false;
-                for (var si = 0; si < suffixes.length; si++) {
-                  var suffixIdx = upperBefore.lastIndexOf(suffixes[si]);
-                  if (suffixIdx > 0) {
-                    street = beforePA.substring(0, suffixIdx + suffixes[si].length).trim();
-                    city = beforePA.substring(suffixIdx + suffixes[si].length).trim();
-                    foundSuffix = true;
-                    break;
-                  }
-                }
-                if (!foundSuffix) {
-                  street = beforePA.trim();
+                break;
+              }
+            }
+            
+            if (zip.length !== 5) {
+              debug.push('  -> Zip not 5 digits: "' + zip + '"');
+              continue;
+            }
+            
+            debug.push('  -> Zip: ' + zip);
+            
+            // Get street and city from HTML (split by <br>)
+            let street = '';
+            let city = '';
+            
+            const brIdx = html.toLowerCase().indexOf('<br');
+            if (brIdx > 0) {
+              street = html.substring(0, brIdx).replace(/<[^>]*>/g, '').trim();
+              const afterBr = html.substring(brIdx);
+              const gtIdx = afterBr.indexOf('>');
+              if (gtIdx > 0) {
+                const cityPart = afterBr.substring(gtIdx + 1).replace(/<[^>]*>/g, '').trim();
+                const cityPaIdx = cityPart.indexOf('PA ');
+                if (cityPaIdx > 0) {
+                  city = cityPart.substring(0, cityPaIdx).replace(/,/g, '').trim();
                 }
               }
             }
             
-            // Clean up
-            city = city.replace(/,/g, '').trim();
-            while (city.indexOf('  ') !== -1) {
-              city = city.split('  ').join(' ');
-            }
+            debug.push('  -> Street: "' + street + '", City: "' + city + '"');
             
             // Check Montgomery County
-            var upperCity = city.toUpperCase();
-            var inMontCo = false;
-            for (var mi = 0; mi < montcoTowns.length; mi++) {
+            const upperCity = city.toUpperCase();
+            let inMontCo = false;
+            for (let mi = 0; mi < montcoTowns.length; mi++) {
               if (upperCity.indexOf(montcoTowns[mi]) !== -1) {
                 inMontCo = true;
                 break;
               }
             }
             
-            addresses.push({ 
-              street: street, 
-              city: city, 
-              state: 'PA', 
-              zip: zip, 
-              inMontCo: inMontCo 
-            });
+            addresses.push({ street, city, state: 'PA', zip, inMontCo });
           }
         }
         
-        return addresses;
+        return { addresses, debug };
       }, MONTCO_TOWNS);
       
+      // Print debug info
+      for (const d of data.debug) {
+        console.log(`      ${d}`);
+      }
+      console.log(`      Found ${data.addresses.length} addresses`);
+      
       // Pick best address
-      let bestAddr = data.find(a => a.inMontCo) || data[0] || null;
+      let bestAddr = data.addresses.find(a => a.inMontCo) || data.addresses[0] || null;
       
       c.propertyAddress = bestAddr?.street || '';
       c.propertyCity = bestAddr?.city || '';
