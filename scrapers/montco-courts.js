@@ -1,8 +1,28 @@
-// Montgomery County Courts scraper - Uses Case # filter for exact match
+// Montgomery County Courts scraper - With town prioritization
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Montgomery County townships/boroughs for address prioritization
+const MONTCO_TOWNS = [
+  'ABINGTON', 'AMBLER', 'BRIDGEPORT', 'BRYN ATHYN', 'CHELTENHAM', 'COLLEGEVILLE',
+  'CONSHOHOCKEN', 'DOUGLASS', 'EAST GREENVILLE', 'EAST NORRITON', 'FRANCONIA',
+  'GREEN LANE', 'HATBORO', 'HATFIELD', 'HORSHAM', 'JENKINTOWN', 'LANSDALE',
+  'LIMERICK', 'LOWER FREDERICK', 'LOWER GWYNEDD', 'LOWER MERION', 'LOWER MORELAND',
+  'LOWER POTTSGROVE', 'LOWER PROVIDENCE', 'LOWER SALFORD', 'MARLBOROUGH',
+  'MONTGOMERY', 'NARBERTH', 'NEW HANOVER', 'NORRISTOWN', 'NORTH WALES', 'PENNSBURG',
+  'PERKIOMEN', 'PLYMOUTH', 'POTTSTOWN', 'RED HILL', 'ROCKLEDGE', 'ROYERSFORD',
+  'SALFORD', 'SCHWENKSVILLE', 'SKIPPACK', 'SOUDERTON', 'SPRINGFIELD', 'TELFORD',
+  'TOWAMENCIN', 'TRAPPE', 'UPPER DUBLIN', 'UPPER FREDERICK', 'UPPER GWYNEDD',
+  'UPPER HANOVER', 'UPPER MERION', 'UPPER MORELAND', 'UPPER POTTSGROVE',
+  'UPPER PROVIDENCE', 'UPPER SALFORD', 'WEST CONSHOHOCKEN', 'WEST NORRITON',
+  'WEST POTTSGROVE', 'WHITEMARSH', 'WHITPAIN', 'WORCESTER',
+  // Common variations
+  'GLENSIDE', 'ARDMORE', 'WILLOW GROVE', 'KING OF PRUSSIA', 'BLUE BELL',
+  'FORT WASHINGTON', 'FLOURTOWN', 'ORELAND', 'WYNDMOOR', 'ELKINS PARK',
+  'GLADWYNE', 'BALA CYNWYD', 'MERION', 'WYNNEWOOD', 'HAVERFORD'
+];
 
 const CONFIG = {
   requestDelay: 800,
@@ -11,7 +31,6 @@ const CONFIG = {
   maxCasesToProcess: 75,
   minDaysOld: 45,
   maxDaysOld: 270,
-  // Use the advanced search with Case # filter - goes directly to case
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
   csvPath: './data/montco-cases.csv'
 };
@@ -22,9 +41,6 @@ async function launchBrowser() {
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--disable-extensions', '--disable-background-networking',
-      '--disable-default-apps', '--disable-sync', '--disable-translate',
-      '--hide-scrollbars', '--metrics-recording-only', '--mute-audio',
-      '--no-first-run', '--safebrowsing-disable-auto-update',
       '--js-flags=--max-old-space-size=256'
     ]
   });
@@ -96,14 +112,58 @@ function calculateScore(c) {
   
   if (c.propertyAddress) { score += 5; factors.push('Has address'); }
   
+  // Bonus for Montgomery County address
+  if (c.inMontgomeryCounty) { score += 5; factors.push('In MontCo'); }
+  
   score = Math.max(0, Math.min(100, score));
   const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : score >= 35 ? 'D' : 'F';
   return { score, grade, factors };
 }
 
+// Check if address is in Montgomery County
+function isInMontgomeryCounty(city) {
+  if (!city) return false;
+  const upperCity = city.toUpperCase().trim();
+  return MONTCO_TOWNS.some(town => upperCity.includes(town) || town.includes(upperCity));
+}
+
+// Parse a single address string
+function parseAddress(addrText) {
+  if (!addrText) return null;
+  
+  // Clean up
+  let addr = addrText.replace(/UNITED STATES/gi, '').trim();
+  
+  // Must have PA (we're in Montgomery County PA)
+  const match = addr.match(/(.+?),?\s*(PA)\s*(\d{5})(-\d{4})?/i);
+  if (!match) return null;
+  
+  let street = match[1].trim();
+  const state = match[2].toUpperCase();
+  const zip = match[3];
+  let city = '';
+  
+  // Try to split street and city
+  // Pattern 1: Street suffix followed by city (e.g., "123 MAIN STREET NORRISTOWN")
+  const suffixMatch = street.match(/(.+(?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))\s+(.+)$/i);
+  if (suffixMatch) {
+    street = suffixMatch[1].trim();
+    city = suffixMatch[2].replace(/,/g, '').trim();
+  } else {
+    // Pattern 2: Newline or multiple spaces
+    const parts = street.split(/\n|(?<=[A-Za-z])\s{2,}(?=[A-Z])/);
+    if (parts.length >= 2) {
+      street = parts[0].trim();
+      city = parts[parts.length - 1].replace(/,/g, '').trim();
+    }
+  }
+  
+  return { street, city, state, zip, inMontCo: isInMontgomeryCounty(city) };
+}
+
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
-  console.log('\n🏛️ Montgomery County Scraper (Case # Filter)');
+  console.log('\n🏛️ Montgomery County Scraper (Town Priority)');
   console.log('='.repeat(50));
   
   let allCases;
@@ -127,9 +187,8 @@ async function scrapeMontgomeryCourts(options = {}) {
     })
     .filter(c => c.daysOpen >= CONFIG.minDaysOld && c.daysOpen <= CONFIG.maxDaysOld);
   
-  console.log(`   ${targets.length} OPEN cases in range (${CONFIG.minDaysOld}-${CONFIG.maxDaysOld}d)`);
+  console.log(`   ${targets.length} OPEN cases in range`);
   
-  // Sort by ideal age
   targets.sort((a, b) => {
     const score = d => (d >= 60 && d <= 180) ? 100 : 50;
     return score(b.daysOpen) - score(a.daysOpen);
@@ -147,7 +206,6 @@ async function scrapeMontgomeryCourts(options = {}) {
   console.log(`\n🌐 Scraping ${targets.length} cases...`);
   
   for (let i = 0; i < targets.length; i++) {
-    // Restart browser every batch to free memory
     if (i % CONFIG.batchSize === 0) {
       if (browser) {
         await browser.close();
@@ -169,131 +227,128 @@ async function scrapeMontgomeryCourts(options = {}) {
     try {
       await delay(CONFIG.requestDelay);
       
-      // Go to advanced search page
+      // Go to search page and use Case # filter
       await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
       await delay(500);
       
-      // Fill in Case # field and submit
-      // The Case # input is in the advanced filter section
-      const found = await page.evaluate((caseNum) => {
-        // Find the Case # input by label
-        const labels = document.querySelectorAll('label');
-        for (const label of labels) {
-          if (label.textContent.includes('Case #')) {
-            // Find the associated input
-            const input = label.parentElement?.querySelector('input') || 
-                          document.querySelector('input[name*="case" i]') ||
-                          label.nextElementSibling;
-            if (input && input.tagName === 'INPUT') {
-              input.value = caseNum;
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              return true;
-            }
-          }
-        }
-        // Fallback: find input near "Case #:" text
-        const allInputs = document.querySelectorAll('input[type="text"]');
-        for (const input of allInputs) {
-          const prev = input.previousElementSibling || input.parentElement?.previousElementSibling;
-          if (prev?.textContent?.includes('Case #')) {
+      // Type case number into Case # field
+      await page.evaluate((caseNum) => {
+        const inputs = document.querySelectorAll('input[type="text"]');
+        for (const input of inputs) {
+          const label = input.closest('div')?.querySelector('label') || 
+                        input.previousElementSibling ||
+                        document.querySelector(`label[for="${input.id}"]`);
+          const labelText = label?.textContent || '';
+          if (labelText.includes('Case #') || labelText.includes('Case Number')) {
             input.value = caseNum;
             input.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+          }
+        }
+        // Fallback: first text input after "Case #:" text
+        const allText = document.body.innerHTML;
+        const caseMatch = allText.match(/Case\s*#[:\s]*<[^>]*input/i);
+        if (caseMatch) {
+          const firstInput = document.querySelector('input[type="text"]');
+          if (firstInput) {
+            firstInput.value = caseNum;
             return true;
           }
         }
         return false;
       }, c.caseNumber);
       
-      if (!found) {
-        // Try typing directly
-        await page.type('input[type="text"]', c.caseNumber, { delay: 50 });
-      }
-      
-      // Click search button
+      // Click search
       await page.evaluate(() => {
         const btns = document.querySelectorAll('button, input[type="submit"]');
         for (const btn of btns) {
-          if (btn.textContent?.toLowerCase().includes('search') || btn.value?.toLowerCase().includes('search')) {
+          if (btn.textContent?.toLowerCase().includes('search') || 
+              btn.value?.toLowerCase().includes('search')) {
             btn.click();
             return;
           }
         }
       });
       
-      // Wait for navigation to detail page
       await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
       await delay(800);
       
       const currentUrl = page.url();
-      
-      // Check if we landed on a detail page
       if (!currentUrl.includes('/detail/Case/')) {
-        console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail page)`);
+        console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
         continue;
       }
       
-      // Extract address from the Defendants table
-      const data = await page.evaluate(() => {
-        const result = { address: '', city: '', state: 'PA', zip: '' };
+      // Extract all addresses and pick the best one
+      const data = await page.evaluate((montcoTowns) => {
+        const addresses = [];
         
-        // Find Defendants section
+        // Get all defendant addresses
         const tables = document.querySelectorAll('table');
         for (const table of tables) {
           const headerRow = table.querySelector('tr');
           if (!headerRow) continue;
           
-          const headers = Array.from(headerRow.querySelectorAll('th, td')).map(h => h.textContent?.trim().toLowerCase() || '');
+          const headers = Array.from(headerRow.querySelectorAll('th, td'))
+            .map(h => h.textContent?.trim().toLowerCase() || '');
           const addrIdx = headers.indexOf('address');
-          if (addrIdx === -1) continue;
-          
-          // Check if this is defendants table (has "Name" column with person name, not company)
           const nameIdx = headers.indexOf('name');
           
-          // Get first data row with PA address
+          if (addrIdx === -1) continue;
+          
+          // Check if this is the Defendants table (should be after Plaintiffs)
+          const prevHeading = table.previousElementSibling?.textContent || '';
+          const isDefendants = prevHeading.toLowerCase().includes('defendant');
+          
           const rows = table.querySelectorAll('tr');
           for (let ri = 1; ri < rows.length; ri++) {
             const cells = rows[ri].querySelectorAll('td');
             if (cells.length <= addrIdx) continue;
             
             const addrText = cells[addrIdx]?.textContent?.trim() || '';
+            const name = nameIdx >= 0 ? cells[nameIdx]?.textContent?.trim() || '' : '';
             
-            // Must be a PA or NJ address
-            const match = addrText.match(/(.+?),?\s*(PA|NJ)\s*(\d{5})/i);
-            if (match) {
-              let street = match[1].replace(/UNITED STATES/gi, '').trim();
-              
-              // Try to split street and city
-              const suffixMatch = street.match(/(.+(?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|CIRCLE|CIR|BOULEVARD|BLVD|PLACE|PL|WAY|TERRACE|TER|PIKE|TRAIL|TRL|HIGHWAY|HWY|PARKWAY|PKWY))\s*(.*)$/i);
-              
-              if (suffixMatch) {
-                result.address = suffixMatch[1].trim();
-                result.city = suffixMatch[2].replace(/,/g, '').trim();
-              } else {
-                // Try splitting on newline or double space
-                const parts = street.split(/\n|  +/);
-                if (parts.length >= 2) {
-                  result.address = parts[0].trim();
-                  result.city = parts[parts.length - 1].replace(/,/g, '').trim();
-                } else {
-                  result.address = street;
-                }
-              }
-              
-              result.state = match[2].toUpperCase();
-              result.zip = match[3];
-              return result;
+            // Only PA addresses
+            if (addrText.match(/PA\s*\d{5}/i)) {
+              addresses.push({ 
+                text: addrText, 
+                name,
+                isDefendant: isDefendants 
+              });
             }
           }
         }
         
-        return result;
-      });
+        // Also check Remarks field for property location
+        const remarks = document.body.innerText.match(/Remarks[:\s]+([^\n]+)/i);
+        
+        return { addresses, remarks: remarks ? remarks[1] : '' };
+      }, MONTCO_TOWNS);
       
-      c.propertyAddress = data.address;
-      c.propertyCity = data.city;
-      c.propertyState = data.state;
-      c.propertyZip = data.zip;
+      // Pick the best address
+      let bestAddr = null;
+      
+      // First priority: Montgomery County address from defendant
+      for (const addr of data.addresses) {
+        const parsed = parseAddress(addr.text);
+        if (parsed && parsed.inMontCo) {
+          bestAddr = parsed;
+          break;
+        }
+      }
+      
+      // Second priority: Any PA address
+      if (!bestAddr && data.addresses.length > 0) {
+        bestAddr = parseAddress(data.addresses[0].text);
+      }
+      
+      c.propertyAddress = bestAddr?.street || '';
+      c.propertyCity = bestAddr?.city || '';
+      c.propertyState = bestAddr?.state || 'PA';
+      c.propertyZip = bestAddr?.zip || '';
+      c.inMontgomeryCounty = bestAddr?.inMontCo || false;
       c.detailUrl = currentUrl;
+      c.remarks = data.remarks;
       
       const ls = calculateScore(c);
       
@@ -307,6 +362,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         propertyCity: c.propertyCity,
         propertyState: c.propertyState,
         propertyZip: c.propertyZip,
+        inMontgomeryCounty: c.inMontgomeryCounty,
         hasJudgement: c.hasJudgement,
         status: c.status,
         leadScore: ls.score,
@@ -319,7 +375,9 @@ async function scrapeMontgomeryCourts(options = {}) {
         state: 'PA'
       });
       
-      const addrStr = c.propertyAddress ? `${c.propertyAddress}, ${c.propertyCity}` : 'No addr';
+      const addrStr = c.propertyAddress ? 
+        `${c.propertyAddress}, ${c.propertyCity}${c.inMontgomeryCounty ? ' ✓' : ''}` : 
+        'No PA addr';
       console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${ls.grade}:${ls.score}] - ${addrStr}`);
       
     } catch (err) {
@@ -335,10 +393,13 @@ async function scrapeMontgomeryCourts(options = {}) {
   results.forEach(c => grades[c.leadGrade]++);
   
   const withAddr = results.filter(r => r.propertyAddress).length;
-  console.log(`\n✅ Done: ${results.length} cases (${withAddr} with addresses)`);
+  const inMontCo = results.filter(r => r.inMontgomeryCounty).length;
+  
+  console.log(`\n✅ Done: ${results.length} cases`);
+  console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
   
   return results;
 }
 
-module.exports = { scrapeMontgomeryCourts, parseCSV, CONFIG };
+module.exports = { scrapeMontgomeryCourts, parseCSV, CONFIG, MONTCO_TOWNS };
