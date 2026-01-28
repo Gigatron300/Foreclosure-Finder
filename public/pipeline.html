@@ -177,6 +177,14 @@
             font-size: 0.8rem;
             font-weight: 600;
         }
+        .days-badge.sweet-spot {
+            background: rgba(16, 185, 129, 0.9);
+            color: white;
+        }
+        .property-card.sweet-spot {
+            border: 2px solid #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+        }
         
         .property-info {
             padding: 20px;
@@ -380,21 +388,28 @@
                 <div class="stat-label">Properties</div>
             </div>
             <div class="stat-item">
+                <div class="stat-value" id="sweetSpotCount" style="color: #10b981;">-</div>
+                <div class="stat-label">🎯 Sweet Spot (9-18mo)</div>
+            </div>
+            <div class="stat-item">
                 <div class="stat-value" id="withAddress">-</div>
                 <div class="stat-label">With Address</div>
             </div>
             <div class="stat-item">
-                <div class="stat-value" id="avgDays">-</div>
-                <div class="stat-label">Avg Days Open</div>
+                <div class="stat-value" id="avgMonths">-</div>
+                <div class="stat-label">Avg Months</div>
             </div>
         </div>
         
         <!-- Actions -->
         <div class="actions-bar">
-            <button class="btn btn-secondary" onclick="refreshData()" id="refreshBtn">🔄 Process Pipeline Data</button>
+            <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">🔄 Process All</button>
+            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: #8b5cf6;">⚡ Test (10 only)</button>
             <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
+            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: #10b981; color: #10b981;">🎯 Sweet Spot Only</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
+                <option value="sweetSpot">Sort: Sweet Spot First</option>
                 <option value="daysOpen">Sort: Days Open</option>
                 <option value="commencedDate">Sort: Filed Date</option>
                 <option value="propertyCity">Sort: City</option>
@@ -418,6 +433,20 @@
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
+        let sweetSpotOnly = false;
+        
+        function toggleSweetSpot() {
+            sweetSpotOnly = !sweetSpotOnly;
+            const btn = document.getElementById('sweetSpotFilter');
+            if (sweetSpotOnly) {
+                btn.style.background = '#10b981';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = '#10b981';
+            }
+            loadData();
+        }
         
         function checkExistingAuth() {
             // Load saved API key
@@ -558,11 +587,33 @@
                     );
                 }
                 
-                // Update stats
+                // Filter sweet spot only if enabled
+                if (sweetSpotOnly) {
+                    cases = cases.filter(c => c.inSweetSpot);
+                }
+                
+                // Sort based on selection
+                if (sortBy === 'sweetSpot') {
+                    cases.sort((a, b) => {
+                        if (a.inSweetSpot && !b.inSweetSpot) return -1;
+                        if (!a.inSweetSpot && b.inSweetSpot) return 1;
+                        return (b.daysOpen || 0) - (a.daysOpen || 0);
+                    });
+                } else if (sortBy === 'daysOpen') {
+                    cases.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0));
+                } else if (sortBy === 'commencedDate') {
+                    cases.sort((a, b) => new Date(a.commencedDate) - new Date(b.commencedDate));
+                } else if (sortBy === 'propertyCity') {
+                    cases.sort((a, b) => (a.propertyCity || '').localeCompare(b.propertyCity || ''));
+                }
+                
+                // Update stats (before filtering for sweet spot only)
+                const allCases = data.cases || [];
                 document.getElementById('totalCases').textContent = cases.length;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
-                const avgDays = cases.length > 0 ? Math.round(cases.reduce((sum, c) => sum + (c.daysOpen || 0), 0) / cases.length) : 0;
-                document.getElementById('avgDays').textContent = avgDays;
+                document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
+                const avgMonths = cases.length > 0 ? Math.round(cases.reduce((sum, c) => sum + (c.monthsOpen || Math.round((c.daysOpen || 0) / 30)), 0) / cases.length) : 0;
+                document.getElementById('avgMonths').textContent = avgMonths;
                 document.getElementById('caseCount').textContent = `(${cases.length})`;
                 
                 if (cases.length === 0) {
@@ -612,11 +663,16 @@
                 </a>`;
             }
             
+            // Sweet spot indicator (9-18 months)
+            const monthsOpen = c.monthsOpen || Math.round((c.daysOpen || 0) / 30);
+            const sweetSpotClass = c.inSweetSpot ? 'sweet-spot' : '';
+            const sweetSpotIcon = c.inSweetSpot ? ' 🎯' : '';
+            
             return `
-                <div class="property-card">
+                <div class="property-card ${sweetSpotClass}">
                     <div class="street-view-container">
                         ${streetViewHtml}
-                        <span class="days-badge">${c.daysOpen || '?'} days</span>
+                        <span class="days-badge ${sweetSpotClass}">${monthsOpen} mo${sweetSpotIcon}</span>
                     </div>
                     <div class="property-info">
                         <div class="property-address">${address}</div>
@@ -650,16 +706,23 @@
             `;
         }
         
-        async function refreshData() {
+        async function refreshData(testMode = false) {
             const btn = document.getElementById('refreshBtn');
+            const testBtn = document.getElementById('testBtn');
             btn.disabled = true;
-            btn.innerHTML = '⏳ Processing... (may take a few minutes)';
+            testBtn.disabled = true;
+            
+            if (testMode) {
+                testBtn.innerHTML = '⏳ Testing...';
+            } else {
+                btn.innerHTML = '⏳ Processing... (may take a few minutes)';
+            }
             
             try {
                 const response = await fetch('/api/pipeline/scrape', {
                     method: 'POST',
                     headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enableEnrichment: false })
+                    body: JSON.stringify({ enableEnrichment: false, testMode: testMode })
                 });
                 
                 const result = await response.json();
@@ -667,14 +730,18 @@
                 if (result.needsCsv) {
                     alert('Please upload a CSV file first!');
                     btn.disabled = false;
-                    btn.innerHTML = '🔄 Process Pipeline Data';
+                    testBtn.disabled = false;
+                    btn.innerHTML = '🔄 Process All';
+                    testBtn.innerHTML = '⚡ Test (10 only)';
                     return;
                 }
                 
                 if (response.status === 429) {
                     alert('Processing already in progress. Please wait.');
                     btn.disabled = false;
-                    btn.innerHTML = '🔄 Process Pipeline Data';
+                    testBtn.disabled = false;
+                    btn.innerHTML = '🔄 Process All';
+                    testBtn.innerHTML = '⚡ Test (10 only)';
                     return;
                 }
                 
@@ -687,12 +754,15 @@
                         setTimeout(checkStatus, 3000);
                     } else {
                         btn.disabled = false;
-                        btn.innerHTML = '🔄 Process Pipeline Data';
+                        testBtn.disabled = false;
+                        btn.innerHTML = '🔄 Process All';
+                        testBtn.innerHTML = '⚡ Test (10 only)';
                         loadData();
                         checkCsvStatus();
                         
                         if (status.lastStatus?.status === 'completed') {
-                            alert(`Done! Found ${status.lastStatus.casesFound} properties.`);
+                            const modeText = status.lastStatus.testMode ? ' (TEST MODE)' : '';
+                            alert(`Done${modeText}! Found ${status.lastStatus.casesFound} properties (${status.lastStatus.withAddress || 0} with addresses).`);
                         } else if (status.lastStatus?.error) {
                             alert('Error: ' + status.lastStatus.error);
                         }
@@ -702,7 +772,9 @@
                 
             } catch (error) {
                 btn.disabled = false;
-                btn.innerHTML = '🔄 Process Pipeline Data';
+                testBtn.disabled = false;
+                btn.innerHTML = '🔄 Process All';
+                testBtn.innerHTML = '⚡ Test (10 only)';
                 alert('Error: ' + error.message);
             }
         }
