@@ -26,13 +26,16 @@ async function runPipelineScraper(options = {}) {
   if (config.enableEnrichment) {
     console.log(`Property enrichment: Enabled (top ${config.maxCasesToEnrich} leads)`);
   }
+  if (config.testMode) {
+    console.log('⚡ TEST MODE ENABLED');
+  }
   console.log('');
   
   let allCases = [];
   
   try {
     // Scrape Montgomery County Courts
-    const montcoCases = await scrapeMontgomeryCourts();
+    const montcoCases = await scrapeMontgomeryCourts({ testMode: config.testMode });
     allCases.push(...montcoCases);
     
     // Property enrichment for top leads
