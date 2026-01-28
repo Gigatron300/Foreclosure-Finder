@@ -310,19 +310,23 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
     });
   }
   
+  const testMode = req.body.testMode === true;
+  
   isPipelineScrapingInProgress = true;
-  lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running' };
-  res.json({ message: 'Pipeline scrape started', status: lastPipelineScrapeStatus });
+  lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', testMode };
+  res.json({ message: testMode ? 'Test scrape started (10 cases)' : 'Pipeline scrape started', status: lastPipelineScrapeStatus });
   
   try {
     const options = {
       enableEnrichment: req.body.enableEnrichment !== false,
-      maxCasesToEnrich: req.body.maxCasesToEnrich || 25
+      maxCasesToEnrich: req.body.maxCasesToEnrich || 25,
+      testMode: testMode
     };
     const cases = await runPipelineScraper(options);
     const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    const withAddress = cases.filter(c => c.propertyAddress).length;
     cases.forEach(c => grades[c.leadGrade || 'C']++);
-    lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'completed', casesFound: cases.length, grades };
+    lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'completed', casesFound: cases.length, withAddress, grades, testMode };
   } catch (error) {
     lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'error', error: error.message };
   } finally {
@@ -362,5 +366,93 @@ ensureDataDir().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀 Foreclosure Finder server running on port ${PORT}`);
     console.log(`   Open http://localhost:${PORT} in your browser`);
+    
+    // Schedule pipeline scrape at 3 AM Eastern Time every day
+    scheduleNightlyScrape();
   });
 });
+
+// ============== SCHEDULED SCRAPING ==============
+
+function scheduleNightlyScrape() {
+  const SCRAPE_HOUR = 3;  // 3 AM
+  const TIMEZONE_OFFSET = -5;  // Eastern Time (adjust for daylight saving if needed: -4 for EDT, -5 for EST)
+  
+  function getNextScrapeTime() {
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const targetUTCHour = SCRAPE_HOUR - TIMEZONE_OFFSET;  // Convert 3 AM ET to UTC
+    
+    let next = new Date(now);
+    next.setUTCHours(targetUTCHour, 0, 0, 0);
+    
+    // If we've passed 3 AM today, schedule for tomorrow
+    if (now >= next) {
+      next.setDate(next.getDate() + 1);
+    }
+    
+    return next;
+  }
+  
+  function scheduleNext() {
+    const nextScrape = getNextScrapeTime();
+    const msUntilScrape = nextScrape.getTime() - Date.now();
+    
+    console.log(`📅 Next scheduled pipeline scrape: ${nextScrape.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`);
+    console.log(`   (in ${Math.round(msUntilScrape / 1000 / 60 / 60 * 10) / 10} hours)`);
+    
+    setTimeout(async () => {
+      console.log(`\n⏰ Starting scheduled 3 AM pipeline scrape...`);
+      
+      // Check if CSV exists before starting
+      try {
+        await fs.access(CSV_FILE);
+      } catch (e) {
+        console.log('   ⚠️ No CSV file found, skipping scheduled scrape');
+        scheduleNext();
+        return;
+      }
+      
+      // Check if scrape is already in progress
+      if (isPipelineScrapingInProgress) {
+        console.log('   ⚠️ Scrape already in progress, skipping');
+        scheduleNext();
+        return;
+      }
+      
+      isPipelineScrapingInProgress = true;
+      lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', scheduled: true };
+      
+      try {
+        const cases = await runPipelineScraper({ enableEnrichment: false });
+        const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+        const withAddress = cases.filter(c => c.propertyAddress).length;
+        cases.forEach(c => grades[c.leadGrade || 'C']++);
+        lastPipelineScrapeStatus = { 
+          completed: new Date().toISOString(), 
+          status: 'completed', 
+          casesFound: cases.length,
+          withAddress,
+          grades,
+          scheduled: true 
+        };
+        console.log(`   ✅ Scheduled scrape complete: ${cases.length} cases (${withAddress} with addresses)`);
+      } catch (error) {
+        lastPipelineScrapeStatus = { 
+          completed: new Date().toISOString(), 
+          status: 'error', 
+          error: error.message,
+          scheduled: true 
+        };
+        console.log(`   ❌ Scheduled scrape error: ${error.message}`);
+      } finally {
+        isPipelineScrapingInProgress = false;
+      }
+      
+      // Schedule the next one
+      scheduleNext();
+    }, msUntilScrape);
+  }
+  
+  scheduleNext();
+}
