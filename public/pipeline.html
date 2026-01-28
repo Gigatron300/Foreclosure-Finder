@@ -236,6 +236,133 @@
         }
         .property-footer a:hover { text-decoration: underline; }
         
+        /* Score Breakdown Dropdown */
+        .score-details {
+            margin: 15px 0;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .score-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: rgba(0,0,0,0.2);
+            cursor: pointer;
+            user-select: none;
+        }
+        .score-summary:hover {
+            background: rgba(0,0,0,0.3);
+        }
+        .score-badge {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+        .score-badge.grade-a { background: rgba(16, 185, 129, 0.3); color: #10b981; }
+        .score-badge.grade-b { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
+        .score-badge.grade-c { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
+        .score-badge.grade-d { background: rgba(249, 115, 22, 0.3); color: #f97316; }
+        .score-badge.grade-f { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
+        .score-number {
+            color: #9ca3af;
+            font-size: 0.85rem;
+        }
+        .expand-icon {
+            margin-left: auto;
+            color: #6b7280;
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        details[open] .expand-icon {
+            transform: rotate(180deg);
+        }
+        .score-breakdown {
+            padding: 15px;
+            background: rgba(0,0,0,0.1);
+        }
+        .score-factor {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.85rem;
+        }
+        .score-factor:last-child {
+            border-bottom: none;
+        }
+        .score-factor.positive .factor-impact {
+            color: #10b981;
+        }
+        .score-factor.negative .factor-impact {
+            color: #ef4444;
+        }
+        .factor-text {
+            color: #d1d5db;
+        }
+        .factor-impact {
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+        }
+        .docket-info {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .docket-header {
+            font-weight: 600;
+            color: #9ca3af;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+        }
+        .docket-stat {
+            font-size: 0.8rem;
+            color: #6b7280;
+            padding: 2px 0;
+        }
+        .docket-stat.warning {
+            color: #f59e0b;
+        }
+        .grade-meaning {
+            color: #9ca3af;
+            font-size: 0.8rem;
+            margin-left: auto;
+            margin-right: 10px;
+        }
+        .score-interpretation {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid #10b981;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 0 6px 6px 0;
+            font-size: 0.85rem;
+            color: #d1d5db;
+        }
+        .score-factor.neutral .factor-impact {
+            color: #6b7280;
+        }
+        .docket-event {
+            display: flex;
+            gap: 10px;
+            padding: 4px 0;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .docket-event:last-child {
+            border-bottom: none;
+        }
+        .event-date {
+            color: #6b7280;
+            min-width: 80px;
+        }
+        .event-type {
+            color: #9ca3af;
+        }
+        
         .maps-link {
             background: #4285f4;
             color: white !important;
@@ -697,6 +824,39 @@
                             </div>
                         </div>
                         
+                        <!-- Score Breakdown Dropdown -->
+                        <details class="score-details">
+                            <summary class="score-summary">
+                                <span class="score-badge grade-${(c.leadGrade || 'C').toLowerCase()}">${c.leadGrade || '?'}</span>
+                                <span class="score-number">Score: ${c.leadScore || 0}</span>
+                                <span class="grade-meaning">${getGradeMeaning(c.leadGrade)}</span>
+                                <span class="expand-icon">▼</span>
+                            </summary>
+                            <div class="score-breakdown">
+                                <div class="score-interpretation">${getGradeAction(c.leadGrade)}</div>
+                                ${(c.scoreFactors || []).map(f => {
+                                    const impact = f.impact || 0;
+                                    const isPositive = impact > 0;
+                                    const isNeutral = impact === 0;
+                                    const impactClass = isNeutral ? 'neutral' : (isPositive ? 'positive' : 'negative');
+                                    const impactText = isNeutral ? '—' : (isPositive ? '+' + impact : impact);
+                                    return `<div class="score-factor ${impactClass}">
+                                        <span class="factor-text">${f.text || f}</span>
+                                        <span class="factor-impact">${impactText}</span>
+                                    </div>`;
+                                }).join('')}
+                                ${c.docket && c.docket.entries > 0 ? `
+                                <div class="docket-info">
+                                    <div class="docket-header">📋 Recent Docket Activity</div>
+                                    ${c.docket.recentEvents && c.docket.recentEvents.length > 0 ? 
+                                        c.docket.recentEvents.slice(-3).map(e => 
+                                            '<div class="docket-event"><span class="event-date">' + e.date + '</span> <span class="event-type">' + e.type + '</span></div>'
+                                        ).join('') : ''}
+                                    ${c.docket.daysSinceLastFiling ? '<div class="docket-stat">Last activity: ' + c.docket.daysSinceLastFiling + ' days ago</div>' : ''}
+                                </div>` : ''}
+                            </div>
+                        </details>
+                        
                         <div class="property-footer">
                             <a href="${c.detailUrl}" target="_blank">Court Record ↗</a>
                             ${c.propertyAddress ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : ''}
@@ -704,6 +864,28 @@
                     </div>
                 </div>
             `;
+        }
+        
+        function getGradeMeaning(grade) {
+            const meanings = {
+                'A': '🔥 Highly willing',
+                'B': '⭐ Strong candidate', 
+                'C': '📋 On the fence',
+                'D': '⏳ Low probability',
+                'F': '❌ Not ready'
+            };
+            return meanings[grade] || '';
+        }
+        
+        function getGradeAction(grade) {
+            const actions = {
+                'A': '📞 <strong>Call immediately</strong> - High likelihood of motivated seller',
+                'B': '📬 <strong>Direct mail + call</strong> - Strong candidate for outreach',
+                'C': '🌱 <strong>Nurture</strong> - May need more time or follow-up',
+                'D': '👀 <strong>Watchlist</strong> - Monitor for changes',
+                'F': '⏸️ <strong>Skip for now</strong> - Not showing selling signals'
+            };
+            return actions[grade] || '';
         }
         
         async function refreshData(testMode = false) {
