@@ -102,22 +102,203 @@ function parseDate(dateStr) {
 }
 
 function calculateScore(c) {
-  let score = 50;
+  // Legacy function - kept for compatibility
+  return calculateEnhancedScore(c);
+}
+
+function calculateEnhancedScore(c) {
+  let score = 0;
   const factors = [];
+  const docket = c.docket || {};
+  const entries = docket.entries || 0;
+  const docketText = (docket.allText || '').toUpperCase();
+  const docketTypes = (docket.allTypes || '').toUpperCase();
+  
+  // ============================================
+  // 1️⃣ CASE AGE SCORE (MAX 25 points)
+  // ============================================
+  const months = c.monthsOpen || Math.round((c.daysOpen || 0) / 30);
   const days = c.daysOpen || 0;
   
-  if (days >= 60 && days <= 120) { score += 15; factors.push('Ideal age'); }
-  else if (days > 120 && days <= 180) { score += 10; factors.push('Good age'); }
-  else if (days > 270) { score -= 15; factors.push('Old case'); }
+  if (days < 120) {
+    // Too early - owner in denial
+    factors.push({ text: '⏱️ Too early (<4 months) - owner likely in denial', impact: 0 });
+  } else if (days >= 120 && days < 180) {
+    score += 5;
+    factors.push({ text: '⏱️ Early stage (4-6 months)', impact: +5 });
+  } else if (days >= 180 && days < 270) {
+    score += 12;
+    factors.push({ text: '⏱️ Building pressure (6-9 months)', impact: +12 });
+  } else if (days >= 270 && days <= 540) {
+    score += 25;
+    factors.push({ text: '🎯 SWEET SPOT (9-18 months) - maximum pressure', impact: +25 });
+  } else if (days > 540 && days <= 720) {
+    score += 18;
+    factors.push({ text: '⏱️ Late stage (18-24 months)', impact: +18 });
+  } else if (days > 720) {
+    score += 10;
+    factors.push({ text: '⏱️ Very old case (>24 months) - may be zombie', impact: +10 });
+  }
   
-  if (!c.hasJudgement) { score += 20; factors.push('No judgment'); }
-  else { score -= 15; factors.push('Has judgment'); }
+  // ============================================
+  // 2️⃣ DOCKET ACTIVITY INTENSITY (MAX 20 points)
+  // ============================================
+  if (entries <= 4) {
+    score += 2;
+    factors.push({ text: `📋 Low activity (${entries} entries)`, impact: +2 });
+  } else if (entries >= 5 && entries <= 8) {
+    score += 8;
+    factors.push({ text: `📋 Moderate activity (${entries} entries)`, impact: +8 });
+  } else if (entries >= 9 && entries <= 14) {
+    score += 14;
+    factors.push({ text: `📋 High activity (${entries} entries) - decision fatigue`, impact: +14 });
+  } else if (entries >= 15) {
+    score += 20;
+    factors.push({ text: `📋 Very high activity (${entries} entries) - exhaustion likely`, impact: +20 });
+  }
   
-  if (c.propertyAddress) { score += 5; factors.push('Has address'); }
-  if (c.inMontgomeryCounty) { score += 5; factors.push('In MontCo'); }
+  // ============================================
+  // 3️⃣ DELAY & CONTINUANCE SIGNALS (MAX 15 points)
+  // ============================================
+  const continuances = docket.continuanceCount || 0;
+  const delayPoints = Math.min(15, continuances * 5);
+  if (continuances > 0) {
+    score += delayPoints;
+    factors.push({ text: `🔄 ${continuances} continuance(s) - bleeding money`, impact: +delayPoints });
+  }
   
+  // ============================================
+  // 4️⃣ RESISTANCE vs CAPITULATION (-15 to +15)
+  // ============================================
+  
+  // NEGATIVE: Still fighting
+  if (docketTypes.includes('ANSWER') && docketText.includes('NEW MATTER')) {
+    score -= 5;
+    factors.push({ text: '⚔️ Answer & New Matter filed - defendant fighting', impact: -5 });
+  }
+  if (docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS')) {
+    score -= 5;
+    factors.push({ text: '⚔️ Preliminary Objections - active resistance', impact: -5 });
+  }
+  if (docketText.includes('OBJECTION') && docketText.includes('OPPOSITION')) {
+    score -= 5;
+    factors.push({ text: '⚔️ Objection/Opposition filed', impact: -5 });
+  }
+  if (docketText.includes('MOTION FOR SUMMARY JUDGMENT') && 
+      (docketText.includes('DEFENDANT') || docketText.includes('BY ') && !docketText.includes('BY PLAINTIFF'))) {
+    score -= 10;
+    factors.push({ text: '⚔️ Defendant filed Motion for Summary Judgment - believes they can win', impact: -10 });
+  }
+  if (docketText.includes('COUNTERCLAIM')) {
+    score -= 8;
+    factors.push({ text: '⚔️ Counterclaim filed - aggressive defense', impact: -8 });
+  }
+  if (docketTypes.includes('REPLY TO NEW MATTER') || docketText.includes('REPLY TO NEW MATTER')) {
+    score -= 3;
+    factors.push({ text: '⚔️ Reply to New Matter - litigation ongoing', impact: -3 });
+  }
+  
+  // POSITIVE: Signs of capitulation
+  if (docketTypes.includes('PRAECIPE TO REINSTATE') || docketText.includes('PRAEC TO REINSTATE') || docketText.includes('PRAECIPE TO REINSTATE')) {
+    score += 5;
+    factors.push({ text: '📄 Praecipe to Reinstate - case reactivated after pause', impact: +5 });
+  }
+  if (docketText.includes('ALTERNATE SERVICE') || docketText.includes('MOTION FOR ALTERNATE SERVICE')) {
+    score += 5;
+    factors.push({ text: '📬 Motion for Alternate Service - hard to locate defendant', impact: +5 });
+  }
+  if (docketText.includes('NOT FOUND') || docketText.includes('FAILURE OF SERVICE')) {
+    score += 5;
+    factors.push({ text: '❓ Service issues - defendant may be avoiding', impact: +5 });
+  }
+  if (docketText.includes('WITHDRAW') && docketText.includes('COUNSEL')) {
+    score += 10;
+    factors.push({ text: '💰 Withdrawal of Counsel - financial distress signal!', impact: +10 });
+  }
+  if (docketText.includes('SUBSTITUTION OF COUNSEL')) {
+    score += 3;
+    factors.push({ text: '🔄 Substitution of Counsel - possible financial strain', impact: +3 });
+  }
+  
+  // ============================================
+  // 5️⃣ SETTLEMENT / DE-ESCALATION (MAX 15 points)
+  // ============================================
+  if (docketText.includes('MATTER SETTLED') || docketText.includes('SETTLED')) {
+    score += 15;
+    factors.push({ text: '🤝 Matter Settled notation - actively negotiating!', impact: +15 });
+  }
+  if (docketText.includes('STIPULATION') && !docketText.includes('DISMISSAL')) {
+    score += 10;
+    factors.push({ text: '📝 Stipulation filed - parties negotiating', impact: +10 });
+  }
+  if (docketText.includes('STIPULATION') && docketText.includes('DISMISSAL')) {
+    score += 8;
+    factors.push({ text: '📝 Stipulation of Dismissal - case may be resolving', impact: +8 });
+  }
+  if (docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) {
+    score += 8;
+    factors.push({ text: '▶️ Stay Lifted - case resuming after pause', impact: +8 });
+  }
+  
+  // ============================================
+  // 6️⃣ RECENT ACTIVITY PENALTY (-10 to 0)
+  // ============================================
+  const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
+  if (daysSinceLastFiling > 0 && daysSinceLastFiling < 30) {
+    score -= 10;
+    factors.push({ text: '🔥 Recent filing (<30 days) - actively litigating', impact: -10 });
+  } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 90) {
+    score -= 5;
+    factors.push({ text: '⏳ Activity 30-90 days ago', impact: -5 });
+  } else if (daysSinceLastFiling >= 90) {
+    factors.push({ text: '💤 No recent activity (>90 days) - case may be stalled', impact: 0 });
+  }
+  
+  // ============================================
+  // 7️⃣ BANKRUPTCY CHECK (Major negative)
+  // ============================================
+  if (docket.hasBankruptcy || docketText.includes('BANKRUPTCY')) {
+    // Check if it's a DISCHARGE of bankruptcy (positive) vs active bankruptcy (negative)
+    if (docketText.includes('DISCHARGE') && docketText.includes('BANKRUPTCY')) {
+      score += 5;
+      factors.push({ text: '✅ Bankruptcy DISCHARGED - case can proceed', impact: +5 });
+    } else {
+      score -= 20;
+      factors.push({ text: '🚫 Bankruptcy filed - case likely stayed', impact: -20 });
+    }
+  }
+  
+  // ============================================
+  // 8️⃣ PROPERTY & DEFENDANT FACTORS
+  // ============================================
+  if (c.propertyAddress) {
+    score += 3;
+    factors.push({ text: '📍 Has property address', impact: +3 });
+  } else {
+    score -= 5;
+    factors.push({ text: '❓ No address found', impact: -5 });
+  }
+  
+  // Defendant type detection
+  const defendant = (c.defendant || '').toUpperCase();
+  if (defendant.includes('LLC') || defendant.includes('INC') || defendant.includes('CORP') || 
+      defendant.includes('TRUST') || defendant.includes('ESTATE OF') || defendant.includes('BANK')) {
+    score -= 8;
+    factors.push({ text: '🏢 Entity defendant - less motivated', impact: -8 });
+  }
+  
+  // ============================================
+  // FINAL SCORE & GRADE
+  // ============================================
   score = Math.max(0, Math.min(100, score));
-  const grade = score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : score >= 35 ? 'D' : 'F';
+  
+  let grade;
+  if (score >= 80) grade = 'A';      // Highly willing seller - call immediately
+  else if (score >= 65) grade = 'B'; // Strong candidate - direct mail + call
+  else if (score >= 50) grade = 'C'; // On the fence - nurture
+  else if (score >= 35) grade = 'D'; // Low probability - watchlist
+  else grade = 'F';                   // Not ready - ignore
+  
   return { score, grade, factors };
 }
 
@@ -267,9 +448,22 @@ async function scrapeMontgomeryCourts(options = {}) {
         // Continue anyway, maybe it loaded
       }
       
-      // Extract addresses
+      // Extract addresses AND docket entries
       const data = await page.evaluate((montcoTowns) => {
-        const addresses = [];
+        const result = {
+          addresses: [],
+          docket: {
+            entries: 0,
+            hasBankruptcy: false,
+            continuanceCount: 0,
+            hasConciliation: false,
+            isStayed: false,
+            lastFilingDate: null,
+            hasServiceCompleted: false,
+            docketEvents: []
+          }
+        };
+        
         const tables = document.querySelectorAll('table');
         
         for (let ti = 0; ti < tables.length; ti++) {
@@ -278,10 +472,91 @@ async function scrapeMontgomeryCourts(options = {}) {
           if (!headerRow) continue;
           
           const headerCells = headerRow.querySelectorAll('th, td');
-          let addrIdx = -1;
+          const headers = [];
           for (let hi = 0; hi < headerCells.length; hi++) {
-            const hText = (headerCells[hi].textContent || '').trim().toLowerCase();
-            if (hText === 'address') {
+            headers.push((headerCells[hi].textContent || '').trim().toLowerCase());
+          }
+          
+          // Check if this is the Docket Entries table
+          if (headers.includes('docket type') || headers.includes('docket text')) {
+            const dateIdx = headers.findIndex(h => h.includes('filing date'));
+            const typeIdx = headers.findIndex(h => h.includes('docket type'));
+            const textIdx = headers.findIndex(h => h.includes('docket text'));
+            
+            const rows = table.querySelectorAll('tr');
+            result.docket.entries = rows.length - 1; // Exclude header
+            
+            // Collect ALL docket text and types for comprehensive analysis
+            let allDocketText = [];
+            let allDocketTypes = [];
+            let firstFilingDate = null;
+            let lastFilingDate = null;
+            
+            for (let ri = 1; ri < rows.length; ri++) {
+              const cells = rows[ri].querySelectorAll('td');
+              const filingDate = dateIdx >= 0 && cells[dateIdx] ? cells[dateIdx].textContent.trim() : '';
+              const docketType = typeIdx >= 0 && cells[typeIdx] ? cells[typeIdx].textContent.trim() : '';
+              const docketText = textIdx >= 0 && cells[textIdx] ? cells[textIdx].textContent.trim().toUpperCase() : '';
+              
+              // Track first and last filing dates
+              if (filingDate) {
+                if (!firstFilingDate) firstFilingDate = filingDate;
+                lastFilingDate = filingDate;
+              }
+              
+              // Collect all text for comprehensive pattern matching
+              if (docketType) allDocketTypes.push(docketType.toUpperCase());
+              if (docketText) allDocketText.push(docketText);
+              
+              // Detect signals in docket text
+              if (docketText.includes('BANKRUPTCY')) {
+                result.docket.hasBankruptcy = true;
+              }
+              if (docketText.includes('CONTINUED TO') || docketText.includes('CONTINUANCE')) {
+                result.docket.continuanceCount++;
+              }
+              if (docketText.includes('CONCILIATION') || docketText.includes('MEDIATION') || docketText.includes('CONFERENCE')) {
+                result.docket.hasConciliation = true;
+              }
+              if (docketText.includes('STAYED') || docketText.includes('STAY ')) {
+                result.docket.isStayed = true;
+              }
+              if (docketText.includes('SERVICE') && (docketText.includes('COMPLETED') || docketText.includes('SERVED'))) {
+                result.docket.hasServiceCompleted = true;
+              }
+              
+              // Store recent docket events (last 5)
+              if (ri >= rows.length - 5) {
+                result.docket.docketEvents.push({
+                  date: filingDate,
+                  type: docketType,
+                  text: docketText.substring(0, 150)
+                });
+              }
+            }
+            
+            // Store concatenated text for pattern matching in scoring
+            result.docket.allText = allDocketText.join(' | ');
+            result.docket.allTypes = allDocketTypes.join(' | ');
+            result.docket.firstFilingDate = firstFilingDate;
+            result.docket.lastFilingDate = lastFilingDate;
+            
+            // Calculate days since last filing
+            if (lastFilingDate) {
+              const parts = lastFilingDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+              if (parts) {
+                const lastDate = new Date(parts[3], parts[1] - 1, parts[2]);
+                result.docket.daysSinceLastFiling = Math.floor((new Date() - lastDate) / 86400000);
+              }
+            }
+            
+            continue;
+          }
+          
+          // Check if this is the address table
+          let addrIdx = -1;
+          for (let hi = 0; hi < headers.length; hi++) {
+            if (headers[hi] === 'address') {
               addrIdx = hi;
               break;
             }
@@ -344,15 +619,16 @@ async function scrapeMontgomeryCourts(options = {}) {
               }
             }
             
-            addresses.push({ street, city, state: 'PA', zip, inMontCo });
+            result.addresses.push({ street, city, state: 'PA', zip, inMontCo });
           }
         }
         
-        return addresses;
+        return result;
       }, MONTCO_TOWNS);
       
-      // Pick best address
-      let bestAddr = data.find(a => a.inMontCo) || data[0] || null;
+      // Pick best address (from new data structure)
+      const addresses = data.addresses || [];
+      let bestAddr = addresses.find(a => a.inMontCo) || addresses[0] || null;
       
       c.propertyAddress = bestAddr?.street || '';
       c.propertyCity = bestAddr?.city || '';
@@ -361,7 +637,11 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.inMontgomeryCounty = bestAddr?.inMontCo || false;
       c.detailUrl = currentUrl;
       
-      const ls = calculateScore(c);
+      // Store docket info
+      c.docket = data.docket || {};
+      
+      // Calculate enhanced score with docket signals
+      const ls = calculateEnhancedScore(c);
       
       results.push({
         caseNumber: c.caseNumber,
@@ -381,18 +661,28 @@ async function scrapeMontgomeryCourts(options = {}) {
         leadScore: ls.score,
         leadGrade: ls.grade,
         scoreFactors: ls.factors,
-        docketSummary: { totalEntries: 0 },
-        remarks: c.inSweetSpot ? '🎯 Sweet Spot' : '',
+        docket: {
+          entries: c.docket.entries || 0,
+          hasBankruptcy: c.docket.hasBankruptcy || false,
+          continuanceCount: c.docket.continuanceCount || 0,
+          hasConciliation: c.docket.hasConciliation || false,
+          isStayed: c.docket.isStayed || false,
+          lastFilingDate: c.docket.lastFilingDate || null,
+          daysSinceLastFiling: c.docket.daysSinceLastFiling || null,
+          hasServiceCompleted: c.docket.hasServiceCompleted || false,
+          recentEvents: c.docket.docketEvents || []
+        },
         detailUrl: c.detailUrl,
         county: 'Montgomery',
         state: 'PA'
       });
       
-      const sweetSpotIndicator = c.inSweetSpot ? ' 🎯' : '';
+      const gradeEmoji = ls.grade === 'A' ? '🔥' : ls.grade === 'B' ? '⭐' : ls.grade === 'C' ? '📋' : '⚠️';
+      const docketInfo = c.docket.entries ? ` [${c.docket.entries}dok]` : '';
       const addrStr = c.propertyAddress ? 
-        `${c.propertyAddress}, ${c.propertyCity}${c.inMontgomeryCounty ? ' ✓' : ''}` : 
+        `${c.propertyAddress}, ${c.propertyCity}` : 
         'No addr';
-      console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${c.monthsOpen}mo${sweetSpotIndicator}] - ${addrStr}`);
+      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}]${docketInfo} - ${addrStr}`);
       
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${err.message.slice(0, 40)})`);
