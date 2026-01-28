@@ -23,13 +23,17 @@ const MONTCO_TOWNS = [
 ];
 
 const CONFIG = {
-  requestDelay: 1000,
-  pageLoadWait: 3000,  // Wait for dynamic content
-  batchSize: 15,
-  batchPause: 3000,
-  maxCasesToProcess: 75,
-  minDaysOld: 45,
-  maxDaysOld: 270,
+  requestDelay: 1200,        // Slightly slower to be safe with more cases
+  pageLoadWait: 3000,        // Wait for dynamic content
+  batchSize: 15,             // Restart browser every 15 cases
+  batchPause: 4000,          // Pause between batches
+  maxCasesToProcess: 0,      // 0 = no limit, process ALL cases
+  testModeLimit: 10,         // When test mode enabled, only process this many
+  // Date ranges in MONTHS (calculated dynamically from today)
+  minMonthsOld: 6,           // Only cases at least 6 months old
+  maxMonthsOld: 24,          // Only cases up to 24 months old
+  sweetSpotMinMonths: 9,     // Sweet spot starts at 9 months
+  sweetSpotMaxMonths: 18,    // Sweet spot ends at 18 months
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
   csvPath: './data/montco-cases.csv'
 };
@@ -119,7 +123,12 @@ function calculateScore(c) {
 
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
-  console.log('\n🏛️ Montgomery County Scraper (Full Page Load)');
+  const testMode = options.testMode || false;
+  
+  console.log('\n🏛️ Montgomery County Scraper');
+  if (testMode) {
+    console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
+  }
   console.log('='.repeat(50));
   
   let allCases;
@@ -133,32 +142,56 @@ async function scrapeMontgomeryCourts(options = {}) {
   }
   
   const now = new Date();
+  
+  // Calculate date range in days from month config
+  const minDaysOld = CONFIG.minMonthsOld * 30;  // ~6 months = 180 days
+  const maxDaysOld = CONFIG.maxMonthsOld * 30;  // ~24 months = 720 days
+  const sweetSpotMinDays = CONFIG.sweetSpotMinMonths * 30;  // ~9 months = 270 days
+  const sweetSpotMaxDays = CONFIG.sweetSpotMaxMonths * 30;  // ~18 months = 540 days
+  
+  console.log(`   Date range: ${CONFIG.minMonthsOld}-${CONFIG.maxMonthsOld} months old`);
+  console.log(`   Sweet spot: ${CONFIG.sweetSpotMinMonths}-${CONFIG.sweetSpotMaxMonths} months old`);
+  
   let targets = allCases
     .filter(c => c.status.toUpperCase().includes('OPEN') && !c.hasJudgement)
     .map(c => {
       const m = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       c.daysOpen = m ? Math.ceil((now - new Date(m[3], m[1] - 1, m[2])) / 86400000) : 0;
+      c.monthsOpen = Math.round(c.daysOpen / 30);
+      // Mark if in sweet spot (9-18 months)
+      c.inSweetSpot = c.daysOpen >= sweetSpotMinDays && c.daysOpen <= sweetSpotMaxDays;
       return c;
     })
-    .filter(c => c.daysOpen >= CONFIG.minDaysOld && c.daysOpen <= CONFIG.maxDaysOld);
+    .filter(c => c.daysOpen >= minDaysOld && c.daysOpen <= maxDaysOld);
   
-  console.log(`   ${targets.length} OPEN cases in range`);
+  const sweetSpotCount = targets.filter(c => c.inSweetSpot).length;
+  console.log(`   ${targets.length} OPEN cases in range (${sweetSpotCount} in sweet spot 🎯)`);
   
+  // Sort: sweet spot cases first, then by age within each group
   targets.sort((a, b) => {
-    const score = d => (d >= 60 && d <= 180) ? 100 : 50;
-    return score(b.daysOpen) - score(a.daysOpen);
+    // Sweet spot cases come first
+    if (a.inSweetSpot && !b.inSweetSpot) return -1;
+    if (!a.inSweetSpot && b.inSweetSpot) return 1;
+    // Within same group, sort by days (older first within sweet spot is better)
+    return b.daysOpen - a.daysOpen;
   });
   
-  if (targets.length > CONFIG.maxCasesToProcess) {
+  // Apply limits: test mode takes priority, then maxCasesToProcess
+  if (testMode) {
+    targets = targets.slice(0, CONFIG.testModeLimit);
+    console.log(`   ⚡ TEST MODE: Limited to ${CONFIG.testModeLimit} cases`);
+  } else if (CONFIG.maxCasesToProcess > 0 && targets.length > CONFIG.maxCasesToProcess) {
     targets = targets.slice(0, CONFIG.maxCasesToProcess);
     console.log(`   Limited to ${CONFIG.maxCasesToProcess} cases`);
+  } else {
+    console.log(`   Processing ALL ${targets.length} cases`);
   }
   
   const results = [];
   let browser = null;
   let page = null;
   
-  console.log(`\n🌐 Scraping ${targets.length} cases (waiting for full page load)...`);
+  console.log(`\n🌐 Scraping ${targets.length} cases...`);
   
   for (let i = 0; i < targets.length; i++) {
     if (i % CONFIG.batchSize === 0) {
@@ -334,6 +367,8 @@ async function scrapeMontgomeryCourts(options = {}) {
         caseNumber: c.caseNumber,
         commencedDate: parseDate(c.commencedDate),
         daysOpen: c.daysOpen,
+        monthsOpen: c.monthsOpen,
+        inSweetSpot: c.inSweetSpot,
         plaintiff: c.plaintiff,
         defendant: c.defendant,
         propertyAddress: c.propertyAddress,
@@ -347,16 +382,17 @@ async function scrapeMontgomeryCourts(options = {}) {
         leadGrade: ls.grade,
         scoreFactors: ls.factors,
         docketSummary: { totalEntries: 0 },
-        remarks: ls.grade === 'A' ? '🔥 HOT LEAD' : ls.grade === 'B' ? '⭐ Good lead' : '',
+        remarks: c.inSweetSpot ? '🎯 Sweet Spot' : '',
         detailUrl: c.detailUrl,
         county: 'Montgomery',
         state: 'PA'
       });
       
+      const sweetSpotIndicator = c.inSweetSpot ? ' 🎯' : '';
       const addrStr = c.propertyAddress ? 
         `${c.propertyAddress}, ${c.propertyCity}${c.inMontgomeryCounty ? ' ✓' : ''}` : 
         'No addr';
-      console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${ls.grade}:${ls.score}] - ${addrStr}`);
+      console.log(`   ${i + 1}/${targets.length} ✓ ${c.caseNumber} [${c.monthsOpen}mo${sweetSpotIndicator}] - ${addrStr}`);
       
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${err.message.slice(0, 40)})`);
