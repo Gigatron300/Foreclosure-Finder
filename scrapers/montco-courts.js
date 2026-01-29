@@ -113,6 +113,7 @@ function calculateEnhancedScore(c) {
   const entries = docket.entries || 0;
   const docketText = (docket.allText || '').toUpperCase();
   const docketTypes = (docket.allTypes || '').toUpperCase();
+  const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
   
   // ============================================
   // 1️⃣ CASE AGE SCORE (MAX 25 points)
@@ -121,7 +122,6 @@ function calculateEnhancedScore(c) {
   const days = c.daysOpen || 0;
   
   if (days < 120) {
-    // Too early - owner in denial
     factors.push({ text: '⏱️ Too early (<4 months) - owner likely in denial', impact: 0 });
   } else if (days >= 120 && days < 180) {
     score += 5;
@@ -158,39 +158,54 @@ function calculateEnhancedScore(c) {
   }
   
   // ============================================
-  // 3️⃣ DELAY & CONTINUANCE SIGNALS (MAX 15 points)
+  // 3️⃣ DELAY & CONTINUANCE SIGNALS (with diminishing returns)
   // ============================================
   const continuances = docket.continuanceCount || 0;
-  const delayPoints = Math.min(15, continuances * 5);
   if (continuances > 0) {
+    // Diminishing returns: 1-3: +5 each, 4-6: +3 each, >6: +1 each
+    let delayPoints = 0;
+    for (let i = 1; i <= continuances; i++) {
+      if (i <= 3) delayPoints += 5;
+      else if (i <= 6) delayPoints += 3;
+      else delayPoints += 1;
+    }
+    delayPoints = Math.min(25, delayPoints); // Cap at 25
     score += delayPoints;
-    factors.push({ text: `🔄 ${continuances} continuance(s) - bleeding money`, impact: +delayPoints });
+    factors.push({ text: `🔄 ${continuances} continuance(s) - mounting costs & fatigue`, impact: +delayPoints });
   }
   
   // ============================================
-  // 4️⃣ RESISTANCE vs CAPITULATION (-15 to +15)
+  // 4️⃣ RESISTANCE vs CAPITULATION (-25 to +20)
   // ============================================
+  
+  // Track if defendant is actively fighting (for "false hope" check)
+  let activeFighting = false;
   
   // NEGATIVE: Still fighting
   if (docketTypes.includes('ANSWER') && docketText.includes('NEW MATTER')) {
     score -= 5;
+    activeFighting = true;
     factors.push({ text: '⚔️ Answer & New Matter filed - defendant fighting', impact: -5 });
   }
   if (docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS')) {
     score -= 5;
+    activeFighting = true;
     factors.push({ text: '⚔️ Preliminary Objections - active resistance', impact: -5 });
   }
   if (docketText.includes('OBJECTION') && docketText.includes('OPPOSITION')) {
     score -= 5;
+    activeFighting = true;
     factors.push({ text: '⚔️ Objection/Opposition filed', impact: -5 });
   }
   if (docketText.includes('MOTION FOR SUMMARY JUDGMENT') && 
-      (docketText.includes('DEFENDANT') || docketText.includes('BY ') && !docketText.includes('BY PLAINTIFF'))) {
+      (docketText.includes('DEFENDANT') || (docketText.includes('BY ') && !docketText.includes('BY PLAINTIFF')))) {
     score -= 10;
+    activeFighting = true;
     factors.push({ text: '⚔️ Defendant filed Motion for Summary Judgment - believes they can win', impact: -10 });
   }
   if (docketText.includes('COUNTERCLAIM')) {
     score -= 8;
+    activeFighting = true;
     factors.push({ text: '⚔️ Counterclaim filed - aggressive defense', impact: -8 });
   }
   if (docketTypes.includes('REPLY TO NEW MATTER') || docketText.includes('REPLY TO NEW MATTER')) {
@@ -212,8 +227,8 @@ function calculateEnhancedScore(c) {
     factors.push({ text: '❓ Service issues - defendant may be avoiding', impact: +5 });
   }
   if (docketText.includes('WITHDRAW') && docketText.includes('COUNSEL')) {
-    score += 10;
-    factors.push({ text: '💰 Withdrawal of Counsel - financial distress signal!', impact: +10 });
+    score += 12;
+    factors.push({ text: '💰 Withdrawal of Counsel - financial distress signal!', impact: +12 });
   }
   if (docketText.includes('SUBSTITUTION OF COUNSEL')) {
     score += 3;
@@ -223,53 +238,101 @@ function calculateEnhancedScore(c) {
   // ============================================
   // 5️⃣ SETTLEMENT / DE-ESCALATION (MAX 15 points)
   // ============================================
+  let hasSettlementSignal = false;
+  
   if (docketText.includes('MATTER SETTLED') || docketText.includes('SETTLED')) {
     score += 15;
+    hasSettlementSignal = true;
     factors.push({ text: '🤝 Matter Settled notation - actively negotiating!', impact: +15 });
   }
   if (docketText.includes('STIPULATION') && !docketText.includes('DISMISSAL')) {
     score += 10;
+    hasSettlementSignal = true;
     factors.push({ text: '📝 Stipulation filed - parties negotiating', impact: +10 });
   }
   if (docketText.includes('STIPULATION') && docketText.includes('DISMISSAL')) {
     score += 8;
+    hasSettlementSignal = true;
     factors.push({ text: '📝 Stipulation of Dismissal - case may be resolving', impact: +8 });
   }
-  if (docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) {
+  
+  // ============================================
+  // 6️⃣ TRANSITION BONUSES (state changes matter!)
+  // ============================================
+  
+  // Stay lifted after being stayed = case resuming, pressure back on
+  if ((docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) && docket.isStayed) {
+    score += 12;
+    factors.push({ text: '▶️ Stay LIFTED after pause - pressure resuming!', impact: +12 });
+  } else if (docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) {
     score += 8;
-    factors.push({ text: '▶️ Stay Lifted - case resuming after pause', impact: +8 });
+    factors.push({ text: '▶️ Stay Lifted - case resuming', impact: +8 });
+  }
+  
+  // Silence after heavy activity = exhaustion (context-aware silence)
+  if (entries >= 8 && daysSinceLastFiling >= 90) {
+    score += 10;
+    factors.push({ text: '💤 Silence after heavy activity - likely exhausted', impact: +10 });
+  } else if (entries >= 5 && daysSinceLastFiling >= 60) {
+    score += 5;
+    factors.push({ text: '💤 Slowing down after activity', impact: +5 });
   }
   
   // ============================================
-  // 6️⃣ RECENT ACTIVITY PENALTY (-10 to 0)
+  // 7️⃣ RECENT ACTIVITY PENALTY (decay function)
   // ============================================
-  const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
-  if (daysSinceLastFiling > 0 && daysSinceLastFiling < 30) {
-    score -= 10;
-    factors.push({ text: '🔥 Recent filing (<30 days) - actively litigating', impact: -10 });
-  } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 90) {
-    score -= 5;
-    factors.push({ text: '⏳ Activity 30-90 days ago', impact: -5 });
-  } else if (daysSinceLastFiling >= 90) {
-    factors.push({ text: '💤 No recent activity (>90 days) - case may be stalled', impact: 0 });
+  if (daysSinceLastFiling > 0 && daysSinceLastFiling < 14) {
+    score -= 12;
+    factors.push({ text: '🔥 Very recent filing (<14 days) - actively litigating', impact: -12 });
+  } else if (daysSinceLastFiling >= 14 && daysSinceLastFiling < 30) {
+    score -= 8;
+    factors.push({ text: '🔥 Recent filing (14-30 days)', impact: -8 });
+  } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 60) {
+    score -= 4;
+    factors.push({ text: '⏳ Activity 30-60 days ago', impact: -4 });
+  } else if (daysSinceLastFiling >= 60 && daysSinceLastFiling < 90) {
+    // Neutral - no penalty
+    factors.push({ text: '⏳ Activity 60-90 days ago', impact: 0 });
+  }
+  // >90 days already handled in transition bonuses if high activity
+  
+  // ============================================
+  // 8️⃣ "FALSE HOPE" DAMPENER
+  // Early case + high activity + no adverse rulings = still believes they can win
+  // ============================================
+  const hasAdverseRuling = docketText.includes('DENIED') || docketText.includes('OVERRULED') || 
+                           docketText.includes('MOTION GRANTED') && docketText.includes('PLAINTIFF');
+  
+  if (days < 360 && entries >= 6 && activeFighting && !hasAdverseRuling) {
+    score -= 8;
+    factors.push({ text: '⚠️ "False hope" - early fighter with no adverse rulings yet', impact: -8 });
   }
   
   // ============================================
-  // 7️⃣ BANKRUPTCY CHECK (Major negative)
+  // 9️⃣ BANKRUPTCY CHECK (with decay)
   // ============================================
   if (docket.hasBankruptcy || docketText.includes('BANKRUPTCY')) {
     // Check if it's a DISCHARGE of bankruptcy (positive) vs active bankruptcy (negative)
     if (docketText.includes('DISCHARGE') && docketText.includes('BANKRUPTCY')) {
-      score += 5;
-      factors.push({ text: '✅ Bankruptcy DISCHARGED - case can proceed', impact: +5 });
+      score += 8;
+      factors.push({ text: '✅ Bankruptcy DISCHARGED - case can proceed!', impact: +8 });
     } else {
-      score -= 20;
-      factors.push({ text: '🚫 Bankruptcy filed - case likely stayed', impact: -20 });
+      // Apply decay based on case age (rough proxy for BK timing)
+      if (daysSinceLastFiling < 90) {
+        score -= 25;
+        factors.push({ text: '🚫 Recent bankruptcy activity - case likely stayed', impact: -25 });
+      } else if (daysSinceLastFiling < 180) {
+        score -= 18;
+        factors.push({ text: '🚫 Bankruptcy (moderating) - still impacting case', impact: -18 });
+      } else {
+        score -= 10;
+        factors.push({ text: '⚠️ Bankruptcy noted - may be old/resolved', impact: -10 });
+      }
     }
   }
   
   // ============================================
-  // 8️⃣ PROPERTY & DEFENDANT FACTORS
+  // 🔟 PROPERTY & DEFENDANT FACTORS
   // ============================================
   if (c.propertyAddress) {
     score += 3;
