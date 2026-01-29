@@ -363,6 +363,73 @@
             color: #9ca3af;
         }
         
+        /* 1. Contributing Factors */
+        .factors-header {
+            font-weight: 600;
+            color: #10b981;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+        .no-factors {
+            color: #6b7280;
+            font-size: 0.85rem;
+            padding: 8px 0;
+        }
+        
+        /* 2. Negative Signals */
+        .negative-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .negative-header {
+            font-weight: 600;
+            color: #ef4444;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+        
+        /* 3. What's Holding It Back (Missing) */
+        .missing-section {
+            margin-top: 15px;
+            padding: 12px;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            border-radius: 8px;
+        }
+        .missing-header {
+            font-weight: 600;
+            color: #fbbf24;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+        .missing-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(251, 191, 36, 0.1);
+            font-size: 0.85rem;
+            color: #d1d5db;
+        }
+        .missing-item:last-child {
+            border-bottom: none;
+        }
+        .missing-potential {
+            font-weight: 500;
+            color: #6b7280;
+            font-size: 0.8rem;
+        }
+        .all-good {
+            margin-top: 15px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #10b981;
+            font-size: 0.85rem;
+        }
+        
         .maps-link {
             background: #4285f4;
             color: white !important;
@@ -536,6 +603,8 @@
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: #10b981; color: #10b981;">🎯 Sweet Spot Only</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
+                <option value="scoreDesc">Sort: Score (High → Low)</option>
+                <option value="scoreAsc">Sort: Score (Low → High)</option>
                 <option value="sweetSpot">Sort: Sweet Spot First</option>
                 <option value="daysOpen">Sort: Days Open</option>
                 <option value="commencedDate">Sort: Filed Date</option>
@@ -720,11 +789,15 @@
                 }
                 
                 // Sort based on selection
-                if (sortBy === 'sweetSpot') {
+                if (sortBy === 'scoreDesc') {
+                    cases.sort((a, b) => (b.leadScore || 0) - (a.leadScore || 0));
+                } else if (sortBy === 'scoreAsc') {
+                    cases.sort((a, b) => (a.leadScore || 0) - (b.leadScore || 0));
+                } else if (sortBy === 'sweetSpot') {
                     cases.sort((a, b) => {
                         if (a.inSweetSpot && !b.inSweetSpot) return -1;
                         if (!a.inSweetSpot && b.inSweetSpot) return 1;
-                        return (b.daysOpen || 0) - (a.daysOpen || 0);
+                        return (b.leadScore || 0) - (a.leadScore || 0);
                     });
                 } else if (sortBy === 'daysOpen') {
                     cases.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0));
@@ -834,17 +907,45 @@
                             </summary>
                             <div class="score-breakdown">
                                 <div class="score-interpretation">${getGradeAction(c.leadGrade)}</div>
-                                ${(c.scoreFactors || []).map(f => {
-                                    const impact = f.impact || 0;
-                                    const isPositive = impact > 0;
-                                    const isNeutral = impact === 0;
-                                    const impactClass = isNeutral ? 'neutral' : (isPositive ? 'positive' : 'negative');
-                                    const impactText = isNeutral ? '—' : (isPositive ? '+' + impact : impact);
-                                    return `<div class="score-factor ${impactClass}">
-                                        <span class="factor-text">${f.text || f}</span>
-                                        <span class="factor-impact">${impactText}</span>
-                                    </div>`;
-                                }).join('')}
+                                
+                                <!-- 1. Contributing Factors -->
+                                <div class="factors-header">✅ Contributing Factors</div>
+                                ${(() => {
+                                    const positiveFactors = (c.scoreFactors || []).filter(f => (f.impact || 0) > 0);
+                                    if (positiveFactors.length > 0) {
+                                        return positiveFactors.map(f => 
+                                            '<div class="score-factor positive"><span class="factor-text">' + f.text + '</span><span class="factor-impact">+' + f.impact + '</span></div>'
+                                        ).join('');
+                                    }
+                                    return '<div class="no-factors">No positive factors yet</div>';
+                                })()}
+                                
+                                <!-- 2. Negative Signals -->
+                                ${(() => {
+                                    const negativeFactors = (c.scoreFactors || []).filter(f => (f.impact || 0) < 0);
+                                    if (negativeFactors.length > 0) {
+                                        return '<div class="negative-section">' +
+                                            '<div class="negative-header">❌ Negative Signals</div>' +
+                                            negativeFactors.map(f => 
+                                                '<div class="score-factor negative"><span class="factor-text">' + f.text + '</span><span class="factor-impact">' + f.impact + '</span></div>'
+                                            ).join('') + '</div>';
+                                    }
+                                    return '';
+                                })()}
+                                
+                                <!-- 3. What's Holding It Back (Missing Opportunities) -->
+                                ${(() => {
+                                    const missingPositives = getMissingPositives(c);
+                                    if (missingPositives.length > 0) {
+                                        return '<div class="missing-section">' +
+                                            '<div class="missing-header">📭 What\'s Holding It Back</div>' +
+                                            missingPositives.map(m => 
+                                                '<div class="missing-item"><span>' + m.text + '</span><span class="missing-potential">+' + m.potential + ' potential</span></div>'
+                                            ).join('') + '</div>';
+                                    }
+                                    return '<div class="all-good">🎉 This lead has all the key signals!</div>';
+                                })()}
+                                
                                 ${c.docket && c.docket.entries > 0 ? `
                                 <div class="docket-info">
                                     <div class="docket-header">📋 Recent Docket Activity</div>
@@ -864,6 +965,54 @@
                     </div>
                 </div>
             `;
+        }
+        
+        function getMissingPositives(c) {
+            const missing = [];
+            const docket = c.docket || {};
+            const factors = (c.scoreFactors || []).map(f => f.text || '');
+            const days = c.daysOpen || 0;
+            
+            // Check for missing sweet spot timing
+            if (days < 270 || days > 540) {
+                missing.push({ text: '🎯 Not in sweet spot (9-18 months)', potential: 25 });
+            }
+            
+            // Check for missing high activity
+            if ((docket.entries || 0) < 9) {
+                missing.push({ text: '📋 Lower docket activity (<9 entries)', potential: 14 });
+            }
+            
+            // Check for missing continuances
+            if ((docket.continuanceCount || 0) < 3) {
+                missing.push({ text: '🔄 Few continuances (delays = fatigue)', potential: 15 });
+            }
+            
+            // Check for missing settlement signals
+            const hasSettlement = factors.some(f => f.includes('Settled') || f.includes('Stipulation'));
+            if (!hasSettlement) {
+                missing.push({ text: '🤝 No settlement/negotiation signals', potential: 15 });
+            }
+            
+            // Check for missing counsel withdrawal
+            const hasCounselWithdrawal = factors.some(f => f.includes('Withdrawal of Counsel'));
+            if (!hasCounselWithdrawal) {
+                missing.push({ text: '💰 No counsel withdrawal (financial distress signal)', potential: 12 });
+            }
+            
+            // Check for missing silence after activity
+            const hasSilence = factors.some(f => f.includes('Silence') || f.includes('Slowing down'));
+            if (!hasSilence && (docket.entries || 0) >= 5) {
+                missing.push({ text: '💤 No period of silence/exhaustion', potential: 10 });
+            }
+            
+            // Check for missing stay lifted
+            const hasStayLifted = factors.some(f => f.includes('Stay') && f.includes('Lifted'));
+            if (!hasStayLifted) {
+                missing.push({ text: '▶️ No stay lifted transition', potential: 8 });
+            }
+            
+            return missing;
         }
         
         function getGradeMeaning(grade) {
