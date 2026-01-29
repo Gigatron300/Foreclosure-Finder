@@ -344,14 +344,25 @@
             font-size: 0.8rem;
         }
         .missing-item {
-            padding: 3px 0;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(251, 191, 36, 0.1);
+        }
+        .missing-item:last-child {
+            border-bottom: none;
+        }
+        .missing-text {
+            display: block;
             font-size: 0.8rem;
-            color: #d1d5db;
+            color: #e5e7eb;
             line-height: 1.3;
         }
-        .missing-potential {
-            color: #9ca3af;
+        .missing-explanation {
+            display: block;
             font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 2px;
+            padding-left: 18px;
+            line-height: 1.3;
         }
         .all-good {
             margin-top: 10px;
@@ -921,7 +932,7 @@
                                         return '<div class="missing-section">' +
                                             '<div class="missing-header">📭 What\'s Holding It Back</div>' +
                                             missingPositives.map(m => 
-                                                '<div class="missing-item">🔶 ' + m.text + ' <span class="missing-potential">(~+' + m.potential + ' pts)</span></div>'
+                                                '<div class="missing-item"><span class="missing-text">🔶 ' + m.text + '</span><span class="missing-explanation">' + m.explanation + '</span></div>'
                                             ).join('') + '</div>';
                                     }
                                     return '<div class="all-good">🎉 This lead has all the key signals!</div>';
@@ -955,42 +966,69 @@
             const days = c.daysOpen || 0;
             
             // Check for missing sweet spot timing
-            if (days < 270 || days > 540) {
-                missing.push({ text: 'Case not in 9-18 month sweet spot yet', potential: 25 });
+            if (days < 270) {
+                missing.push({ 
+                    text: 'Case has not yet reached the 9-18 month sweet spot.', 
+                    explanation: 'As the case ages into this window, the score would increase by approximately 25 points.' 
+                });
+            } else if (days > 540) {
+                missing.push({ 
+                    text: 'Case has passed the 9-18 month sweet spot.', 
+                    explanation: 'Older cases score lower as motivated sellers typically act earlier.' 
+                });
             }
             
             // Check for missing high activity
             if ((docket.entries || 0) < 9) {
-                missing.push({ text: 'Limited docket activity so far', potential: 14 });
+                missing.push({ 
+                    text: 'Limited docket activity observed so far.', 
+                    explanation: 'If more filings occur (9+ entries), the score would increase by approximately 14 points due to decision fatigue.' 
+                });
             }
             
             // Check for missing continuances
             if ((docket.continuanceCount || 0) < 3) {
-                missing.push({ text: 'Few delays/continuances recorded', potential: 15 });
+                missing.push({ 
+                    text: 'Few delays or continuances recorded yet.', 
+                    explanation: 'Multiple continuances signal mounting costs and fatigue. Three or more would add approximately 15 points.' 
+                });
             }
             
             // Check for missing settlement signals
             const hasSettlement = factors.some(f => f.includes('Settled') || f.includes('Stipulation'));
             if (!hasSettlement) {
-                missing.push({ text: 'No settlement or negotiation activity yet', potential: 15 });
+                missing.push({ 
+                    text: 'No settlement or negotiation activity observed yet.', 
+                    explanation: 'If settlement discussions or stipulations appear, the score would increase by approximately 15 points.' 
+                });
             }
             
             // Check for missing counsel withdrawal
             const hasCounselWithdrawal = factors.some(f => f.includes('Withdrawal of Counsel'));
             if (!hasCounselWithdrawal) {
-                missing.push({ text: 'Defendant still has legal counsel', potential: 12 });
+                missing.push({ 
+                    text: 'Defendant's legal counsel has not withdrawn.', 
+                    explanation: 'Counsel withdrawal is a strong financial distress signal. If this occurs, the score would increase by approximately 12 points.' 
+                });
             }
             
             // Check for missing silence after activity
             const hasSilence = factors.some(f => f.includes('Silence') || f.includes('Slowing down'));
             if (!hasSilence && (docket.entries || 0) >= 5) {
-                missing.push({ text: 'No quiet period indicating exhaustion', potential: 10 });
+                missing.push({ 
+                    text: 'No extended quiet period observed after docket activity.', 
+                    explanation: 'A 90+ day silence after heavy activity signals exhaustion. If this occurs, the score would increase by approximately 10 points.' 
+                });
             }
             
             // Check for missing stay lifted
             const hasStayLifted = factors.some(f => f.includes('Stay') && f.includes('Lifted'));
-            if (!hasStayLifted) {
-                missing.push({ text: 'No stay lifted event', potential: 8 });
+            const hasStay = factors.some(f => f.includes('stayed') || f.includes('Stayed'));
+            if (!hasStayLifted && hasStay) {
+                missing.push({ 
+                    text: 'Case was stayed but the stay has not yet been lifted.', 
+                    explanation: 'When a stay is lifted, pressure resumes. If this occurs, the score would increase by approximately 12 points.' 
+                });
             }
             
             return missing;
