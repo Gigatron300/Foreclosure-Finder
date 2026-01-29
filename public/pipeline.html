@@ -279,71 +279,11 @@
         details[open] .expand-icon {
             transform: rotate(180deg);
         }
-        .score-breakdown {
-            padding: 15px;
-            background: rgba(0,0,0,0.1);
-        }
-        .score-factor {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            font-size: 0.85rem;
-        }
-        .score-factor:last-child {
-            border-bottom: none;
-        }
-        .score-factor.positive .factor-impact {
-            color: #10b981;
-        }
-        .score-factor.negative .factor-impact {
-            color: #ef4444;
-        }
-        .factor-text {
-            color: #d1d5db;
-        }
-        .factor-impact {
-            font-weight: 600;
-            min-width: 40px;
-            text-align: right;
-        }
-        .docket-info {
-            margin-top: 12px;
-            padding-top: 12px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        .docket-header {
-            font-weight: 600;
-            color: #9ca3af;
-            margin-bottom: 8px;
-            font-size: 0.8rem;
-        }
-        .docket-stat {
-            font-size: 0.8rem;
-            color: #6b7280;
-            padding: 2px 0;
-        }
-        .docket-stat.warning {
-            color: #f59e0b;
-        }
         .grade-meaning {
             color: #9ca3af;
             font-size: 0.8rem;
             margin-left: auto;
             margin-right: 10px;
-        }
-        .score-interpretation {
-            background: rgba(16, 185, 129, 0.1);
-            border-left: 3px solid #10b981;
-            padding: 10px 12px;
-            margin-bottom: 12px;
-            border-radius: 0 6px 6px 0;
-            font-size: 0.85rem;
-            color: #d1d5db;
-        }
-        .score-factor.neutral .factor-impact {
-            color: #6b7280;
         }
         .docket-event {
             display: flex;
@@ -367,68 +307,109 @@
         .factors-header {
             font-weight: 600;
             color: #10b981;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
         }
         .no-factors {
             color: #6b7280;
-            font-size: 0.85rem;
-            padding: 8px 0;
+            font-size: 0.8rem;
+            padding: 4px 0;
         }
         
         /* 2. Negative Signals */
         .negative-section {
-            margin-top: 15px;
-            padding-top: 15px;
+            margin-top: 10px;
+            padding-top: 10px;
             border-top: 1px solid rgba(255,255,255,0.1);
         }
         .negative-header {
             font-weight: 600;
             color: #ef4444;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
         }
         
         /* 3. What's Holding It Back (Missing) */
         .missing-section {
-            margin-top: 15px;
-            padding: 12px;
+            margin-top: 10px;
+            padding: 8px 10px;
             background: rgba(251, 191, 36, 0.08);
             border: 1px solid rgba(251, 191, 36, 0.2);
-            border-radius: 8px;
+            border-radius: 6px;
         }
         .missing-header {
             font-weight: 600;
             color: #fbbf24;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
-        }
-        .missing-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 5px 0;
-            border-bottom: 1px solid rgba(251, 191, 36, 0.1);
-            font-size: 0.85rem;
-            color: #d1d5db;
-        }
-        .missing-item:last-child {
-            border-bottom: none;
-        }
-        .missing-potential {
-            font-weight: 500;
-            color: #6b7280;
+            margin-bottom: 6px;
             font-size: 0.8rem;
         }
+        .missing-item {
+            padding: 3px 0;
+            font-size: 0.8rem;
+            color: #d1d5db;
+            line-height: 1.3;
+        }
+        .missing-potential {
+            color: #9ca3af;
+            font-size: 0.75rem;
+        }
         .all-good {
-            margin-top: 15px;
+            margin-top: 10px;
             background: rgba(16, 185, 129, 0.1);
             border: 1px solid rgba(16, 185, 129, 0.3);
             border-radius: 6px;
-            padding: 10px 12px;
+            padding: 8px 10px;
             color: #10b981;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
         }
+        
+        /* Compact score breakdown */
+        .score-breakdown {
+            padding: 10px;
+            background: rgba(0,0,0,0.1);
+        }
+        .score-interpretation {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid #10b981;
+            padding: 6px 10px;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+            font-size: 0.8rem;
+            color: #d1d5db;
+        }
+        .score-factor {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 0;
+            font-size: 0.8rem;
+        }
+        .score-factor.positive .factor-impact { color: #10b981; }
+        .score-factor.negative .factor-impact { color: #ef4444; }
+        .score-factor.neutral .factor-impact { color: #6b7280; }
+        .factor-text { color: #d1d5db; }
+        .factor-impact { font-weight: 600; min-width: 35px; text-align: right; }
+        
+        /* Compact docket info */
+        .docket-info {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .docket-header {
+            font-weight: 600;
+            color: #9ca3af;
+            margin-bottom: 4px;
+            font-size: 0.75rem;
+        }
+        .docket-event {
+            display: flex;
+            gap: 8px;
+            padding: 2px 0;
+            font-size: 0.75rem;
+        }
+        .event-date { color: #6b7280; min-width: 70px; }
+        .docket-stat { font-size: 0.75rem; color: #6b7280; padding: 2px 0; }
         
         .maps-link {
             background: #4285f4;
@@ -940,7 +921,7 @@
                                         return '<div class="missing-section">' +
                                             '<div class="missing-header">📭 What\'s Holding It Back</div>' +
                                             missingPositives.map(m => 
-                                                '<div class="missing-item"><span>' + m.text + '</span><span class="missing-potential">+' + m.potential + ' potential</span></div>'
+                                                '<div class="missing-item">🔶 ' + m.text + ' <span class="missing-potential">(~+' + m.potential + ' pts)</span></div>'
                                             ).join('') + '</div>';
                                     }
                                     return '<div class="all-good">🎉 This lead has all the key signals!</div>';
@@ -975,41 +956,41 @@
             
             // Check for missing sweet spot timing
             if (days < 270 || days > 540) {
-                missing.push({ text: '🎯 Not in sweet spot (9-18 months)', potential: 25 });
+                missing.push({ text: 'Case not in 9-18 month sweet spot yet', potential: 25 });
             }
             
             // Check for missing high activity
             if ((docket.entries || 0) < 9) {
-                missing.push({ text: '📋 Lower docket activity (<9 entries)', potential: 14 });
+                missing.push({ text: 'Limited docket activity so far', potential: 14 });
             }
             
             // Check for missing continuances
             if ((docket.continuanceCount || 0) < 3) {
-                missing.push({ text: '🔄 Few continuances (delays = fatigue)', potential: 15 });
+                missing.push({ text: 'Few delays/continuances recorded', potential: 15 });
             }
             
             // Check for missing settlement signals
             const hasSettlement = factors.some(f => f.includes('Settled') || f.includes('Stipulation'));
             if (!hasSettlement) {
-                missing.push({ text: '🤝 No settlement/negotiation signals', potential: 15 });
+                missing.push({ text: 'No settlement or negotiation activity yet', potential: 15 });
             }
             
             // Check for missing counsel withdrawal
             const hasCounselWithdrawal = factors.some(f => f.includes('Withdrawal of Counsel'));
             if (!hasCounselWithdrawal) {
-                missing.push({ text: '💰 No counsel withdrawal (financial distress signal)', potential: 12 });
+                missing.push({ text: 'Defendant still has legal counsel', potential: 12 });
             }
             
             // Check for missing silence after activity
             const hasSilence = factors.some(f => f.includes('Silence') || f.includes('Slowing down'));
             if (!hasSilence && (docket.entries || 0) >= 5) {
-                missing.push({ text: '💤 No period of silence/exhaustion', potential: 10 });
+                missing.push({ text: 'No quiet period indicating exhaustion', potential: 10 });
             }
             
             // Check for missing stay lifted
             const hasStayLifted = factors.some(f => f.includes('Stay') && f.includes('Lifted'));
             if (!hasStayLifted) {
-                missing.push({ text: '▶️ No stay lifted transition', potential: 8 });
+                missing.push({ text: 'No stay lifted event', potential: 8 });
             }
             
             return missing;
