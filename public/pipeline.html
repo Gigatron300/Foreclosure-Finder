@@ -329,23 +329,41 @@
             font-size: 0.8rem;
         }
         
-        /* 3. What's Holding It Back (Missing) */
-        .missing-section {
+        /* 3. What's Holding It Back (Nested Dropdown) */
+        .missing-details {
             margin-top: 10px;
+        }
+        .missing-summary {
+            cursor: pointer;
             padding: 8px 10px;
             background: rgba(251, 191, 36, 0.08);
             border: 1px solid rgba(251, 191, 36, 0.2);
             border-radius: 6px;
-        }
-        .missing-header {
-            font-weight: 600;
-            color: #fbbf24;
-            margin-bottom: 6px;
             font-size: 0.8rem;
+            color: #fbbf24;
+            font-weight: 500;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .missing-summary:hover {
+            background: rgba(251, 191, 36, 0.12);
+        }
+        .missing-count {
+            color: #9ca3af;
+            font-weight: 400;
+        }
+        .missing-content {
+            padding: 10px;
+            border: 1px solid rgba(251, 191, 36, 0.15);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            background: rgba(0,0,0,0.1);
         }
         .missing-item {
             padding: 6px 0;
-            border-bottom: 1px solid rgba(251, 191, 36, 0.1);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
         }
         .missing-item:last-child {
             border-bottom: none;
@@ -925,15 +943,16 @@
                                     return '';
                                 })()}
                                 
-                                <!-- 3. What's Holding It Back (Missing Opportunities) -->
+                                <!-- 3. What's Holding It Back (Nested Dropdown) -->
                                 ${(() => {
                                     const missingPositives = getMissingPositives(c);
                                     if (missingPositives.length > 0) {
-                                        return '<div class="missing-section">' +
-                                            '<div class="missing-header">📭 What\'s Holding It Back</div>' +
+                                        return '<details class="missing-details">' +
+                                            '<summary class="missing-summary">📭 What\'s Holding It Back <span class="missing-count">(' + missingPositives.length + ' items)</span></summary>' +
+                                            '<div class="missing-content">' +
                                             missingPositives.map(m => 
                                                 '<div class="missing-item"><span class="missing-text">🔶 ' + m.text + '</span><span class="missing-explanation">' + m.explanation + '</span></div>'
-                                            ).join('') + '</div>';
+                                            ).join('') + '</div></details>';
                                     }
                                     return '<div class="all-good">🎉 This lead has all the key signals!</div>';
                                 })()}
@@ -969,12 +988,12 @@
             if (days < 270) {
                 missing.push({ 
                     text: 'Case has not yet reached the 9-18 month sweet spot.', 
-                    explanation: 'As the case ages into this window, the score would increase by approximately 25 points.' 
+                    explanation: 'Cases in this window show the highest seller motivation.' 
                 });
             } else if (days > 540) {
                 missing.push({ 
                     text: 'Case has passed the 9-18 month sweet spot.', 
-                    explanation: 'Older cases score lower as motivated sellers typically act earlier.' 
+                    explanation: 'Older cases often indicate less motivated sellers.' 
                 });
             }
             
@@ -982,7 +1001,7 @@
             if ((docket.entries || 0) < 9) {
                 missing.push({ 
                     text: 'Limited docket activity observed so far.', 
-                    explanation: 'If more filings occur (9+ entries), the score would increase by approximately 14 points due to decision fatigue.' 
+                    explanation: 'More filings typically indicate mounting pressure and decision fatigue.' 
                 });
             }
             
@@ -990,7 +1009,7 @@
             if ((docket.continuanceCount || 0) < 3) {
                 missing.push({ 
                     text: 'Few delays or continuances recorded yet.', 
-                    explanation: 'Multiple continuances signal mounting costs and fatigue. Three or more would add approximately 15 points.' 
+                    explanation: 'Multiple continuances signal mounting costs and fatigue.' 
                 });
             }
             
@@ -999,7 +1018,7 @@
             if (!hasSettlement) {
                 missing.push({ 
                     text: 'No settlement or negotiation activity observed yet.', 
-                    explanation: 'If settlement discussions or stipulations appear, the score would increase by approximately 15 points.' 
+                    explanation: 'Settlement discussions indicate openness to resolution.' 
                 });
             }
             
@@ -1008,7 +1027,7 @@
             if (!hasCounselWithdrawal) {
                 missing.push({ 
                     text: 'Defendant legal counsel has not withdrawn.', 
-                    explanation: 'Counsel withdrawal is a strong financial distress signal. If this occurs, the score would increase by approximately 12 points.' 
+                    explanation: 'Counsel withdrawal is a strong financial distress signal.' 
                 });
             }
             
@@ -1017,7 +1036,7 @@
             if (!hasSilence && (docket.entries || 0) >= 5) {
                 missing.push({ 
                     text: 'No extended quiet period observed after docket activity.', 
-                    explanation: 'A 90+ day silence after heavy activity signals exhaustion. If this occurs, the score would increase by approximately 10 points.' 
+                    explanation: 'Silence after heavy activity often signals exhaustion.' 
                 });
             }
             
@@ -1027,7 +1046,7 @@
             if (!hasStayLifted && hasStay) {
                 missing.push({ 
                     text: 'Case was stayed but the stay has not yet been lifted.', 
-                    explanation: 'When a stay is lifted, pressure resumes. If this occurs, the score would increase by approximately 12 points.' 
+                    explanation: 'When a stay lifts, pressure on the defendant resumes.' 
                 });
             }
             
