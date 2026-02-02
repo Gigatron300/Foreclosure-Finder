@@ -9,30 +9,29 @@
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --benoro-navy: #1e3a5f;
-            --benoro-navy-dark: #152a45;
-            --benoro-gold: #c9a227;
-            --benoro-gold-light: #d4b84a;
-            --benoro-gold-subtle: rgba(201, 162, 39, 0.15);
-            --benoro-tan: #d4c5a3;
-            --benoro-tan-light: #e8dcc4;
-            --benoro-tan-dark: #c4b393;
-            --benoro-cream: #f5f0e6;
+            --benoro-navy: #1a3a52;
+            --benoro-navy-dark: #152d42;
+            --benoro-navy-light: #234a66;
+            --benoro-gold: #d4a84b;
+            --benoro-gold-light: #e0bc6a;
+            --benoro-gold-dark: #b8923f;
             --benoro-white: #ffffff;
-            --benoro-card: #ffffff;
-            --benoro-card-hover: #faf8f4;
-            --benoro-text: #1e3a5f;
-            --benoro-text-light: #4a5568;
-            --benoro-gray: #6b7280;
-            --benoro-success: #22c55e;
-            --benoro-warning: #eab308;
-            --benoro-danger: #ef4444;
+            --benoro-off-white: #f0f4f7;
+            --benoro-card: #1f4460;
+            --benoro-card-hover: #245070;
+            --benoro-text: #ffffff;
+            --benoro-text-muted: #a0b4c4;
+            --benoro-text-light: #7a9bb5;
+            --benoro-border: rgba(255,255,255,0.1);
+            --benoro-success: #4ade80;
+            --benoro-warning: #fbbf24;
+            --benoro-danger: #f87171;
         }
         
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--benoro-tan);
+            background: var(--benoro-navy);
             min-height: 100vh;
             color: var(--benoro-text);
             padding: 0;
@@ -41,10 +40,10 @@
         
         /* Header */
         header { 
-            background: var(--benoro-navy);
-            border-bottom: 3px solid var(--benoro-gold);
-            padding: 20px 0;
-            margin-bottom: 40px;
+            background: var(--benoro-navy-dark);
+            border-bottom: 2px solid var(--benoro-gold);
+            padding: 15px 0;
+            margin-bottom: 30px;
         }
         .header-inner {
             display: flex;
@@ -58,14 +57,14 @@
         .page-title-section { flex: 1; text-align: center; }
         .page-title {
             font-family: 'Montserrat', sans-serif;
-            font-size: 1rem;
+            font-size: 0.9rem;
             font-weight: 500;
-            color: var(--benoro-white);
+            color: var(--benoro-gold);
             letter-spacing: 3px;
             text-transform: uppercase;
         }
         .header-logo {
-            height: 45px;
+            height: 40px;
             width: auto;
         }
         .logo-text {
@@ -200,20 +199,21 @@
             transition: all 0.3s;
         }
         .btn-primary { 
-            background: var(--benoro-navy); 
-            color: var(--benoro-white);
+            background: var(--benoro-gold); 
+            color: var(--benoro-navy-dark);
         }
-        .btn-primary:hover { background: var(--benoro-navy-dark); }
+        .btn-primary:hover { background: var(--benoro-gold-light); }
         .btn-secondary { 
-            background: var(--benoro-gold);
-            border: none;
-            color: var(--benoro-navy);
+            background: var(--benoro-navy-light);
+            border: 1px solid var(--benoro-border);
+            color: var(--benoro-text);
         }
         .btn-secondary:hover { 
-            background: var(--benoro-gold-light);
+            background: var(--benoro-card-hover);
+            border-color: var(--benoro-gold);
         }
-        .btn-outline { background: transparent; border: 1px solid var(--benoro-navy); color: var(--benoro-navy); }
-        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); background: rgba(201, 162, 39, 0.1); }
+        .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
+        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .actions-bar {
@@ -280,20 +280,20 @@
             border-radius: 8px;
             overflow: hidden;
             transition: all 0.3s;
-            border: 1px solid var(--benoro-tan-dark);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid var(--benoro-border);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
         .property-card:hover { 
             border-color: var(--benoro-gold); 
             transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
         }
         
         .street-view-container {
             position: relative;
             width: 100%;
             height: 200px;
-            background: var(--benoro-tan-light);
+            background: var(--benoro-navy-dark);
         }
         .street-view-img {
             width: 100%;
@@ -325,7 +325,7 @@
         }
         .property-card.sweet-spot {
             border: 2px solid var(--benoro-gold);
-            box-shadow: 0 0 15px rgba(201, 162, 39, 0.3);
+            box-shadow: 0 0 20px rgba(212, 168, 75, 0.2);
         }
         
         .property-info {
@@ -335,10 +335,10 @@
             font-size: 1.1rem;
             font-weight: 600;
             margin-bottom: 5px;
-            color: var(--benoro-navy);
+            color: var(--benoro-white);
         }
         .property-location {
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             font-size: 0.9rem;
             margin-bottom: 15px;
         }
@@ -381,7 +381,7 @@
         /* Score Breakdown Dropdown */
         .score-details {
             margin: 15px 0;
-            border: 1px solid var(--benoro-tan-dark);
+            border: 1px solid var(--benoro-border);
             border-radius: 8px;
             overflow: hidden;
         }
@@ -390,12 +390,12 @@
             align-items: center;
             gap: 10px;
             padding: 10px 15px;
-            background: var(--benoro-cream);
+            background: var(--benoro-navy-dark);
             cursor: pointer;
             user-select: none;
         }
         .score-summary:hover {
-            background: var(--benoro-tan-light);
+            background: var(--benoro-navy-light);
         }
         .score-badge {
             padding: 4px 10px;
@@ -403,18 +403,18 @@
             font-weight: 700;
             font-size: 0.85rem;
         }
-        .score-badge.grade-a { background: rgba(16, 185, 129, 0.2); color: #059669; }
-        .score-badge.grade-b { background: rgba(59, 130, 246, 0.2); color: #2563eb; }
-        .score-badge.grade-c { background: rgba(245, 158, 11, 0.2); color: #d97706; }
-        .score-badge.grade-d { background: rgba(249, 115, 22, 0.2); color: #ea580c; }
-        .score-badge.grade-f { background: rgba(239, 68, 68, 0.2); color: #dc2626; }
+        .score-badge.grade-a { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .score-badge.grade-b { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+        .score-badge.grade-c { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .score-badge.grade-d { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+        .score-badge.grade-f { background: rgba(248, 113, 113, 0.2); color: #f87171; }
         .score-number {
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             font-size: 0.85rem;
         }
         .expand-icon {
             margin-left: auto;
-            color: var(--benoro-gray);
+            color: var(--benoro-text-light);
             font-size: 0.7rem;
             transition: transform 0.2s;
         }
@@ -422,7 +422,7 @@
             transform: rotate(180deg);
         }
         .grade-meaning {
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             font-size: 0.8rem;
             margin-left: auto;
             margin-right: 10px;
@@ -466,7 +466,7 @@
         }
         .negative-header {
             font-weight: 600;
-            color: #ef4444;
+            color: #f87171;
             margin-bottom: 6px;
             font-size: 0.8rem;
         }
@@ -478,11 +478,11 @@
         .missing-summary {
             cursor: pointer;
             padding: 8px 10px;
-            background: rgba(201, 162, 39, 0.1);
-            border: 1px solid rgba(201, 162, 39, 0.3);
+            background: rgba(212, 168, 75, 0.1);
+            border: 1px solid rgba(212, 168, 75, 0.3);
             border-radius: 6px;
             font-size: 0.8rem;
-            color: #b7940c;
+            color: var(--benoro-gold);
             font-weight: 500;
             user-select: none;
             display: flex;
@@ -490,22 +490,22 @@
             gap: 6px;
         }
         .missing-summary:hover {
-            background: rgba(201, 162, 39, 0.15);
+            background: rgba(212, 168, 75, 0.2);
         }
         .missing-count {
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             font-weight: 400;
         }
         .missing-content {
             padding: 10px;
-            border: 1px solid rgba(201, 162, 39, 0.2);
+            border: 1px solid rgba(212, 168, 75, 0.2);
             border-top: none;
             border-radius: 0 0 6px 6px;
-            background: var(--benoro-cream);
+            background: var(--benoro-navy-dark);
         }
         .missing-item {
             padding: 6px 0;
-            border-bottom: 1px solid var(--benoro-tan-dark);
+            border-bottom: 1px solid var(--benoro-border);
         }
         .missing-item:last-child {
             border-bottom: none;
@@ -519,28 +519,28 @@
         .missing-explanation {
             display: block;
             font-size: 0.75rem;
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             margin-top: 2px;
             padding-left: 18px;
             line-height: 1.3;
         }
         .all-good {
             margin-top: 10px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
             border-radius: 6px;
             padding: 8px 10px;
-            color: #059669;
+            color: #4ade80;
             font-size: 0.8rem;
         }
         
         /* Compact score breakdown */
         .score-breakdown {
             padding: 10px;
-            background: var(--benoro-white);
+            background: var(--benoro-navy-dark);
         }
         .score-interpretation {
-            background: rgba(201, 162, 39, 0.1);
+            background: rgba(212, 168, 75, 0.1);
             border-left: 3px solid var(--benoro-gold);
             padding: 6px 10px;
             margin-bottom: 10px;
@@ -555,17 +555,17 @@
             padding: 3px 0;
             font-size: 0.8rem;
         }
-        .score-factor.positive .factor-impact { color: #059669; }
-        .score-factor.negative .factor-impact { color: #dc2626; }
-        .score-factor.neutral .factor-impact { color: var(--benoro-gray); }
-        .factor-text { color: var(--benoro-text); }
+        .score-factor.positive .factor-impact { color: #4ade80; }
+        .score-factor.negative .factor-impact { color: #f87171; }
+        .score-factor.neutral .factor-impact { color: var(--benoro-text-light); }
+        .factor-text { color: var(--benoro-text-muted); }
         .factor-impact { font-weight: 600; min-width: 35px; text-align: right; }
         
         /* Compact docket info */
         .docket-info {
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid var(--benoro-tan-dark);
+            border-top: 1px solid var(--benoro-border);
         }
         .docket-header {
             font-weight: 600;
@@ -592,7 +592,7 @@
         }
         .maps-link:hover { background: #3367d6; text-decoration: none !important; }
         
-        .no-results { text-align: center; padding: 60px 20px; color: var(--benoro-text-light); }
+        .no-results { text-align: center; padding: 60px 20px; color: var(--benoro-text-muted); }
         .loading { text-align: center; padding: 60px 20px; }
         .spinner {
             width: 40px; height: 40px;
@@ -606,47 +606,47 @@
         
         .login-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: var(--benoro-tan);
+            background: var(--benoro-navy);
             display: flex; align-items: center; justify-content: center;
             z-index: 1000;
         }
         .login-box {
-            background: var(--benoro-white);
-            padding: 60px 50px;
-            border-radius: 8px;
+            background: var(--benoro-card);
+            padding: 50px;
+            border-radius: 12px;
             text-align: center;
             max-width: 420px;
             width: 90%;
-            border: 1px solid var(--benoro-tan-dark);
-            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+            border: 1px solid var(--benoro-border);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
         }
         .login-logo {
             width: 180px;
             margin-bottom: 25px;
         }
         .header-logo {
-            height: 45px;
+            height: 40px;
             width: auto;
         }
         .login-box h2 { 
             margin-bottom: 10px; 
-            color: var(--benoro-navy); 
+            color: var(--benoro-white); 
             font-family: 'Cormorant Garamond', serif;
             font-weight: 500;
             font-size: 2rem;
             letter-spacing: 2px;
         }
         .login-box .login-subtitle {
-            color: var(--benoro-text-light);
+            color: var(--benoro-text-muted);
             margin-bottom: 30px;
             font-size: 0.85rem;
             letter-spacing: 0.5px;
         }
         .login-box input {
             width: 100%; padding: 15px 20px; border-radius: 6px;
-            border: 1px solid var(--benoro-tan-dark); 
-            background: var(--benoro-cream);
-            color: var(--benoro-navy); font-size: 0.9rem; margin-bottom: 20px;
+            border: 1px solid var(--benoro-border); 
+            background: var(--benoro-navy-dark);
+            color: var(--benoro-white); font-size: 0.9rem; margin-bottom: 20px;
             letter-spacing: 0.5px;
         }
         .login-box input:focus {
@@ -655,16 +655,16 @@
         }
         .login-box button {
             width: 100%; padding: 15px; border-radius: 6px;
-            border: none; background: var(--benoro-navy);
-            color: var(--benoro-white); font-size: 0.75rem; font-weight: 500; cursor: pointer;
+            border: none; background: var(--benoro-gold);
+            color: var(--benoro-navy-dark); font-size: 0.75rem; font-weight: 600; cursor: pointer;
             transition: background 0.3s;
             letter-spacing: 2px;
             text-transform: uppercase;
         }
         .login-box button:hover {
-            background: var(--benoro-navy-dark);
+            background: var(--benoro-gold-light);
         }
-        .login-error { color: #ef4444; margin-top: 15px; display: none; font-size: 0.85rem; }
+        .login-error { color: #f87171; margin-top: 15px; display: none; font-size: 0.85rem; }
         
         .filter-row {
             display: flex;
@@ -676,8 +676,8 @@
         .filter-row select, .filter-row input {
             padding: 10px 15px;
             border-radius: 6px;
-            border: 1px solid var(--benoro-tan-dark);
-            background: var(--benoro-white);
+            border: 1px solid var(--benoro-border);
+            background: var(--benoro-card);
             color: var(--benoro-gray-light);
             font-size: 0.8rem;
             letter-spacing: 0.5px;
