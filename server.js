@@ -2,9 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
-const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
+const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -213,7 +213,7 @@ app.get('/api/export/csv', checkAuth, async (req, res) => {
   }
 });
 
-// ============== PIPELINE API ==============
+// ============== PIPELINE API (Montgomery County) ==============
 
 app.get('/api/pipeline', checkAuth, async (req, res) => {
   try {
@@ -366,11 +366,6 @@ app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
 });
 
 // ============== CAMDEN COUNTY PIPELINE API ==============
-// Add these routes to server.js
-// Also add at the top: const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
-
-const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
-const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
 
 // Upload Camden County CSV
 app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
@@ -552,6 +547,8 @@ app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ============== START SERVER ==============
 
 ensureDataDir().then(() => {
   app.listen(PORT, () => {
