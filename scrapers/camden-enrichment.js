@@ -127,22 +127,29 @@ function parseCamdenCSV(csvText) {
   if (lines.length < 2) throw new Error('CSV appears empty');
 
   const header = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, ''));
+  
+  console.log('CSV headers found:', header.join(', '));
 
   // Find column indices - Camden County Clerk CSV format
+  // Actual headers: (blank), Party Code, Name, Cross Name, Date, Type, Book Type, Book, Page, Town, Lot, Block, Instr#, Status, Flag
   const col = {
-    book: header.findIndex(h => h.includes('book')),
-    page: header.findIndex(h => h.includes('page') && !h.includes('party')),
-    instrNum: header.findIndex(h => h.includes('instr') || h.includes('instrument')),
-    docType: header.findIndex(h => h.includes('doctype') || h.includes('documenttype')),
-    recordDate: header.findIndex(h => h.includes('record') && h.includes('date')),
-    town: header.findIndex(h => h.includes('town')),
-    lot: header.findIndex(h => h.includes('lot') && !h.includes('block')),
-    block: header.findIndex(h => h.includes('block')),
-    partyCode: header.findIndex(h => h.includes('partycode') || h.includes('party') && h.includes('code')),
-    lastName: header.findIndex(h => h.includes('last') && h.includes('name')),
-    firstName: header.findIndex(h => h.includes('first') && h.includes('name')),
-    status: header.findIndex(h => h === 'status' || h.includes('status')),
+    partyCode: header.findIndex(h => h.includes('partycode') || h === 'partycode'),
+    name: header.findIndex(h => h === 'name'),
+    crossName: header.findIndex(h => h.includes('crossname') || h === 'crossname'),
+    date: header.findIndex(h => h === 'date'),
+    type: header.findIndex(h => h === 'type'),
+    bookType: header.findIndex(h => h.includes('booktype') || h === 'booktype'),
+    book: header.findIndex(h => h === 'book'),
+    page: header.findIndex(h => h === 'page'),
+    town: header.findIndex(h => h === 'town'),
+    lot: header.findIndex(h => h === 'lot'),
+    block: header.findIndex(h => h === 'block'),
+    instrNum: header.findIndex(h => h.includes('instr')),
+    status: header.findIndex(h => h === 'status'),
+    flag: header.findIndex(h => h === 'flag'),
   };
+  
+  console.log('Column mapping:', JSON.stringify(col));
 
   // Group rows by instrument number
   const caseMap = new Map();
@@ -157,11 +164,12 @@ function parseCamdenCSV(csvText) {
         instrumentNumber: instrNum,
         book: col.book >= 0 ? v[col.book] : '',
         page: col.page >= 0 ? v[col.page] : '',
-        filingDate: col.recordDate >= 0 ? v[col.recordDate] : '',
+        filingDate: col.date >= 0 ? v[col.date] : '',
         town: col.town >= 0 ? (v[col.town] || '').toUpperCase().trim() : '',
         block: col.block >= 0 ? (v[col.block] || '').trim() : '',
         lot: col.lot >= 0 ? (v[col.lot] || '').trim() : '',
         status: col.status >= 0 ? v[col.status] : '',
+        docType: col.type >= 0 ? v[col.type] : '',
         plaintiffNames: [],
         defendantNames: [],
       });
@@ -169,9 +177,8 @@ function parseCamdenCSV(csvText) {
 
     const entry = caseMap.get(instrNum);
     const partyCode = col.partyCode >= 0 ? (v[col.partyCode] || '').toUpperCase().trim() : '';
-    const lastName = col.lastName >= 0 ? (v[col.lastName] || '').trim() : '';
-    const firstName = col.firstName >= 0 ? (v[col.firstName] || '').trim() : '';
-    const fullName = firstName ? `${lastName} ${firstName}`.trim() : lastName;
+    // The "Name" column has the full name for this party row
+    const fullName = col.name >= 0 ? (v[col.name] || '').trim() : '';
 
     if (!fullName) continue;
 
