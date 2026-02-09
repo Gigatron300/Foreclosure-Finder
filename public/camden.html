@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camden County Pipeline | Benoro Development</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --benoro-navy: #1a3a52;
+            --benoro-navy-dark: #152d42;
+            --benoro-navy-light: #234a66;
+            --benoro-gold: #d4a84b;
+            --benoro-gold-light: #e0bc6a;
+            --benoro-gold-dark: #b8923f;
+            --benoro-white: #ffffff;
+            --benoro-card: #1f4460;
+            --benoro-card-hover: #245070;
+            --benoro-text: #ffffff;
+            --benoro-text-muted: #a0b4c4;
+            --benoro-text-light: #7a9bb5;
+            --benoro-border: rgba(255,255,255,0.1);
+            --benoro-success: #4ade80;
+            --benoro-warning: #fbbf24;
+            --benoro-danger: #f87171;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--benoro-navy);
+            min-height: 100vh;
+            color: var(--benoro-text);
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 0 30px; }
+
+        /* Header */
+        header {
+            background: var(--benoro-navy-dark);
+            border-bottom: 2px solid var(--benoro-gold);
+            padding: 15px 0;
+            margin-bottom: 30px;
+        }
+        .header-inner {
+            display: flex; justify-content: space-between; align-items: center;
+            max-width: 1400px; margin: 0 auto; padding: 0 30px;
+        }
+        .logo-section { display: flex; align-items: center; gap: 15px; }
+        .header-logo { height: 40px; width: auto; }
+        .page-title-section { flex: 1; text-align: center; }
+        .page-title {
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.9rem; font-weight: 500;
+            color: var(--benoro-gold);
+            letter-spacing: 3px; text-transform: uppercase;
+        }
+        .nav-links a {
+            color: var(--benoro-text-muted); text-decoration: none; margin-left: 25px;
+            font-weight: 400; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;
+            transition: color 0.3s;
+        }
+        .nav-links a:hover, .nav-links a.active { color: var(--benoro-gold); }
+
+        /* Login */
+        .login-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--benoro-navy);
+            display: flex; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .login-box {
+            background: var(--benoro-card); padding: 50px; border-radius: 12px;
+            text-align: center; max-width: 420px; width: 90%;
+            border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .login-logo { width: 180px; margin-bottom: 25px; }
+        .login-box h2 { margin-bottom: 10px; color: var(--benoro-white); font-family: 'Cormorant Garamond', serif; font-size: 2rem; letter-spacing: 2px; }
+        .login-box .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 30px; font-size: 0.85rem; }
+        .login-box input { width: 100%; padding: 15px 20px; border-radius: 6px; border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); font-size: 0.9rem; margin-bottom: 20px; }
+        .login-box input:focus { outline: none; border-color: var(--benoro-gold); }
+        .login-box button { width: 100%; padding: 15px; border-radius: 6px; border: none; background: var(--benoro-gold); color: var(--benoro-navy-dark); font-size: 0.75rem; font-weight: 600; cursor: pointer; letter-spacing: 2px; text-transform: uppercase; }
+        .login-box button:hover { background: var(--benoro-gold-light); }
+        .login-error { color: #f87171; margin-top: 15px; display: none; font-size: 0.85rem; }
+
+        /* Cards & Layout */
+        .status-bar {
+            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15);
+            border-radius: 4px; padding: 18px 25px; margin-bottom: 25px;
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;
+        }
+        .status-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--benoro-success); }
+        .status-dot.stale { background: var(--benoro-warning); }
+
+        .upload-section {
+            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.2);
+            border-radius: 4px; padding: 30px; margin-bottom: 25px; text-align: center;
+        }
+        .upload-section h3 { color: var(--benoro-white); margin-bottom: 8px; font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; }
+        .upload-section p { color: var(--benoro-text-muted); margin-bottom: 20px; font-size: 0.85rem; }
+        .upload-input { display: none; }
+        .upload-label {
+            display: inline-block; padding: 12px 35px; background: transparent;
+            border: 1px solid var(--benoro-gold); color: var(--benoro-gold);
+            cursor: pointer; font-weight: 500; font-size: 0.8rem;
+            letter-spacing: 1.5px; text-transform: uppercase; transition: all 0.3s;
+        }
+        .upload-label:hover { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .csv-status { margin-top: 15px; padding: 10px 15px; background: rgba(0,0,0,0.3); border-radius: 2px; font-size: 0.8rem; }
+        .csv-status.has-file { color: var(--benoro-success); }
+        .csv-status.no-file { color: var(--benoro-warning); }
+
+        .btn {
+            padding: 12px 30px; border-radius: 6px; font-weight: 500; cursor: pointer;
+            border: none; display: inline-flex; align-items: center; gap: 8px;
+            font-size: 0.75rem; letter-spacing: 1.5px; text-transform: uppercase; transition: all 0.3s;
+        }
+        .btn-primary { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .btn-primary:hover { background: var(--benoro-gold-light); }
+        .btn-secondary { background: var(--benoro-navy-light); border: 1px solid var(--benoro-border); color: var(--benoro-text); }
+        .btn-secondary:hover { background: var(--benoro-card-hover); border-color: var(--benoro-gold); }
+        .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
+        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .actions-bar { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; align-items: center; }
+
+        .stats-summary {
+            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.1);
+            border-radius: 2px; padding: 25px 35px; margin-bottom: 30px;
+            display: flex; gap: 50px; flex-wrap: wrap;
+        }
+        .stat-item { text-align: center; }
+        .stat-value { font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; font-weight: 600; color: var(--benoro-gold); }
+        .stat-label { color: var(--benoro-text-muted); font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 5px; }
+
+        .filter-row { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        .filter-row select, .filter-row input {
+            padding: 10px 15px; border-radius: 6px; border: 1px solid var(--benoro-border);
+            background: var(--benoro-card); color: var(--benoro-text); font-size: 0.8rem;
+        }
+        .filter-row select:focus, .filter-row input:focus { outline: none; border-color: var(--benoro-gold); }
+
+        .results-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid rgba(184,134,11,0.1);
+        }
+        .results-header h2 { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; }
+        .case-count { color: var(--benoro-text-muted); font-size: 1rem; }
+
+        /* Property Cards */
+        .cases-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 25px; }
+
+        .property-card {
+            background: var(--benoro-card); border-radius: 8px; overflow: hidden;
+            transition: all 0.3s; border: 1px solid var(--benoro-border);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .property-card:hover { border-color: var(--benoro-gold); transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+        .property-card.mortgage { border-left: 3px solid var(--benoro-gold); }
+        .property-card.tax-lien { border-left: 3px solid #f87171; }
+        .property-card.government { border-left: 3px solid #60a5fa; }
+
+        .street-view-container { position: relative; width: 100%; height: 180px; background: var(--benoro-navy-dark); }
+        .street-view-img { width: 100%; height: 100%; object-fit: cover; }
+        .no-image { display: flex; align-items: center; justify-content: center; height: 100%; color: #6b7280; font-size: 0.85rem; }
+        .type-badge {
+            position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 4px;
+            font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .type-badge.mortgage { background: rgba(212,168,75,0.9); color: #152d42; }
+        .type-badge.tax-lien { background: rgba(248,113,113,0.9); color: white; }
+        .type-badge.government { background: rgba(96,165,250,0.9); color: white; }
+        .days-badge {
+            position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7);
+            color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+        }
+
+        .property-info { padding: 20px; }
+        .property-address { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--benoro-white); }
+        .property-location { color: var(--benoro-text-muted); font-size: 0.85rem; margin-bottom: 15px; }
+
+        .property-details { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
+        .detail-item { font-size: 0.85rem; }
+        .detail-label { color: #6b7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .detail-value { color: #f3f4f6; margin-top: 2px; }
+
+        .value-row {
+            display: flex; gap: 15px; padding: 10px 0; margin-bottom: 10px;
+            border-top: 1px solid var(--benoro-border); border-bottom: 1px solid var(--benoro-border);
+        }
+        .value-item { flex: 1; text-align: center; }
+        .value-amount { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 600; color: var(--benoro-gold); }
+        .value-label { font-size: 0.65rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .property-footer {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        .maps-link {
+            background: #4285f4; color: white !important; padding: 6px 12px;
+            border-radius: 6px; font-size: 0.8rem; text-decoration: none;
+        }
+        .maps-link:hover { background: #3367d6; }
+
+        .no-results { text-align: center; padding: 60px 20px; color: var(--benoro-text-muted); }
+        .loading { text-align: center; padding: 60px 20px; }
+        .spinner { width: 40px; height: 40px; border: 3px solid rgba(16,185,129,0.2); border-top-color: var(--benoro-gold); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Google API Key */
+        .api-key-section {
+            background: rgba(184,134,11,0.08); border: 1px solid rgba(184,134,11,0.2);
+            border-radius: 2px; padding: 20px; margin-bottom: 25px; font-size: 0.85rem;
+        }
+        .api-key-section input { width: 300px; padding: 8px 12px; border-radius: 6px; border: 1px solid #374151; background: #1f2937; color: #f3f4f6; margin-right: 10px; }
+        .api-key-section button { padding: 8px 15px; border-radius: 6px; border: none; background: var(--benoro-gold); color: var(--benoro-navy-dark); cursor: pointer; font-weight: 500; }
+
+        @media (max-width: 768px) {
+            .cases-grid { grid-template-columns: 1fr; }
+            .property-details { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-box">
+            <img src="/images/logo-stacked.png" alt="Benoro Development" class="login-logo">
+            <p class="login-subtitle">Camden County Pipeline</p>
+            <input type="password" id="passwordInput" placeholder="Enter password" onkeypress="if(event.key==='Enter')login()">
+            <button onclick="login()">Continue</button>
+            <div class="login-error" id="loginError">Invalid password</div>
+        </div>
+    </div>
+
+    <div id="mainContent" style="display: none;">
+        <header>
+            <div class="header-inner">
+                <div class="logo-section">
+                    <img src="/images/logo-horizontal.png" alt="Benoro Development" class="header-logo">
+                </div>
+                <div class="page-title-section">
+                    <div class="page-title">Camden County &mdash; Lis Pendens Pipeline</div>
+                </div>
+                <nav class="nav-links">
+                    <a href="/">Sheriff Sales</a>
+                    <a href="/pipeline.html">MontCo Pipeline</a>
+                    <a href="/camden.html" class="active">Camden Pipeline</a>
+                </nav>
+            </div>
+        </header>
+
+        <main class="container">
+            <div class="status-bar">
+                <div class="status-info">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Loading...</span>
+                </div>
+                <div id="enrichmentInfo" style="color: var(--benoro-text-light); font-size: 0.8rem;"></div>
+            </div>
+
+            <!-- Google API Key -->
+            <div class="api-key-section" id="apiKeySection">
+                <strong>📷 Street View Images:</strong> Enter your Google Maps API key for property photos.
+                <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" style="color: var(--benoro-gold);">Get a free API key</a>
+                <br><br>
+                <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
+                <button onclick="saveApiKey()">Save Key</button>
+                <span id="apiKeyStatus" style="margin-left: 10px;"></span>
+            </div>
+
+            <!-- CSV Upload -->
+            <div class="upload-section" id="uploadSection">
+                <h3>📁 Upload Camden County Lis Pendens CSV</h3>
+                <p>Export from the <a href="#" style="color: var(--benoro-gold);">Camden County Clerk's document search</a> — select Lis Pendens filings for your target month</p>
+                <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
+                <label for="csvUpload" class="upload-label">📤 Choose CSV File</label>
+                <div class="csv-status" id="csvStatus">Checking for existing data...</div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-summary">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalCases">-</div>
+                    <div class="stat-label">Total Cases</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="mortgageCount" style="color: var(--benoro-gold);">-</div>
+                    <div class="stat-label">Mortgage Foreclosures</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="taxLienCount" style="color: #f87171;">-</div>
+                    <div class="stat-label">Tax Lien</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="withAddress">-</div>
+                    <div class="stat-label">With Address</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="individualCount">-</div>
+                    <div class="stat-label">Individual Defendants</div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="actions-bar">
+                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">🏠 Resolve Addresses</button>
+                <button class="btn btn-secondary" onclick="enrichData(true)" id="testBtn" style="background: #8b5cf6; border: none; color: white;">⚡ Test (10 only)</button>
+                <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
+
+                <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
+                    <option value="daysSinceFiling">Sort: Days Since Filing</option>
+                    <option value="assessedValue">Sort: Assessed Value</option>
+                    <option value="town">Sort: Town</option>
+                </select>
+
+                <select id="typeFilter" onchange="loadData()">
+                    <option value="">All Types</option>
+                    <option value="MORTGAGE">Mortgage Only</option>
+                    <option value="TAX_LIEN">Tax Lien Only</option>
+                    <option value="GOVERNMENT">Government Only</option>
+                </select>
+
+                <select id="addressFilter" onchange="loadData()">
+                    <option value="">All Cases</option>
+                    <option value="true">With Address</option>
+                    <option value="false">Missing Address</option>
+                </select>
+
+                <input type="text" id="townFilter" placeholder="Filter by town..." onkeyup="loadData()" style="width: 150px;">
+            </div>
+
+            <div class="results-header">
+                <h2>📋 Cases <span class="case-count" id="caseCount">(0)</span></h2>
+            </div>
+
+            <div class="cases-grid" id="casesGrid">
+                <div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let authToken = localStorage.getItem('pipelineAuth');
+        let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
+
+        function checkExistingAuth() {
+            const savedKey = localStorage.getItem('googleMapsApiKey');
+            if (savedKey) {
+                document.getElementById('googleApiKey').value = savedKey;
+                document.getElementById('apiKeyStatus').textContent = '✓ Key saved';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-gold)';
+                googleApiKey = savedKey;
+            }
+            if (authToken) {
+                fetch('/api/camden', { headers: { 'X-Auth-Token': authToken } })
+                    .then(r => {
+                        if (r.status === 401) {
+                            localStorage.removeItem('pipelineAuth');
+                            document.getElementById('loginOverlay').style.display = 'flex';
+                        } else {
+                            document.getElementById('loginOverlay').style.display = 'none';
+                            document.getElementById('mainContent').style.display = 'block';
+                            loadData();
+                            checkCsvStatus();
+                        }
+                    });
+            } else {
+                document.getElementById('loginOverlay').style.display = 'flex';
+            }
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('googleApiKey').value.trim();
+            if (key) {
+                localStorage.setItem('googleMapsApiKey', key);
+                googleApiKey = key;
+                document.getElementById('apiKeyStatus').textContent = '✓ Key saved!';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-gold)';
+                loadData();
+            }
+        }
+
+        function login() {
+            const password = document.getElementById('passwordInput').value;
+            fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    authToken = password;
+                    localStorage.setItem('pipelineAuth', authToken);
+                    document.getElementById('loginOverlay').style.display = 'none';
+                    document.getElementById('mainContent').style.display = 'block';
+                    loadData();
+                    checkCsvStatus();
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            });
+        }
+
+        async function checkCsvStatus() {
+            try {
+                const r = await fetch('/api/camden/csv-status', { headers: { 'X-Auth-Token': authToken } });
+                const data = await r.json();
+                const el = document.getElementById('csvStatus');
+                if (data.exists) {
+                    el.textContent = `✓ Data loaded: ${data.caseCount} cases (updated ${getTimeAgo(new Date(data.lastModified))})`;
+                    el.className = 'csv-status has-file';
+                    if (data.enrichmentSummary) {
+                        document.getElementById('enrichmentInfo').textContent =
+                            `Enrichment: ${data.enrichmentSummary.addressesFound} addresses found (${data.enrichmentSummary.hitRate} hit rate)`;
+                    }
+                } else {
+                    el.textContent = '⚠ No data uploaded — please upload a Camden County Lis Pendens CSV';
+                    el.className = 'csv-status no-file';
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const el = document.getElementById('csvStatus');
+            el.textContent = '⏳ Uploading and parsing...';
+            try {
+                const csvData = await file.text();
+                const r = await fetch('/api/camden/upload-csv', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csvData, filename: file.name })
+                });
+                const result = await r.json();
+                if (result.success) {
+                    el.textContent = `✓ Uploaded! ${result.uniqueCases} unique cases from ${result.totalRows} rows. Click "Resolve Addresses" to enrich.`;
+                    el.className = 'csv-status has-file';
+                    loadData();
+                } else {
+                    el.textContent = '❌ Error: ' + result.error;
+                    el.className = 'csv-status no-file';
+                }
+            } catch (e) {
+                el.textContent = '❌ Upload failed: ' + e.message;
+                el.className = 'csv-status no-file';
+            }
+        }
+
+        async function loadData() {
+            const grid = document.getElementById('casesGrid');
+            const sortBy = document.getElementById('sortBy').value;
+            const typeFilter = document.getElementById('typeFilter').value;
+            const addressFilter = document.getElementById('addressFilter').value;
+            const townFilter = document.getElementById('townFilter').value.toLowerCase();
+
+            try {
+                let url = `/api/camden?sortBy=${sortBy}&sortOrder=desc`;
+                if (typeFilter) url += `&plaintiffType=${typeFilter}`;
+                if (addressFilter) url += `&hasAddress=${addressFilter}`;
+                if (townFilter) url += `&town=${encodeURIComponent(townFilter)}`;
+
+                const r = await fetch(url, { headers: { 'X-Auth-Token': authToken } });
+                const data = await r.json();
+
+                if (data.lastUpdated) {
+                    document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
+                }
+
+                const cases = data.cases || [];
+                const allCases = cases;
+
+                // Stats
+                document.getElementById('totalCases').textContent = cases.length;
+                document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
+                document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
+                document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
+                document.getElementById('individualCount').textContent = cases.filter(c => c.defendantType === 'INDIVIDUAL').length;
+                document.getElementById('caseCount').textContent = `(${cases.length})`;
+
+                if (cases.length === 0) {
+                    grid.innerHTML = '<div class="no-results"><p>No cases found. Upload a CSV to get started.</p></div>';
+                    return;
+                }
+
+                grid.innerHTML = cases.map(c => createCard(c)).join('');
+            } catch (e) {
+                grid.innerHTML = `<div class="no-results"><p>Error: ${e.message}</p></div>`;
+            }
+        }
+
+        function createCard(c) {
+            const address = c.propertyAddress || 'Address pending enrichment';
+            const town = c.town || '';
+            const hasAddr = !!c.propertyAddress;
+            const typeClass = c.plaintiffType === 'TAX_LIEN' ? 'tax-lien' : c.plaintiffType === 'GOVERNMENT' ? 'government' : 'mortgage';
+            const typeLabel = c.plaintiffType === 'TAX_LIEN' ? 'Tax Lien' : c.plaintiffType === 'GOVERNMENT' ? 'Gov\'t' : 'Mortgage';
+
+            const fullAddress = hasAddr ? `${address}, ${town}, NJ` : '';
+            const encodedAddress = encodeURIComponent(fullAddress);
+            const hasApiKey = googleApiKey && googleApiKey.length > 10;
+
+            const streetViewUrl = (hasAddr && hasApiKey)
+                ? `https://maps.googleapis.com/maps/api/streetview?size=400x180&location=${encodedAddress}&key=${googleApiKey}`
+                : '';
+            const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
+
+            let streetViewHtml;
+            if (!hasAddr) {
+                streetViewHtml = '<div class="no-image">📍 Address not yet resolved — click "Resolve Addresses"</div>';
+            } else if (!hasApiKey) {
+                streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
+                    <div style="text-align:center;">🗺️ Click to view on Google Maps<br><small>Add API key for street photos</small></div>
+                </a>`;
+            } else {
+                streetViewHtml = `<a href="${mapsUrl}" target="_blank">
+                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View"
+                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📍 No Street View</div>'">
+                </a>`;
+            }
+
+            const months = Math.round((c.daysSinceFiling || 0) / 30);
+
+            // Value row
+            let valueRow = '';
+            if (c.assessedValue || c.lastSalePrice) {
+                valueRow = `<div class="value-row">
+                    ${c.assessedValue ? `<div class="value-item"><div class="value-amount">$${c.assessedValue.toLocaleString()}</div><div class="value-label">Assessed</div></div>` : ''}
+                    ${c.landValue ? `<div class="value-item"><div class="value-amount">$${c.landValue.toLocaleString()}</div><div class="value-label">Land</div></div>` : ''}
+                    ${c.improvementValue ? `<div class="value-item"><div class="value-amount">$${c.improvementValue.toLocaleString()}</div><div class="value-label">Improvement</div></div>` : ''}
+                    ${c.lastSalePrice ? `<div class="value-item"><div class="value-amount">$${c.lastSalePrice.toLocaleString()}</div><div class="value-label">Last Sale</div></div>` : ''}
+                </div>`;
+            }
+
+            return `
+                <div class="property-card ${typeClass}">
+                    <div class="street-view-container">
+                        ${streetViewHtml}
+                        <span class="type-badge ${typeClass}">${typeLabel}</span>
+                        <span class="days-badge">${months} mo</span>
+                    </div>
+                    <div class="property-info">
+                        <div class="property-address">${address}</div>
+                        <div class="property-location">${town}, NJ &mdash; Block ${c.block}, Lot ${c.lot}</div>
+
+                        ${valueRow}
+
+                        <div class="property-details">
+                            <div class="detail-item">
+                                <div class="detail-label">Defendant</div>
+                                <div class="detail-value">${truncate(c.primaryDefendant, 28) || 'N/A'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Filed</div>
+                                <div class="detail-value">${c.filingDate || 'N/A'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Plaintiff</div>
+                                <div class="detail-value">${truncate(c.primaryPlaintiff, 25) || 'N/A'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Instrument #</div>
+                                <div class="detail-value">${c.instrumentNumber || 'N/A'}</div>
+                            </div>
+                            ${c.buildingDesc ? `<div class="detail-item"><div class="detail-label">Building</div><div class="detail-value">${c.buildingDesc}</div></div>` : ''}
+                            ${c.yearConstructed ? `<div class="detail-item"><div class="detail-label">Year Built</div><div class="detail-value">${c.yearConstructed}</div></div>` : ''}
+                        </div>
+
+                        <div class="property-footer">
+                            <span style="font-size: 0.75rem; color: var(--benoro-text-muted);">${c.defendantType} defendant</span>
+                            ${hasAddr ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function enrichData(testMode = false) {
+            const enrichBtn = document.getElementById('enrichBtn');
+            const testBtn = document.getElementById('testBtn');
+            enrichBtn.disabled = true;
+            testBtn.disabled = true;
+            enrichBtn.innerHTML = testMode ? '⏳ Testing...' : '⏳ Resolving addresses... (~45 sec)';
+
+            try {
+                const r = await fetch('/api/camden/enrich', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ testMode })
+                });
+                const result = await r.json();
+
+                if (result.needsCsv) { alert('Upload a CSV first!'); resetButtons(); return; }
+                if (r.status === 429) { alert('Enrichment already in progress.'); resetButtons(); return; }
+
+                // Poll for completion
+                const check = async () => {
+                    const sr = await fetch('/api/camden/enrich/status', { headers: { 'X-Auth-Token': authToken } });
+                    const status = await sr.json();
+                    if (status.inProgress) {
+                        setTimeout(check, 3000);
+                    } else {
+                        resetButtons();
+                        loadData();
+                        checkCsvStatus();
+                        if (status.lastStatus?.status === 'completed') {
+                            const s = status.lastStatus.enrichmentSummary || {};
+                            alert(`Done! ${s.addressesFound || 0} addresses resolved (${s.hitRate || 'N/A'} hit rate)`);
+                        } else if (status.lastStatus?.error) {
+                            alert('Error: ' + status.lastStatus.error);
+                        }
+                    }
+                };
+                setTimeout(check, 3000);
+            } catch (e) {
+                resetButtons();
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function resetButtons() {
+            document.getElementById('enrichBtn').disabled = false;
+            document.getElementById('testBtn').disabled = false;
+            document.getElementById('enrichBtn').innerHTML = '🏠 Resolve Addresses';
+        }
+
+        function exportCSV() { window.open('/api/camden/export/csv', '_blank'); }
+
+        function truncate(str, len) {
+            if (!str) return '';
+            return str.length > len ? str.substring(0, len) + '...' : str;
+        }
+
+        function getTimeAgo(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            const intervals = [
+                { label: 'year', seconds: 31536000 }, { label: 'month', seconds: 2592000 },
+                { label: 'day', seconds: 86400 }, { label: 'hour', seconds: 3600 }, { label: 'minute', seconds: 60 }
+            ];
+            for (const i of intervals) {
+                const count = Math.floor(seconds / i.seconds);
+                if (count >= 1) return `${count} ${i.label}${count > 1 ? 's' : ''} ago`;
+            }
+            return 'just now';
+        }
+
+        checkExistingAuth();
+    </script>
+</body>
+</html>
