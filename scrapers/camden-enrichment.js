@@ -61,8 +61,8 @@ const OUT_FIELDS = [
   'PCLBLOCK', 'PCLLOT', 'PCLQCODE', 'PCL_MUN', 'MUN_NAME', 'COUNTY',
   'PROP_LOC', 'PROP_CLASS', 'BLDG_DESC',
   'LAND_VAL', 'IMPRVT_VAL', 'NET_VALUE',
-  'SALE_PRICE', 'SALE_DATE', 'DEED_BK', 'DEED_PG',
-  'YR_CONSTR', 'ADDL_LOTS', 'ACREAGE'
+  'SALE_PRICE', 'DEED_DATE', 'DEED_BOOK', 'DEED_PAGE',
+  'YR_CONSTR', 'ADD_LOTS1', 'CALC_ACRE'
 ].join(',');
 
 // ============================================================
@@ -287,10 +287,25 @@ function httpsGet(url) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Invalid JSON response')); }
+        try {
+          const parsed = JSON.parse(data);
+          // ArcGIS returns { error: { ... } } on bad queries
+          if (parsed.error) {
+            console.log(`     API error: ${parsed.error.message || JSON.stringify(parsed.error)}`);
+            resolve({ features: [] });
+            return;
+          }
+          resolve(parsed);
+        }
+        catch (e) {
+          console.log(`     JSON parse error. Response starts with: ${data.substring(0, 200)}`);
+          resolve({ features: [] });
+        }
       });
-    }).on('error', reject);
+    }).on('error', (err) => {
+      console.log(`     HTTP error: ${err.message}`);
+      resolve({ features: [] });
+    });
   });
 }
 
@@ -342,9 +357,9 @@ async function queryParcel(munCode, block, lot) {
     improvementValue: attrs.IMPRVT_VAL,
     netValue: attrs.NET_VALUE,
     salePrice: attrs.SALE_PRICE,
-    saleDate: attrs.SALE_DATE,
+    saleDate: attrs.DEED_DATE,
     yearConstructed: attrs.YR_CONSTR,
-    acreage: attrs.ACREAGE,
+    acreage: attrs.CALC_ACRE,
     matchedBlock: attrs.PCLBLOCK,
     matchedLot: attrs.PCLLOT,
     matchCount: features.length,
