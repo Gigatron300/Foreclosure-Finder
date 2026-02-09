@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 
@@ -17,6 +18,8 @@ app.use(express.text({ limit: '10mb', type: 'text/csv' }));
 const DATA_FILE = path.join(CONFIG.outputDir, CONFIG.outputFile);
 const PIPELINE_DATA_FILE = path.join(CONFIG.outputDir, PIPELINE_FILE);
 const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
+const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
+const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
 
 async function ensureDataDir() {
   try { await fs.mkdir(CONFIG.outputDir, { recursive: true }); } catch (e) {}
@@ -356,6 +359,194 @@ app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=pre-foreclosure-pipeline.csv');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============== CAMDEN COUNTY PIPELINE API ==============
+// Add these routes to server.js
+// Also add at the top: const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
+
+const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
+const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
+
+// Upload Camden County CSV
+app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
+  try {
+    const { csvData, filename } = req.body;
+    if (!csvData) return res.status(400).json({ error: 'No CSV data provided' });
+
+    // Parse and validate
+    let parsed;
+    try {
+      parsed = parseCamdenCSV(csvData);
+    } catch (e) {
+      return res.status(400).json({ error: `CSV parsing error: ${e.message}` });
+    }
+
+    // Save raw CSV
+    await ensureDataDir();
+    await fs.writeFile(CAMDEN_CSV_FILE, csvData, 'utf8');
+
+    // Save parsed JSON
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(parsed, null, 2));
+
+    res.json({
+      success: true,
+      filename: filename || 'camden-lis-pendens.csv',
+      totalRows: parsed.totalRows,
+      uniqueCases: parsed.totalCases,
+      summary: parsed.summary
+    });
+  } catch (error) {
+    console.error('Camden CSV upload error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check Camden CSV status
+app.get('/api/camden/csv-status', checkAuth, async (req, res) => {
+  try {
+    const stats = await fs.stat(CAMDEN_DATA_FILE);
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    res.json({
+      exists: true,
+      caseCount: data.totalCases,
+      lastModified: stats.mtime,
+      summary: data.summary,
+      enrichmentSummary: data.enrichmentSummary || null
+    });
+  } catch (error) {
+    res.json({ exists: false });
+  }
+});
+
+// Get Camden pipeline data
+app.get('/api/camden', checkAuth, async (req, res) => {
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    let cases = data.cases || [];
+
+    // Filters
+    if (req.query.plaintiffType) {
+      cases = cases.filter(c => c.plaintiffType === req.query.plaintiffType.toUpperCase());
+    }
+    if (req.query.defendantType) {
+      cases = cases.filter(c => c.defendantType === req.query.defendantType.toUpperCase());
+    }
+    if (req.query.town) {
+      cases = cases.filter(c => (c.town || '').toLowerCase().includes(req.query.town.toLowerCase()));
+    }
+    if (req.query.hasAddress === 'true') {
+      cases = cases.filter(c => c.propertyAddress);
+    } else if (req.query.hasAddress === 'false') {
+      cases = cases.filter(c => !c.propertyAddress);
+    }
+
+    // Sort
+    const sortBy = req.query.sortBy || 'daysSinceFiling';
+    const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+    cases.sort((a, b) => {
+      if (sortBy === 'daysSinceFiling') return ((a.daysSinceFiling || 0) - (b.daysSinceFiling || 0)) * sortOrder;
+      if (sortBy === 'assessedValue') return ((a.assessedValue || 0) - (b.assessedValue || 0)) * sortOrder;
+      if (sortBy === 'town') return (a.town || '').localeCompare(b.town || '') * sortOrder;
+      return 0;
+    });
+
+    res.json({
+      lastUpdated: data.processedAt,
+      totalCases: cases.length,
+      summary: data.summary,
+      enrichmentSummary: data.enrichmentSummary || null,
+      cases
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      res.json({ lastUpdated: null, totalCases: 0, summary: {}, cases: [] });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+// Enrich Camden data (resolve addresses)
+let isCamdenEnriching = false;
+let lastCamdenEnrichStatus = null;
+
+app.post('/api/camden/enrich', checkAuth, async (req, res) => {
+  if (isCamdenEnriching) {
+    return res.status(429).json({ error: 'Enrichment already in progress', status: lastCamdenEnrichStatus });
+  }
+
+  try {
+    await fs.access(CAMDEN_DATA_FILE);
+  } catch (e) {
+    return res.status(400).json({ error: 'No Camden data found. Upload a CSV first.', needsCsv: true });
+  }
+
+  const testMode = req.body.testMode === true;
+  isCamdenEnriching = true;
+  lastCamdenEnrichStatus = { started: new Date().toISOString(), status: 'running', testMode };
+  res.json({ message: testMode ? 'Test enrichment started (10 cases)' : 'Enrichment started', status: lastCamdenEnrichStatus });
+
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    let data = JSON.parse(content);
+
+    data = await enrichCamdenCases(data, { testMode, testLimit: 10 });
+
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+
+    const withAddress = data.cases.filter(c => c.propertyAddress).length;
+    lastCamdenEnrichStatus = {
+      completed: new Date().toISOString(),
+      status: 'completed',
+      totalCases: data.totalCases,
+      withAddress,
+      enrichmentSummary: data.enrichmentSummary,
+      testMode
+    };
+  } catch (error) {
+    lastCamdenEnrichStatus = { completed: new Date().toISOString(), status: 'error', error: error.message };
+    console.error('Camden enrichment error:', error);
+  } finally {
+    isCamdenEnriching = false;
+  }
+});
+
+app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
+  res.json({ inProgress: isCamdenEnriching, lastStatus: lastCamdenEnrichStatus });
+});
+
+// Export Camden CSV
+app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const headers = [
+      'Instrument #', 'Filing Date', 'Days Since Filing', 'Town',
+      'Block', 'Lot', 'Property Address',
+      'Plaintiff Type', 'Primary Plaintiff', 'Defendant Type', 'Primary Defendant',
+      'All Defendants', 'Entity Co-Defendants',
+      'Assessed Value', 'Land Value', 'Improvement Value',
+      'Building Desc', 'Year Built', 'Last Sale Price', 'Property Class'
+    ];
+    const esc = (s) => `"${(s || '').toString().replace(/"/g, '""')}"`;
+    const rows = data.cases.map(c => [
+      c.instrumentNumber, c.filingDate, c.daysSinceFiling, c.town,
+      c.block, c.lot, esc(c.propertyAddress),
+      c.plaintiffType, esc(c.primaryPlaintiff), c.defendantType, esc(c.primaryDefendant),
+      esc((c.allDefendants || []).join('; ')), esc((c.entityCoDefendants || []).join('; ')),
+      c.assessedValue || '', c.landValue || '', c.improvementValue || '',
+      esc(c.buildingDesc), c.yearConstructed || '', c.lastSalePrice || '', c.propertyClass || ''
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=camden-lis-pendens.csv');
     res.send(csv);
   } catch (error) {
     res.status(500).json({ error: error.message });
