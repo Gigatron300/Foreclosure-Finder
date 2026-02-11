@@ -511,10 +511,13 @@ async function searchByPartyName(page, lastName) {
 
 /**
  * Match search results to a specific lis pendens case
- * Uses plaintiff name, venue (Camden), case type (Foreclosure), and date proximity
+ * Uses venue (Camden), case type (Foreclosure), defendant name in caption, and date proximity
+ * 
+ * RELAXED MATCHING: We searched by defendant last name, so if we find a Camden foreclosure
+ * case with that defendant in the caption, it's very likely the right case.
  */
 function findBestMatch(searchResults, lispendenCase) {
-  const plaintiffKeyword = parsePlaintiffForMatch(lispendenCase.plaintiff);
+  const plaintiffKeyword = parsePlaintiffForMatch(lispendenCase.plaintiff || lispendenCase.primaryPlaintiff);
   const defendantParts = parseDefendantName(lispendenCase.primaryDefendant);
   const lisPendensDate = lispendenCase.filingDate ? new Date(lispendenCase.filingDate) : null;
 
@@ -527,41 +530,56 @@ function findBestMatch(searchResults, lispendenCase) {
     const caseType = (result.caseType || '').toUpperCase();
     const docket = (result.docketNumber || '').toUpperCase();
 
-    // Must be Camden venue
-    if (!venue.includes('CAMDEN') && !docket.includes('CAM')) continue;
+    // Must be Camden venue (check both venue field and docket prefix)
+    const isCamden = venue.includes('CAMDEN') || docket.includes('CAM-') || docket.startsWith('F-');
+    if (!isCamden) {
+      console.log(`      Skipping non-Camden: ${docket} venue=${venue}`);
+      continue;
+    }
     matchScore += 10;
 
-    // Prefer foreclosure cases
-    if (caseType.includes('FORECLOSURE') || docket.includes('-F-')) {
-      matchScore += 20;
+    // Must be foreclosure case (docket starts with F- or contains -F-)
+    const isForeclosure = docket.includes('-F-') || docket.startsWith('F-') || caseType.includes('FORECLOSURE');
+    if (!isForeclosure) {
+      console.log(`      Skipping non-foreclosure: ${docket} type=${caseType}`);
+      continue;
     }
+    matchScore += 20;
 
-    // Plaintiff name in caption (e.g., "CITIZENS VS GLADDEN")
-    if (plaintiffKeyword && caption.includes(plaintiffKeyword)) {
-      matchScore += 30;
-    }
-
-    // Defendant name in caption
+    // Defendant name in caption - THIS IS KEY since we searched by defendant
     if (defendantParts) {
-      if (caption.includes(defendantParts.lastName)) matchScore += 15;
-      if (defendantParts.firstName && caption.includes(defendantParts.firstName)) matchScore += 5;
+      if (caption.includes(defendantParts.lastName)) {
+        matchScore += 25;  // Strong match - defendant last name in caption
+        if (defendantParts.firstName && caption.includes(defendantParts.firstName)) {
+          matchScore += 10;  // Even better - first name too
+        }
+      } else {
+        // Defendant name not in caption - skip this result
+        console.log(`      Skipping - defendant ${defendantParts.lastName} not in caption: ${caption}`);
+        continue;
+      }
     }
 
-    // Date proximity - lis pendens is usually 1-8 weeks after case filing
+    // Plaintiff name in caption (bonus points, not required)
+    if (plaintiffKeyword && caption.includes(plaintiffKeyword)) {
+      matchScore += 15;
+    }
+
+    // Date proximity - lis pendens is usually 1-8 weeks after case filing (bonus points)
     if (lisPendensDate && result.filedDate) {
       try {
         const caseDate = new Date(result.filedDate);
         const daysDiff = Math.abs((lisPendensDate - caseDate) / (1000 * 60 * 60 * 24));
         
-        if (daysDiff <= 14) matchScore += 20;      // Within 2 weeks - strong match
+        if (daysDiff <= 14) matchScore += 15;       // Within 2 weeks - strong match
         else if (daysDiff <= 60) matchScore += 10;  // Within 2 months - good match
         else if (daysDiff <= 180) matchScore += 5;  // Within 6 months - possible
       } catch (e) {}
     }
 
-    if (matchScore >= 25) {
-      candidates.push({ ...result, matchScore });
-    }
+    // If we get here, we have a Camden foreclosure with defendant name - that's a match!
+    console.log(`      ✓ Candidate: ${docket} "${caption}" score=${matchScore}`);
+    candidates.push({ ...result, matchScore });
   }
 
   // Sort by match score, pick best
