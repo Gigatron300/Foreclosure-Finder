@@ -301,12 +301,22 @@
                     <div class="stat-value" id="individualCount">-</div>
                     <div class="stat-label">Individual Defendants</div>
                 </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="openCount" style="color: var(--benoro-success);">-</div>
+                    <div class="stat-label">🟢 Open Cases</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="closedCount" style="color: #f87171;">-</div>
+                    <div class="stat-label">🔴 Closed/Dismissed</div>
+                </div>
             </div>
 
             <!-- Actions -->
             <div class="actions-bar">
                 <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">🏠 Resolve Addresses</button>
                 <button class="btn btn-secondary" onclick="enrichData(true)" id="testBtn" style="background: #8b5cf6; border: none; color: white;">⚡ Test (10 only)</button>
+                <button class="btn btn-secondary" onclick="checkCourtStatus(false)" id="courtStatusBtn" style="background: #0891b2; border: none; color: white;">⚖️ Check Court Status</button>
+                <button class="btn btn-secondary" onclick="checkCourtStatus(true)" id="courtStatusTestBtn" style="background: #6366f1; border: none; color: white;">⚡ Status Test (10)</button>
                 <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
 
                 <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
@@ -320,6 +330,13 @@
                     <option value="MORTGAGE">Mortgage Only</option>
                     <option value="TAX_LIEN">Tax Lien Only</option>
                     <option value="GOVERNMENT">Government Only</option>
+                </select>
+
+                <select id="courtStatusFilter" onchange="loadData()">
+                    <option value="">All Court Status</option>
+                    <option value="OPEN">Open Cases Only</option>
+                    <option value="CLOSED">Closed/Dismissed Only</option>
+                    <option value="NOT_CHECKED">Not Yet Checked</option>
                 </select>
 
                 <select id="addressFilter" onchange="loadData()">
@@ -452,6 +469,7 @@
             const typeFilter = document.getElementById('typeFilter').value;
             const addressFilter = document.getElementById('addressFilter').value;
             const townFilter = document.getElementById('townFilter').value.toLowerCase();
+            const courtStatusFilter = document.getElementById('courtStatusFilter').value;
 
             try {
                 let url = `/api/camden?sortBy=${sortBy}&sortOrder=desc`;
@@ -466,15 +484,26 @@
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
                 }
 
-                const cases = data.cases || [];
-                const allCases = cases;
+                let cases = data.cases || [];
 
-                // Stats
+                // Court status filter (client-side since it's a new field)
+                if (courtStatusFilter === 'OPEN') {
+                    cases = cases.filter(c => c.courtStatus === 'OPEN');
+                } else if (courtStatusFilter === 'CLOSED') {
+                    cases = cases.filter(c => c.courtStatus === 'CLOSED');
+                } else if (courtStatusFilter === 'NOT_CHECKED') {
+                    cases = cases.filter(c => !c.courtStatus);
+                }
+
+                // Stats (from unfiltered data for totals)
+                const allCases = data.cases || [];
                 document.getElementById('totalCases').textContent = cases.length;
                 document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
                 document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
                 document.getElementById('individualCount').textContent = cases.filter(c => c.defendantType === 'INDIVIDUAL').length;
+                document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
+                document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
                 document.getElementById('caseCount').textContent = `(${cases.length})`;
 
                 if (cases.length === 0) {
@@ -567,6 +596,14 @@
 
                         <div class="property-footer">
                             <span style="font-size: 0.75rem; color: var(--benoro-text-muted);">${c.defendantType} defendant</span>
+                            ${c.courtStatus ? `<span style="font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; font-weight: 600;
+                                ${c.courtStatus === 'OPEN' ? 'background: rgba(74,222,128,0.2); color: #4ade80;' : 
+                                  c.courtStatus === 'CLOSED' ? 'background: rgba(248,113,113,0.2); color: #f87171;' :
+                                  'background: rgba(156,163,175,0.2); color: #9ca3af;'}">
+                                ${c.courtStatus === 'OPEN' ? '🟢 OPEN' : c.courtStatus === 'CLOSED' ? '🔴 CLOSED' : '⚪ ' + c.courtStatus}
+                                ${c.courtDisposition ? ' — ' + c.courtDisposition : ''}
+                            </span>` : ''}
+                            ${c.courtDocketNumber ? `<span style="font-size: 0.7rem; color: var(--benoro-text-light);">${c.courtDocketNumber}</span>` : ''}
                             ${hasAddr ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : ''}
                         </div>
                     </div>
@@ -621,6 +658,56 @@
             document.getElementById('enrichBtn').disabled = false;
             document.getElementById('testBtn').disabled = false;
             document.getElementById('enrichBtn').innerHTML = '🏠 Resolve Addresses';
+            document.getElementById('courtStatusBtn').disabled = false;
+            document.getElementById('courtStatusTestBtn').disabled = false;
+            document.getElementById('courtStatusBtn').innerHTML = '⚖️ Check Court Status';
+            document.getElementById('courtStatusTestBtn').innerHTML = '⚡ Status Test (10)';
+        }
+
+        async function checkCourtStatus(testMode = false) {
+            const btn = document.getElementById('courtStatusBtn');
+            const testBtn = document.getElementById('courtStatusTestBtn');
+            btn.disabled = true;
+            testBtn.disabled = true;
+            btn.innerHTML = testMode ? '⏳ Testing...' : '⏳ Checking court status... (may take a few minutes)';
+
+            try {
+                const r = await fetch('/api/camden/court-status', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ testMode })
+                });
+                const result = await r.json();
+
+                if (result.error && !result.status) {
+                    alert(result.error);
+                    resetButtons();
+                    return;
+                }
+                if (r.status === 429) { alert('Court status check already in progress.'); resetButtons(); return; }
+
+                // Poll for completion
+                const check = async () => {
+                    const sr = await fetch('/api/camden/court-status/status', { headers: { 'X-Auth-Token': authToken } });
+                    const status = await sr.json();
+                    if (status.inProgress) {
+                        setTimeout(check, 4000);
+                    } else {
+                        resetButtons();
+                        loadData();
+                        if (status.lastStatus?.status === 'completed') {
+                            const s = status.lastStatus.courtStatusSummary || status.lastStatus;
+                            alert(`Done! ${s.matched || 0} cases matched. Open: ${s.openCases || 0}, Closed: ${s.closedCases || 0}`);
+                        } else if (status.lastStatus?.error) {
+                            alert('Error: ' + status.lastStatus.error);
+                        }
+                    }
+                };
+                setTimeout(check, 4000);
+            } catch (e) {
+                resetButtons();
+                alert('Error: ' + e.message);
+            }
         }
 
         function exportCSV() { window.open('/api/camden/export/csv', '_blank'); }
