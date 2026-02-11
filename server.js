@@ -5,6 +5,7 @@ const fs = require('fs').promises;
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
+const { enrichCourtStatus } = require('./scrapers/nj-courts-status');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -517,6 +518,64 @@ app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
   res.json({ inProgress: isCamdenEnriching, lastStatus: lastCamdenEnrichStatus });
 });
 
+// ============== NJ COURTS STATUS ENRICHMENT ==============
+
+let isCourtStatusEnriching = false;
+let lastCourtStatusEnrichStatus = null;
+
+app.post('/api/camden/court-status', checkAuth, async (req, res) => {
+  if (isCourtStatusEnriching) {
+    return res.status(429).json({ error: 'Court status enrichment already in progress', status: lastCourtStatusEnrichStatus });
+  }
+
+  try {
+    await fs.access(CAMDEN_DATA_FILE);
+  } catch (e) {
+    return res.status(400).json({ error: 'No Camden data found. Upload and process a CSV first.', needsCsv: true });
+  }
+
+  if (!process.env.NJ_COURTS_USER || !process.env.NJ_COURTS_PASS) {
+    return res.status(400).json({ 
+      error: 'NJ Courts credentials not configured. Set NJ_COURTS_USER and NJ_COURTS_PASS environment variables on Render.' 
+    });
+  }
+
+  const testMode = req.body.testMode === true;
+  isCourtStatusEnriching = true;
+  lastCourtStatusEnrichStatus = { started: new Date().toISOString(), status: 'running', testMode };
+  res.json({ message: testMode ? 'Court status check started (10 cases)' : 'Court status check started', status: lastCourtStatusEnrichStatus });
+
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    let data = JSON.parse(content);
+
+    data = await enrichCourtStatus(data, { testMode, testLimit: 10 });
+
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+
+    const openCases = data.cases.filter(c => c.courtStatus === 'OPEN').length;
+    const closedCases = data.cases.filter(c => c.courtStatus === 'CLOSED').length;
+    lastCourtStatusEnrichStatus = {
+      completed: new Date().toISOString(),
+      status: 'completed',
+      totalCases: data.totalCases,
+      openCases,
+      closedCases,
+      courtStatusSummary: data.courtStatusSummary,
+      testMode
+    };
+  } catch (error) {
+    lastCourtStatusEnrichStatus = { completed: new Date().toISOString(), status: 'error', error: error.message };
+    console.error('Court status enrichment error:', error);
+  } finally {
+    isCourtStatusEnriching = false;
+  }
+});
+
+app.get('/api/camden/court-status/status', checkAuth, (req, res) => {
+  res.json({ inProgress: isCourtStatusEnriching, lastStatus: lastCourtStatusEnrichStatus });
+});
+
 // Export Camden CSV
 app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
   try {
@@ -528,7 +587,8 @@ app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
       'Plaintiff Type', 'Primary Plaintiff', 'Defendant Type', 'Primary Defendant',
       'All Defendants', 'Entity Co-Defendants',
       'Assessed Value', 'Land Value', 'Improvement Value',
-      'Building Desc', 'Year Built', 'Last Sale Price', 'Property Class'
+      'Building Desc', 'Year Built', 'Last Sale Price', 'Property Class',
+      'Court Status', 'Court Disposition', 'Docket Number', 'Court Filed Date'
     ];
     const esc = (s) => `"${(s || '').toString().replace(/"/g, '""')}"`;
     const rows = data.cases.map(c => [
@@ -537,7 +597,8 @@ app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
       c.plaintiffType, esc(c.primaryPlaintiff), c.defendantType, esc(c.primaryDefendant),
       esc((c.allDefendants || []).join('; ')), esc((c.entityCoDefendants || []).join('; ')),
       c.assessedValue || '', c.landValue || '', c.improvementValue || '',
-      esc(c.buildingDesc), c.yearConstructed || '', c.lastSalePrice || '', c.propertyClass || ''
+      esc(c.buildingDesc), c.yearConstructed || '', c.lastSalePrice || '', c.propertyClass || '',
+      c.courtStatus || '', esc(c.courtDisposition), c.courtDocketNumber || '', c.courtFiledDate || ''
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     res.setHeader('Content-Type', 'text/csv');
