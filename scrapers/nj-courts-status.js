@@ -454,56 +454,65 @@ async function searchByPartyName(page, lastName) {
   await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
   await delay(CONFIG.pageLoadWait);
 
-  // Extract search results
+  // Extract search results with HARDCODED column positions
+  // Based on NJ Courts General Equity search results table:
+  // Column 0: Name, Column 1: Venue, Column 2: Docket Number, Column 3: Case Caption, Column 4: Case Initiation Date
   const results = await page.evaluate(() => {
     const rows = [];
+    
+    // Find the DataTable results (it has class 'dataTable' or contains docket links)
     const tables = document.querySelectorAll('table');
-
+    
     for (const table of tables) {
-      const headerRow = table.querySelector('tr');
-      if (!headerRow) continue;
-
-      const headers = Array.from(headerRow.querySelectorAll('th, td'))
-        .map(h => (h.textContent || '').trim().toLowerCase());
-
-      // Look for result table with docket number, case caption, etc.
-      const hasDocket = headers.some(h => h.includes('docket'));
-      const hasCaption = headers.some(h => h.includes('caption') || h.includes('case'));
-      const hasVenue = headers.some(h => h.includes('venue') || h.includes('county'));
-
-      if (!hasDocket && !hasCaption) continue;
-
-      const docketIdx = headers.findIndex(h => h.includes('docket'));
-      const captionIdx = headers.findIndex(h => h.includes('caption') || h.includes('case'));
-      const venueIdx = headers.findIndex(h => h.includes('venue') || h.includes('county'));
-      const statusIdx = headers.findIndex(h => h.includes('status'));
-      const dateIdx = headers.findIndex(h => h.includes('date') || h.includes('initiation') || h.includes('filed'));
-      const dispositionIdx = headers.findIndex(h => h.includes('disposition'));
-      const typeIdx = headers.findIndex(h => h.includes('type'));
-
       const allRows = table.querySelectorAll('tr');
-      for (let i = 1; i < allRows.length; i++) {
-        const cells = allRows[i].querySelectorAll('td');
-        if (cells.length < 2) continue;
-
-        // Check for a link to the case jacket
-        const link = allRows[i].querySelector('a');
-        const linkHref = link ? link.href : '';
-
-        rows.push({
-          docketNumber: docketIdx >= 0 && cells[docketIdx] ? cells[docketIdx].textContent.trim() : '',
-          caseCaption: captionIdx >= 0 && cells[captionIdx] ? cells[captionIdx].textContent.trim() : '',
-          venue: venueIdx >= 0 && cells[venueIdx] ? cells[venueIdx].textContent.trim() : '',
-          status: statusIdx >= 0 && cells[statusIdx] ? cells[statusIdx].textContent.trim() : '',
-          filedDate: dateIdx >= 0 && cells[dateIdx] ? cells[dateIdx].textContent.trim() : '',
-          disposition: dispositionIdx >= 0 && cells[dispositionIdx] ? cells[dispositionIdx].textContent.trim() : '',
-          caseType: typeIdx >= 0 && cells[typeIdx] ? cells[typeIdx].textContent.trim() : '',
-          detailLink: linkHref
-        });
+      
+      for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i];
+        const cells = row.querySelectorAll('td');
+        
+        // Need at least 5 columns for a data row
+        if (cells.length < 5) continue;
+        
+        // Skip header/footer rows
+        const rowText = row.textContent.toLowerCase();
+        if (rowText.includes('showing') || rowText.includes('previous') || rowText.includes('next')) continue;
+        if (row.querySelector('th')) continue;
+        
+        // HARDCODED column positions based on actual NJ Courts table structure:
+        // 0=Name, 1=Venue, 2=Docket Number, 3=Case Caption, 4=Case Initiation Date
+        const name = cells[0] ? cells[0].textContent.trim() : '';
+        const venue = cells[1] ? cells[1].textContent.trim() : '';
+        const docketNumber = cells[2] ? cells[2].textContent.trim() : '';
+        const caseCaption = cells[3] ? cells[3].textContent.trim() : '';
+        const filedDate = cells[4] ? cells[4].textContent.trim() : '';
+        
+        // Get the docket link (it's in the Docket Number column)
+        const docketLink = cells[2] ? cells[2].querySelector('a') : null;
+        const detailLink = docketLink ? docketLink.href : '';
+        
+        // Only add if we have a docket number (confirms it's a real result row)
+        if (docketNumber && docketNumber.match(/F-\d+/)) {
+          rows.push({
+            name,
+            venue,
+            docketNumber,
+            caseCaption,
+            filedDate,
+            detailLink,
+            status: '',
+            disposition: '',
+            caseType: ''
+          });
+        }
       }
     }
-
+    
     return rows;
+  });
+
+  console.log(`    Found ${results.length} search results`);
+  results.forEach((r, i) => {
+    console.log(`      ${i + 1}. ${r.docketNumber} | Venue: ${r.venue} | ${r.caseCaption.substring(0, 40)}...`);
   });
 
   return results;
@@ -511,15 +520,16 @@ async function searchByPartyName(page, lastName) {
 
 /**
  * Match search results to a specific lis pendens case
- * Uses venue (Camden), case type (Foreclosure), defendant name in caption, and date proximity
- * 
- * RELAXED MATCHING: We searched by defendant last name, so if we find a Camden foreclosure
- * case with that defendant in the caption, it's very likely the right case.
+ * Now that we have proper column extraction:
+ * - Venue should be "CAMDEN" 
+ * - Docket should start with "F-" for foreclosure
+ * - Caption should contain defendant name
  */
 function findBestMatch(searchResults, lispendenCase) {
-  const plaintiffKeyword = parsePlaintiffForMatch(lispendenCase.plaintiff || lispendenCase.primaryPlaintiff);
   const defendantParts = parseDefendantName(lispendenCase.primaryDefendant);
   const lisPendensDate = lispendenCase.filingDate ? new Date(lispendenCase.filingDate) : null;
+
+  console.log(`      Looking for defendant: ${defendantParts?.lastName}`);
 
   const candidates = [];
 
@@ -527,122 +537,148 @@ function findBestMatch(searchResults, lispendenCase) {
     let matchScore = 0;
     const caption = (result.caseCaption || '').toUpperCase();
     const venue = (result.venue || '').toUpperCase();
-    const caseType = (result.caseType || '').toUpperCase();
     const docket = (result.docketNumber || '').toUpperCase();
 
-    // Must be Camden venue (check both venue field and docket prefix)
-    const isCamden = venue.includes('CAMDEN') || docket.includes('CAM-') || docket.startsWith('F-');
-    if (!isCamden) {
-      console.log(`      Skipping non-Camden: ${docket} venue=${venue}`);
+    // Must be Camden venue
+    if (!venue.includes('CAMDEN')) {
+      console.log(`      Skip ${docket}: wrong venue "${venue}"`);
       continue;
     }
     matchScore += 10;
 
-    // Must be foreclosure case (docket starts with F- or contains -F-)
-    const isForeclosure = docket.includes('-F-') || docket.startsWith('F-') || caseType.includes('FORECLOSURE');
-    if (!isForeclosure) {
-      console.log(`      Skipping non-foreclosure: ${docket} type=${caseType}`);
+    // Must be foreclosure (docket starts with F-)
+    if (!docket.startsWith('F-')) {
+      console.log(`      Skip ${docket}: not foreclosure`);
       continue;
     }
     matchScore += 20;
 
-    // Defendant name in caption - THIS IS KEY since we searched by defendant
-    if (defendantParts) {
+    // Defendant name should be in caption (e.g., "NEW JERSEY HOUSING A VS DOWNING LAUREN")
+    if (defendantParts && defendantParts.lastName) {
       if (caption.includes(defendantParts.lastName)) {
-        matchScore += 25;  // Strong match - defendant last name in caption
+        matchScore += 25;
+        console.log(`      ✓ ${docket}: found defendant ${defendantParts.lastName} in caption`);
+        
+        // Bonus for first name match
         if (defendantParts.firstName && caption.includes(defendantParts.firstName)) {
-          matchScore += 10;  // Even better - first name too
+          matchScore += 10;
         }
       } else {
-        // Defendant name not in caption - skip this result
-        console.log(`      Skipping - defendant ${defendantParts.lastName} not in caption: ${caption}`);
+        console.log(`      Skip ${docket}: defendant ${defendantParts.lastName} not in caption "${caption.substring(0, 50)}"`);
         continue;
       }
     }
 
-    // Plaintiff name in caption (bonus points, not required)
-    if (plaintiffKeyword && caption.includes(plaintiffKeyword)) {
-      matchScore += 15;
-    }
-
-    // Date proximity - lis pendens is usually 1-8 weeks after case filing (bonus points)
+    // Date proximity bonus (not required)
     if (lisPendensDate && result.filedDate) {
       try {
         const caseDate = new Date(result.filedDate);
         const daysDiff = Math.abs((lisPendensDate - caseDate) / (1000 * 60 * 60 * 24));
         
-        if (daysDiff <= 14) matchScore += 15;       // Within 2 weeks - strong match
-        else if (daysDiff <= 60) matchScore += 10;  // Within 2 months - good match
-        else if (daysDiff <= 180) matchScore += 5;  // Within 6 months - possible
+        if (daysDiff <= 60) matchScore += 10;
+        else if (daysDiff <= 180) matchScore += 5;
       } catch (e) {}
     }
 
-    // If we get here, we have a Camden foreclosure with defendant name - that's a match!
-    console.log(`      ✓ Candidate: ${docket} "${caption}" score=${matchScore}`);
     candidates.push({ ...result, matchScore });
   }
 
-  // Sort by match score, pick best
+  // Sort by score, return best match
   candidates.sort((a, b) => b.matchScore - a.matchScore);
-  return candidates[0] || null;
+  
+  if (candidates.length > 0) {
+    console.log(`      Best match: ${candidates[0].docketNumber} (score: ${candidates[0].matchScore})`);
+    return candidates[0];
+  }
+  
+  return null;
 }
 
 /**
- * Click into a case jacket to get full status details
- * (only needed if the search results don't have status/disposition)
+ * Click into a case jacket to get full status details from the detail page
+ * The detail page shows: Case Status, Case Disposition, Case Type, Venue, etc.
  */
 async function getCaseDetails(page, result) {
-  // If we already have status from search results, use it
-  if (result.status && result.disposition) {
-    return {
-      docketNumber: result.docketNumber,
-      caseStatus: result.status,
-      caseDisposition: result.disposition,
-      caseCaption: result.caseCaption,
-      caseType: result.caseType,
-      venue: result.venue,
-      filedDate: result.filedDate
-    };
-  }
-
-  // If there's a detail link, click into it
+  // If there's a detail link, click into it to get the actual status
   if (result.detailLink) {
     try {
-      await page.goto(result.detailLink, { waitUntil: 'networkidle2', timeout: 15000 });
+      console.log(`      Opening case detail: ${result.detailLink}`);
+      await page.goto(result.detailLink, { waitUntil: 'networkidle2', timeout: 20000 });
       await delay(2000);
 
+      // Extract case details from the case jacket page
+      // Based on NJ Courts case detail page structure:
+      // Case Status: Active, Case Disposition: Open, Case Type: Residential Mortgage Foreclosure, etc.
       const details = await page.evaluate(() => {
         const text = document.body.innerText || '';
+        const html = document.body.innerHTML || '';
+        
+        // Helper to find field value - looks for "Label: Value" pattern
         const getField = (labels) => {
           for (const label of labels) {
-            const regex = new RegExp(label + '[:\\s]+([^\\n]+)', 'i');
-            const match = text.match(regex);
-            if (match) return match[1].trim();
+            // Try regex pattern for "Label: Value" or "Label Value"
+            const patterns = [
+              new RegExp(label + ':\\s*([^\\n]+)', 'i'),
+              new RegExp(label + '\\s*:\\s*([^\\n]+)', 'i'),
+              new RegExp(label + '\\s+([A-Za-z]+)', 'i')
+            ];
+            
+            for (const regex of patterns) {
+              const match = text.match(regex);
+              if (match && match[1]) {
+                return match[1].trim().split('\n')[0].trim();
+              }
+            }
           }
           return '';
         };
-
+        
+        // Extract all the key fields from the case detail page
+        const caseStatus = getField(['Case Status']);
+        const caseDisposition = getField(['Case Disposition']);
+        const caseType = getField(['Case Type']);
+        const venue = getField(['Venue']);
+        const caseCaption = getField(['Case Caption']);
+        const filedDate = getField(['Case Initiation Date', 'Filed Date', 'Initiation Date']);
+        const dispositionDate = getField(['Disposition Date']);
+        const judge = getField(['Judge']);
+        const court = getField(['Court']);
+        
         return {
-          caseStatus: getField(['Case Status']),
-          caseDisposition: getField(['Case Disposition', 'Disposition']),
-          caseCaption: getField(['Case Caption']),
-          caseType: getField(['Case Type']),
-          venue: getField(['Venue']),
-          filedDate: getField(['Case Initiation Date', 'Filed Date', 'Initiation Date']),
-          dispositionDate: getField(['Disposition Date'])
+          caseStatus,
+          caseDisposition,
+          caseType,
+          venue,
+          caseCaption,
+          filedDate,
+          dispositionDate,
+          judge,
+          court,
+          // Include raw text snippet for debugging
+          rawTextSnippet: text.substring(0, 500)
         };
       });
 
+      console.log(`      Case Status: ${details.caseStatus}, Disposition: ${details.caseDisposition}`);
+
       return {
         docketNumber: result.docketNumber,
-        ...details
+        caseStatus: details.caseStatus,
+        caseDisposition: details.caseDisposition,
+        caseCaption: details.caseCaption || result.caseCaption,
+        caseType: details.caseType,
+        venue: details.venue || result.venue,
+        filedDate: details.filedDate || result.filedDate,
+        dispositionDate: details.dispositionDate,
+        judge: details.judge,
+        detailLink: result.detailLink
       };
     } catch (err) {
-      console.log(`     ⚠ Could not load case jacket: ${err.message}`);
+      console.log(`      ⚠ Could not load case jacket: ${err.message}`);
     }
   }
 
-  // Return what we have
+  // Return what we have from search results if we couldn't get detail page
   return {
     docketNumber: result.docketNumber,
     caseStatus: result.status || '',
