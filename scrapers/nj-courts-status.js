@@ -74,232 +74,252 @@ function parsePlaintiffForMatch(plaintiffName) {
 // ============================================================
 
 async function launchBrowser() {
-  return puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-gpu', '--disable-extensions', '--disable-background-networking',
-      '--js-flags=--max-old-space-size=256'
-    ]
-  });
+  // Try puppeteer-extra with stealth plugin first (if available)
+  try {
+    const puppeteerExtra = require('puppeteer-extra');
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    puppeteerExtra.use(StealthPlugin());
+    console.log('  Using puppeteer-extra with stealth plugin');
+    return puppeteerExtra.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+        '--disable-gpu', '--disable-extensions', '--disable-background-networking',
+        '--disable-blink-features=AutomationControlled',
+        '--js-flags=--max-old-space-size=256'
+      ]
+    });
+  } catch (e) {
+    console.log('  Stealth plugin not available, using standard puppeteer');
+    return puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+        '--disable-gpu', '--disable-extensions', '--disable-background-networking',
+        '--disable-blink-features=AutomationControlled',
+        '--js-flags=--max-old-space-size=256'
+      ]
+    });
+  }
 }
 
 async function loginToNJCourts(page, username, password) {
   console.log('  🔑 Logging into NJ Courts portal...');
 
-  // Navigate to the civil case search - it will redirect to login
-  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-  await delay(3000);
+  // Remove headless detection markers
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    // Override the languages
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    // Fix Chrome object
+    window.chrome = { runtime: {} };
+    // Fix permissions
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) =>
+      parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : originalQuery(parameters);
+  });
 
-  const currentUrl = page.url();
+  // Set extra headers to look more like a real browser
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  });
+
+  // Navigate to the civil case search - it will redirect to login
+  console.log('  Navigating to portal...');
+  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+  await delay(5000);
+
+  let currentUrl = page.url();
   console.log(`  Current URL: ${currentUrl}`);
 
-  // Check if we're already on the search page (already logged in)
-  const isSearchPage = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
-  });
-  if (isSearchPage) {
-    console.log('  ✅ Already logged in');
+  // ---- RAW HTML DUMP for diagnostics ----
+  const rawHtml = await page.content();
+  console.log(`  Raw HTML length: ${rawHtml.length}`);
+  console.log(`  HTML first 500 chars: ${rawHtml.substring(0, 500)}`);
+
+  // Check for Incapsula/bot block
+  if (rawHtml.includes('Incapsula') || rawHtml.includes('_Incapsula') || rawHtml.includes('visid_incap')) {
+    console.error('  ⚠ Page appears to be blocked by Incapsula bot protection');
+    console.log(`  HTML snippet: ${rawHtml.substring(0, 1000)}`);
+  }
+
+  // Check for meta refresh redirect
+  const metaRefresh = rawHtml.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["']([^"']+)["']/i);
+  if (metaRefresh) {
+    console.log(`  Meta refresh found: ${metaRefresh[1]}`);
+    const urlMatch = metaRefresh[1].match(/url=(.+)/i);
+    if (urlMatch) {
+      console.log(`  Following meta refresh to: ${urlMatch[1]}`);
+      await page.goto(urlMatch[1], { waitUntil: 'networkidle2', timeout: 30000 });
+      await delay(5000);
+      console.log(`  After redirect URL: ${page.url()}`);
+    }
+  }
+
+  // Wait for content to render (JS SPA)
+  let hasContent = false;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const check = await page.evaluate(() => ({
+      inputs: document.querySelectorAll('input').length,
+      bodyLen: document.body.innerHTML.length,
+      hasText: document.body.innerText.trim().length > 50,
+      frames: document.querySelectorAll('iframe, frame').length
+    }));
+
+    if (check.inputs > 0 || check.hasText) {
+      console.log(`  Content loaded (attempt ${attempt + 1}): ${check.inputs} inputs, bodyLen=${check.bodyLen}, frames=${check.frames}`);
+      hasContent = true;
+      break;
+    }
+    
+    if (attempt === 3) {
+      // After a few tries, check if we need to navigate somewhere else
+      const curUrl = page.url();
+      console.log(`  Still empty at attempt ${attempt + 1}. URL: ${curUrl}`);
+      
+      // Try the portal root
+      if (curUrl.includes('civilCaseSearch')) {
+        console.log('  Trying portal root instead...');
+        await page.goto('https://portal.njcourts.gov/', { waitUntil: 'networkidle2', timeout: 30000 });
+        await delay(3000);
+        const rootHtml = await page.content();
+        console.log(`  Portal root HTML length: ${rootHtml.length}`);
+        console.log(`  Portal root first 500: ${rootHtml.substring(0, 500)}`);
+      }
+    }
+
+    console.log(`  Waiting for content (attempt ${attempt + 1}/8)...`);
+    await delay(3000);
+  }
+
+  // Full diagnostic dump
+  const pageInfo = await page.evaluate(() => ({
+    title: document.title,
+    url: window.location.href,
+    forms: Array.from(document.querySelectorAll('form')).map(f => ({ action: f.action, method: f.method, id: f.id })),
+    inputs: Array.from(document.querySelectorAll('input')).map(i => ({ type: i.type, name: i.name, id: i.id, placeholder: i.placeholder })),
+    bodyText: document.body.innerText.substring(0, 500),
+    bodyHtmlLen: document.body.innerHTML.length,
+    iframes: Array.from(document.querySelectorAll('iframe, frame')).map(f => ({ src: f.src, id: f.id })),
+    scripts: Array.from(document.querySelectorAll('script[src]')).map(s => s.src).slice(0, 5)
+  }));
+
+  console.log(`  Page title: "${pageInfo.title}"`);
+  console.log(`  Body text: "${pageInfo.bodyText.substring(0, 300)}"`);
+  console.log(`  Forms: ${pageInfo.forms.length}, Inputs: ${pageInfo.inputs.length}`);
+  pageInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name="${i.name}" id="${i.id}"`));
+  pageInfo.forms.forEach(f => console.log(`    Form: action=${f.action} method=${f.method}`));
+  console.log(`  Iframes: ${pageInfo.iframes.length}`);
+  pageInfo.iframes.forEach(f => console.log(`    Iframe: src=${f.src} id=${f.id}`));
+  console.log(`  Scripts: ${pageInfo.scripts.join(', ')}`);
+
+  // Check iframes for login form
+  const allFrames = page.frames();
+  for (const frame of allFrames) {
+    if (frame === page.mainFrame()) continue;
+    try {
+      const fInfo = await frame.evaluate(() => ({
+        url: window.location.href,
+        inputs: Array.from(document.querySelectorAll('input')).map(i => ({ type: i.type, name: i.name, id: i.id })),
+        bodyText: document.body.innerText.substring(0, 200)
+      }));
+      if (fInfo.inputs.length > 0) {
+        console.log(`  Frame ${fInfo.url}: ${fInfo.inputs.length} inputs found`);
+        fInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name="${i.name}" id="${i.id}"`));
+      }
+    } catch (e) {
+      console.log(`  Frame [cross-origin]: ${frame.url()}`);
+    }
+  }
+
+  // ---- Already on search page? ----
+  if (pageInfo.bodyText.includes('Party Name') || pageInfo.bodyText.includes('Case Search')) {
+    console.log('  ✅ Already logged in!');
     return true;
   }
 
-  // Diagnostic: dump all form fields on the page
-  const pageInfo = await page.evaluate(() => {
-    const forms = document.querySelectorAll('form');
-    const inputs = document.querySelectorAll('input');
-    const formInfo = [];
-    forms.forEach((f, i) => {
-      formInfo.push({ index: i, action: f.action, method: f.method, id: f.id, name: f.name });
-    });
-    const inputInfo = [];
-    inputs.forEach(inp => {
-      inputInfo.push({ 
-        type: inp.type, name: inp.name, id: inp.id, 
-        placeholder: inp.placeholder, value: inp.value ? '[has value]' : '[empty]',
-        visible: inp.offsetParent !== null
-      });
-    });
-    const pageTitle = document.title;
-    const bodySnippet = document.body.innerText.substring(0, 500);
-    return { pageTitle, forms: formInfo, inputs: inputInfo, bodySnippet, url: window.location.href };
-  });
+  // ---- Attempt login ----
+  if (pageInfo.inputs.length === 0) {
+    // No inputs found anywhere - the page is blocked or completely JS-rendered
+    console.error('  ❌ No login form found. Site may be blocking headless browser.');
+    console.error('  Full HTML dump:');
+    const fullHtml = await page.content();
+    // Log in chunks to avoid truncation
+    for (let i = 0; i < Math.min(fullHtml.length, 3000); i += 500) {
+      console.log(`  HTML[${i}]: ${fullHtml.substring(i, i + 500)}`);
+    }
+    return false;
+  }
 
-  console.log(`  Page title: ${pageInfo.pageTitle}`);
-  console.log(`  Page URL: ${pageInfo.url}`);
-  console.log(`  Forms found: ${pageInfo.forms.length}`);
-  pageInfo.forms.forEach(f => console.log(`    Form: action=${f.action} method=${f.method} id=${f.id}`));
-  console.log(`  Inputs found: ${pageInfo.inputs.length}`);
-  pageInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name=${i.name} id=${i.id} placeholder=${i.placeholder}`));
-  console.log(`  Body snippet: ${pageInfo.bodySnippet.substring(0, 200)}`);
-
-  // Strategy 1: IBM WebSEAL PKMS login form (field names: "username" and "password")
-  // Strategy 2: Standard form with various input names
-  // Strategy 3: Any text input + password input combo
-  
-  const loginSuccess = await page.evaluate((user, pass) => {
-    // Collect all inputs
+  // Fill login fields
+  const loginResult = await page.evaluate((user, pass) => {
     const allInputs = Array.from(document.querySelectorAll('input'));
+    let userInput = null, passInput = null;
     
-    let userInput = null;
-    let passInput = null;
-    
-    // ---- Strategy 1: IBM WebSEAL PKMS standard fields ----
+    // Try by name
     userInput = document.querySelector('input[name="username"]');
     passInput = document.querySelector('input[name="password"]');
+    if (!userInput) userInput = document.querySelector('input[name="userid"]') || document.querySelector('input[name="j_username"]');
+    if (!passInput) passInput = document.querySelector('input[name="j_password"]') || document.querySelector('input[type="password"]');
     
-    // ---- Strategy 2: Common NJ Courts field names ----
-    if (!userInput) userInput = document.querySelector('input[name="userid"]');
-    if (!userInput) userInput = document.querySelector('input[name="userId"]');
-    if (!userInput) userInput = document.querySelector('input[name="j_username"]');
-    if (!userInput) userInput = document.querySelector('input[name="login"]');
-    if (!passInput) passInput = document.querySelector('input[name="j_password"]');
-    if (!passInput) passInput = document.querySelector('input[type="password"]');
+    // Try by ID
+    if (!userInput) userInput = document.querySelector('input[id*="user" i]') || document.querySelector('input[id*="login" i]');
     
-    // ---- Strategy 3: ID-based lookup ----
-    if (!userInput) userInput = document.querySelector('input[id*="user" i]');
-    if (!userInput) userInput = document.querySelector('input[id*="login" i]');
-    if (!userInput) userInput = document.querySelector('input[id*="userid" i]');
+    // Fallback
+    if (!userInput) userInput = allInputs.find(i => (i.type === 'text' || i.type === '') && i.offsetParent !== null);
+    if (!passInput) passInput = allInputs.find(i => i.type === 'password');
     
-    // ---- Strategy 4: First visible text input + first password input ----
-    if (!userInput) {
-      for (const inp of allInputs) {
-        if ((inp.type === 'text' || inp.type === '') && inp.offsetParent !== null) {
-          userInput = inp;
-          break;
-        }
-      }
-    }
-    if (!passInput) {
-      for (const inp of allInputs) {
-        if (inp.type === 'password' && inp.offsetParent !== null) {
-          passInput = inp;
-          break;
-        }
-      }
-    }
+    if (!userInput || !passInput) return { success: false };
     
-    if (!userInput || !passInput) {
-      return { success: false, reason: `userInput=${!!userInput}, passInput=${!!passInput}` };
-    }
-    
-    // Fill fields using multiple methods for maximum compatibility
-    // Native value setter (bypasses React/Angular/JSF frameworks)
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    
-    nativeInputValueSetter.call(userInput, user);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(userInput, user);
     userInput.dispatchEvent(new Event('input', { bubbles: true }));
     userInput.dispatchEvent(new Event('change', { bubbles: true }));
-    
-    nativeInputValueSetter.call(passInput, pass);
+    setter.call(passInput, pass);
     passInput.dispatchEvent(new Event('input', { bubbles: true }));
     passInput.dispatchEvent(new Event('change', { bubbles: true }));
     
     return { success: true, userField: userInput.name || userInput.id, passField: passInput.name || passInput.id };
   }, username, password);
 
-  if (!loginSuccess.success) {
-    console.error(`  ❌ Could not find login fields: ${loginSuccess.reason}`);
+  if (!loginResult.success) {
+    console.error('  ❌ Could not fill login fields');
     return false;
   }
-  
-  console.log(`  ✓ Filled fields: user=${loginSuccess.userField}, pass=${loginSuccess.passField}`);
+  console.log(`  ✓ Filled: user=${loginResult.userField}, pass=${loginResult.passField}`);
 
-  // Click login/submit button
-  const clickResult = await page.evaluate(() => {
-    // Try submit buttons first
-    const submitBtns = document.querySelectorAll('input[type="submit"]');
-    if (submitBtns.length > 0) {
-      submitBtns[0].click();
-      return `Clicked input[type=submit]: ${submitBtns[0].value || submitBtns[0].name}`;
-    }
-    
-    // Try buttons
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      const text = (btn.textContent || '').toLowerCase().trim();
-      if (text.includes('log') || text.includes('sign') || text.includes('submit') || text.includes('continue')) {
-        btn.click();
-        return `Clicked button: ${text}`;
-      }
-    }
-    
-    // Try links styled as buttons
-    const links = document.querySelectorAll('a');
-    for (const a of links) {
-      const text = (a.textContent || '').toLowerCase().trim();
-      if (text.includes('log in') || text.includes('login') || text.includes('sign in')) {
-        a.click();
-        return `Clicked link: ${text}`;
-      }
-    }
-    
-    // Last resort: submit the first form
-    const form = document.querySelector('form');
-    if (form) {
-      form.submit();
-      return 'Submitted form directly';
-    }
-    
-    return 'No submit mechanism found';
+  // Submit
+  await page.evaluate(() => {
+    const btn = document.querySelector('input[type="submit"]') || document.querySelector('button');
+    if (btn) btn.click();
+    else { const f = document.querySelector('form'); if (f) f.submit(); }
   });
-  
-  console.log(`  Submit: ${clickResult}`);
 
-  // Wait for navigation after login
-  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {
-    console.log('  ⚠ Navigation timeout after login click (may be normal for AJAX)');
-  });
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {});
   await delay(CONFIG.loginWait);
 
-  // Check where we ended up
-  const afterLoginUrl = page.url();
-  console.log(`  After login URL: ${afterLoginUrl}`);
+  console.log(`  After login URL: ${page.url()}`);
 
-  // Check if login succeeded
-  const postLoginCheck = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    const title = document.title || '';
-    return {
-      hasSearchForm: text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number') || text.includes('Case Jacket'),
-      hasError: text.includes('Authentication Failed') || text.includes('Invalid') || text.includes('locked') || text.includes('incorrect'),
-      title,
-      snippet: text.substring(0, 300)
-    };
-  });
-
-  console.log(`  Post-login title: ${postLoginCheck.title}`);
-  
-  if (postLoginCheck.hasSearchForm) {
-    console.log('  ✅ Login successful - search form found');
-    return true;
-  }
-
-  if (postLoginCheck.hasError) {
-    console.error(`  ❌ Login failed - error on page`);
-    console.error(`  Page snippet: ${postLoginCheck.snippet}`);
-    return false;
-  }
-
-  // May have landed on an intermediate page - try navigating to search directly
-  console.log('  ⚠ Not on search page yet, trying direct navigation...');
-  await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
-  await delay(3000);
-
-  const finalCheck = await page.evaluate(() => {
+  const loggedIn = await page.evaluate(() => {
     const text = document.body.innerText || '';
     return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
   });
 
-  if (finalCheck) {
-    console.log('  ✅ Login successful (after redirect)');
+  if (loggedIn) {
+    console.log('  ✅ Login successful');
     return true;
   }
 
-  console.error('  ❌ Login failed - could not reach search page');
-  console.error(`  Final URL: ${page.url()}`);
-  const finalSnippet = await page.evaluate(() => document.body.innerText.substring(0, 500));
-  console.error(`  Page content: ${finalSnippet}`);
+  // One more try
+  await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+  await delay(5000);
+  const final = await page.evaluate(() => document.body.innerText.includes('Party Name') || document.body.innerText.includes('Case Search'));
+  if (final) { console.log('  ✅ Login successful (after redirect)'); return true; }
+
+  console.error('  ❌ Login failed');
   return false;
 }
 
@@ -618,9 +638,9 @@ async function enrichCourtStatus(data, options = {}) {
     cases = cases.slice(0, testLimit);
   }
 
-  // Filter to cases that need status lookup
+  // Skip cases already permanently marked as CLOSED (dismissed cases never need re-checking)
   const toProcess = skipAlreadyEnriched
-    ? cases.filter(c => !c.courtStatus)
+    ? cases.filter(c => !c.courtStatus || (c.courtStatus !== 'CLOSED'))
     : cases;
 
   if (toProcess.length === 0) {
