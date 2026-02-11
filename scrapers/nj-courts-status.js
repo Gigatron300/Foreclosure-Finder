@@ -6,7 +6,12 @@
 // Credentials: Set NJ_COURTS_USER and NJ_COURTS_PASS env vars on Render
 // Portal: https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces
 
-const puppeteer = require('puppeteer');
+const puppeteerExtra = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Apply stealth plugin BEFORE any browser launch
+puppeteerExtra.use(StealthPlugin());
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const CONFIG = {
@@ -74,42 +79,33 @@ function parsePlaintiffForMatch(plaintiffName) {
 // ============================================================
 
 async function launchBrowser() {
-  // Try puppeteer-extra with stealth plugin first (if available)
-  try {
-    const puppeteerExtra = require('puppeteer-extra');
-    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-    puppeteerExtra.use(StealthPlugin());
-    console.log('  Using puppeteer-extra with stealth plugin');
-    return puppeteerExtra.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--disable-gpu', '--disable-extensions', '--disable-background-networking',
-        '--disable-blink-features=AutomationControlled',
-        '--js-flags=--max-old-space-size=256'
-      ]
-    });
-  } catch (e) {
-    console.log('  Stealth plugin not available, using standard puppeteer');
-    return puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--disable-gpu', '--disable-extensions', '--disable-background-networking',
-        '--disable-blink-features=AutomationControlled',
-        '--js-flags=--max-old-space-size=256'
-      ]
-    });
-  }
+  console.log('  🚀 Launching browser with stealth plugin...');
+  
+  return puppeteerExtra.launch({
+    headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-blink-features=AutomationControlled',
+      '--js-flags=--max-old-space-size=256',
+      '--window-size=1920,1080'
+    ]
+  });
 }
 
 async function loginToNJCourts(page, username, password) {
   console.log('  🔑 Logging into NJ Courts portal...');
 
-  // Remove headless detection markers
+  // Additional anti-detection measures
   await page.evaluateOnNewDocument(() => {
+    // Override webdriver property
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    // Override the languages
+    // Override languages
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     // Fix Chrome object
     window.chrome = { runtime: {} };
@@ -119,18 +115,25 @@ async function loginToNJCourts(page, username, password) {
       parameters.name === 'notifications'
         ? Promise.resolve({ state: Notification.permission })
         : originalQuery(parameters);
+    // Remove automation indicators
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
   });
 
   // Set extra headers to look more like a real browser
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
   });
 
   // Navigate to the civil case search - it will redirect to login
   console.log('  Navigating to portal...');
-  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-  await delay(5000);
+  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+  await delay(8000);  // Longer wait for Incapsula challenge to complete
 
   let currentUrl = page.url();
   console.log(`  Current URL: ${currentUrl}`);
@@ -142,8 +145,26 @@ async function loginToNJCourts(page, username, password) {
 
   // Check for Incapsula/bot block
   if (rawHtml.includes('Incapsula') || rawHtml.includes('_Incapsula') || rawHtml.includes('visid_incap')) {
-    console.error('  ⚠ Page appears to be blocked by Incapsula bot protection');
-    console.log(`  HTML snippet: ${rawHtml.substring(0, 1000)}`);
+    console.log('  ⚠ Incapsula challenge detected, waiting longer for it to resolve...');
+    
+    // Wait for Incapsula challenge to complete (it usually auto-redirects)
+    for (let i = 0; i < 10; i++) {
+      await delay(3000);
+      const newHtml = await page.content();
+      console.log(`  Challenge attempt ${i+1}/10, HTML length: ${newHtml.length}`);
+      
+      if (!newHtml.includes('Incapsula') && !newHtml.includes('_Incapsula')) {
+        console.log('  ✅ Incapsula challenge passed!');
+        break;
+      }
+      
+      // Check if we got redirected
+      const newUrl = page.url();
+      if (newUrl !== currentUrl) {
+        console.log(`  Redirected to: ${newUrl}`);
+        currentUrl = newUrl;
+      }
+    }
   }
 
   // Check for meta refresh redirect
@@ -161,37 +182,38 @@ async function loginToNJCourts(page, username, password) {
 
   // Wait for content to render (JS SPA)
   let hasContent = false;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 12; attempt++) {
     const check = await page.evaluate(() => ({
       inputs: document.querySelectorAll('input').length,
       bodyLen: document.body.innerHTML.length,
       hasText: document.body.innerText.trim().length > 50,
-      frames: document.querySelectorAll('iframe, frame').length
+      frames: document.querySelectorAll('iframe, frame').length,
+      hasIncapsula: document.body.innerHTML.includes('Incapsula')
     }));
 
-    if (check.inputs > 0 || check.hasText) {
+    if ((check.inputs > 0 || check.hasText) && !check.hasIncapsula) {
       console.log(`  Content loaded (attempt ${attempt + 1}): ${check.inputs} inputs, bodyLen=${check.bodyLen}, frames=${check.frames}`);
       hasContent = true;
       break;
     }
     
-    if (attempt === 3) {
+    if (attempt === 5) {
       // After a few tries, check if we need to navigate somewhere else
       const curUrl = page.url();
-      console.log(`  Still empty at attempt ${attempt + 1}. URL: ${curUrl}`);
+      console.log(`  Still waiting at attempt ${attempt + 1}. URL: ${curUrl}`);
       
       // Try the portal root
-      if (curUrl.includes('civilCaseSearch')) {
+      if (curUrl.includes('civilCaseSearch') || curUrl.includes('Incapsula')) {
         console.log('  Trying portal root instead...');
         await page.goto('https://portal.njcourts.gov/', { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(3000);
+        await delay(5000);
         const rootHtml = await page.content();
         console.log(`  Portal root HTML length: ${rootHtml.length}`);
         console.log(`  Portal root first 500: ${rootHtml.substring(0, 500)}`);
       }
     }
 
-    console.log(`  Waiting for content (attempt ${attempt + 1}/8)...`);
+    console.log(`  Waiting for content (attempt ${attempt + 1}/12)...`);
     await delay(3000);
   }
 
@@ -244,7 +266,7 @@ async function loginToNJCourts(page, username, password) {
   // ---- Attempt login ----
   if (pageInfo.inputs.length === 0) {
     // No inputs found anywhere - the page is blocked or completely JS-rendered
-    console.error('  ❌ No login form found. Site may be blocking headless browser.');
+    console.error('  ❌ No login form found. Site may still be blocking headless browser.');
     console.error('  Full HTML dump:');
     const fullHtml = await page.content();
     // Log in chunks to avoid truncation
@@ -274,10 +296,12 @@ async function loginToNJCourts(page, username, password) {
     
     if (!userInput || !passInput) return { success: false };
     
+    // Use native value setter to bypass JSF input interception
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     setter.call(userInput, user);
     userInput.dispatchEvent(new Event('input', { bubbles: true }));
     userInput.dispatchEvent(new Event('change', { bubbles: true }));
+    
     setter.call(passInput, pass);
     passInput.dispatchEvent(new Event('input', { bubbles: true }));
     passInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -286,38 +310,65 @@ async function loginToNJCourts(page, username, password) {
   }, username, password);
 
   if (!loginResult.success) {
-    console.error('  ❌ Could not fill login fields');
+    console.error('  ❌ Could not find login form fields');
     return false;
   }
-  console.log(`  ✓ Filled: user=${loginResult.userField}, pass=${loginResult.passField}`);
 
-  // Submit
-  await page.evaluate(() => {
-    const btn = document.querySelector('input[type="submit"]') || document.querySelector('button');
-    if (btn) btn.click();
-    else { const f = document.querySelector('form'); if (f) f.submit(); }
+  console.log(`  Filled login: user=${loginResult.userField}, pass=${loginResult.passField}`);
+  await delay(500);
+
+  // Click submit
+  const clicked = await page.evaluate(() => {
+    const btns = document.querySelectorAll('button, input[type="submit"], input[type="button"], a');
+    for (const btn of btns) {
+      const text = (btn.textContent || btn.value || '').toLowerCase();
+      if (text.includes('log in') || text.includes('login') || text.includes('sign in') || text.includes('submit')) {
+        btn.click();
+        return true;
+      }
+    }
+    // Fallback: submit the form
+    const form = document.querySelector('form');
+    if (form) { form.submit(); return true; }
+    return false;
   });
 
-  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {});
+  if (!clicked) {
+    console.error('  ❌ Could not find submit button');
+    return false;
+  }
+
+  console.log('  Submitted login, waiting for redirect...');
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
   await delay(CONFIG.loginWait);
 
-  console.log(`  After login URL: ${page.url()}`);
+  // Check if we landed on search page
+  const afterLogin = await page.evaluate(() => ({
+    url: window.location.href,
+    text: document.body.innerText.substring(0, 500)
+  }));
 
-  const loggedIn = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
-  });
+  console.log(`  After login URL: ${afterLogin.url}`);
+  console.log(`  After login text: ${afterLogin.text.substring(0, 200)}`);
 
-  if (loggedIn) {
-    console.log('  ✅ Login successful');
+  if (afterLogin.text.includes('Party Name') || afterLogin.text.includes('Case Search') || afterLogin.url.includes('civilCaseSearch')) {
+    console.log('  ✅ Login successful (on search page)');
     return true;
   }
 
-  // One more try
-  await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
-  await delay(5000);
-  const final = await page.evaluate(() => document.body.innerText.includes('Party Name') || document.body.innerText.includes('Case Search'));
-  if (final) { console.log('  ✅ Login successful (after redirect)'); return true; }
+  if (afterLogin.text.includes('Invalid') || afterLogin.text.includes('incorrect') || afterLogin.text.includes('failed')) {
+    console.error('  ❌ Login failed - invalid credentials');
+    return false;
+  }
+
+  // May need to navigate to search page after login
+  if (!afterLogin.url.includes('civilCaseSearch')) {
+    console.log('  Navigating to search page after login...');
+    await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+    await delay(3000);
+    const searchCheck = await page.evaluate(() => document.body.innerText.includes('Party Name'));
+    if (searchCheck) { console.log('  ✅ Login successful (after redirect)'); return true; }
+  }
 
   console.error('  ❌ Login failed');
   return false;
@@ -447,95 +498,69 @@ async function searchByPartyName(page, lastName) {
           filedDate: dateIdx >= 0 && cells[dateIdx] ? cells[dateIdx].textContent.trim() : '',
           disposition: dispositionIdx >= 0 && cells[dispositionIdx] ? cells[dispositionIdx].textContent.trim() : '',
           caseType: typeIdx >= 0 && cells[typeIdx] ? cells[typeIdx].textContent.trim() : '',
-          detailLink: linkHref,
-          rowText: allRows[i].textContent.replace(/\s+/g, ' ').trim()
+          detailLink: linkHref
         });
       }
-    }
-
-    // Also check if there's just page text with results (non-table format)
-    if (rows.length === 0) {
-      // Store page text for debugging
-      const bodyText = document.body.innerText.substring(0, 3000);
-      rows.push({ _pageDebug: bodyText, _isDebug: true });
     }
 
     return rows;
   });
 
-  return results.filter(r => !r._isDebug);
+  return results;
 }
 
 /**
- * Given search results and case info, find the best matching court case
+ * Match search results to a specific lis pendens case
+ * Uses plaintiff name, venue (Camden), case type (Foreclosure), and date proximity
  */
-function findBestMatch(searchResults, caseData) {
-  if (!searchResults || searchResults.length === 0) return null;
-
-  const plaintiffKey = parsePlaintiffForMatch(caseData.primaryPlaintiff);
-  const defendantParts = parseDefendantName(caseData.primaryDefendant);
-
-  // Parse the lis pendens filing date for proximity matching
-  let lisPendensDate = null;
-  if (caseData.filingDateISO) {
-    lisPendensDate = new Date(caseData.filingDateISO);
-  } else if (caseData.filingDate) {
-    const m = caseData.filingDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (m) lisPendensDate = new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
-  }
+function findBestMatch(searchResults, lispendenCase) {
+  const plaintiffKeyword = parsePlaintiffForMatch(lispendenCase.plaintiff);
+  const defendantParts = parseDefendantName(lispendenCase.primaryDefendant);
+  const lisPendensDate = lispendenCase.filingDate ? new Date(lispendenCase.filingDate) : null;
 
   const candidates = [];
 
   for (const result of searchResults) {
-    let score = 0;
-    const caption = (result.caseCaption || result.rowText || '').toUpperCase();
+    let matchScore = 0;
+    const caption = (result.caseCaption || '').toUpperCase();
+    const venue = (result.venue || '').toUpperCase();
+    const caseType = (result.caseType || '').toUpperCase();
     const docket = (result.docketNumber || '').toUpperCase();
-    const venue = (result.venue || result.rowText || '').toUpperCase();
-    const caseType = (result.caseType || result.rowText || '').toUpperCase();
 
     // Must be Camden venue
-    if (venue.includes('CAMDEN') || venue.includes('CAM')) {
-      score += 20;
-    } else if (venue && !venue.includes('CAMDEN')) {
-      continue;  // Wrong venue, skip entirely
+    if (!venue.includes('CAMDEN') && !docket.includes('CAM')) continue;
+    matchScore += 10;
+
+    // Prefer foreclosure cases
+    if (caseType.includes('FORECLOSURE') || docket.includes('-F-')) {
+      matchScore += 20;
     }
 
-    // Must be foreclosure type (docket starts with F or type mentions foreclosure)
-    if (docket.includes('-F-') || docket.startsWith('F-') || docket.includes('CAM-F')) {
-      score += 15;
-    }
-    if (caseType.includes('FORECLOSURE') || caption.includes('FORECLOSURE')) {
-      score += 10;
+    // Plaintiff name in caption (e.g., "CITIZENS VS GLADDEN")
+    if (plaintiffKeyword && caption.includes(plaintiffKeyword)) {
+      matchScore += 30;
     }
 
-    // Check if plaintiff name appears in caption
-    // Caption format: "CITIZENS BANK VS HENDERSON LAKISHA"
-    if (plaintiffKey && caption.includes(plaintiffKey)) {
-      score += 25;
+    // Defendant name in caption
+    if (defendantParts) {
+      if (caption.includes(defendantParts.lastName)) matchScore += 15;
+      if (defendantParts.firstName && caption.includes(defendantParts.firstName)) matchScore += 5;
     }
 
-    // Check if defendant last name appears in caption
-    if (defendantParts && caption.includes(defendantParts.lastName)) {
-      score += 15;
-    }
-
-    // Date proximity: lis pendens is typically 1-8 weeks after case initiation
+    // Date proximity - lis pendens is usually 1-8 weeks after case filing
     if (lisPendensDate && result.filedDate) {
-      const m = result.filedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      if (m) {
-        const courtDate = new Date(parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
-        const daysDiff = Math.abs((lisPendensDate - courtDate) / 86400000);
-
-        if (daysDiff <= 14) score += 20;        // Within 2 weeks
-        else if (daysDiff <= 60) score += 15;    // Within 2 months
-        else if (daysDiff <= 120) score += 8;    // Within 4 months
-        else if (daysDiff <= 365) score += 3;    // Within 1 year
-        // More than a year apart = probably not the same case
-      }
+      try {
+        const caseDate = new Date(result.filedDate);
+        const daysDiff = Math.abs((lisPendensDate - caseDate) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff <= 14) matchScore += 20;      // Within 2 weeks - strong match
+        else if (daysDiff <= 60) matchScore += 10;  // Within 2 months - good match
+        else if (daysDiff <= 180) matchScore += 5;  // Within 6 months - possible
+      } catch (e) {}
     }
 
-    if (score >= 30) {  // Minimum threshold - at least venue + one other match
-      candidates.push({ ...result, matchScore: score });
+    if (matchScore >= 25) {
+      candidates.push({ ...result, matchScore });
     }
   }
 
@@ -661,8 +686,8 @@ async function enrichCourtStatus(data, options = {}) {
   try {
     browser = await launchBrowser();
     page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    await page.setViewport({ width: 1280, height: 900 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 1080 });
 
     // Login
     const loggedIn = await loginToNJCourts(page, username, password);
