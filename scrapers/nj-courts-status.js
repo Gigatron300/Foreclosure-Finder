@@ -88,122 +88,218 @@ async function loginToNJCourts(page, username, password) {
   console.log('  🔑 Logging into NJ Courts portal...');
 
   // Navigate to the civil case search - it will redirect to login
-  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-  await delay(2000);
+  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+  await delay(3000);
 
   const currentUrl = page.url();
   console.log(`  Current URL: ${currentUrl}`);
 
-  // Check if we're on a login page
-  const isLoginPage = await page.evaluate(() => {
+  // Check if we're already on the search page (already logged in)
+  const isSearchPage = await page.evaluate(() => {
     const text = document.body.innerText || '';
-    return text.includes('User ID') && text.includes('Password');
+    return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
   });
-
-  if (!isLoginPage) {
-    // May already be logged in
-    const isSearchPage = await page.evaluate(() => {
-      const text = document.body.innerText || '';
-      return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
-    });
-    if (isSearchPage) {
-      console.log('  ✅ Already logged in');
-      return true;
-    }
-  }
-
-  // Find and fill login fields
-  const loginSuccess = await page.evaluate((user, pass) => {
-    // Try various input selectors for the NJ Courts login form
-    const userInputs = document.querySelectorAll('input[type="text"], input[name*="user" i], input[id*="user" i], input[name*="login" i]');
-    const passInputs = document.querySelectorAll('input[type="password"]');
-
-    let userInput = null;
-    let passInput = passInputs[0] || null;
-
-    // Find the user ID field
-    for (const inp of userInputs) {
-      const label = inp.closest('div')?.textContent || '';
-      const name = (inp.name || '').toLowerCase();
-      const id = (inp.id || '').toLowerCase();
-      if (label.includes('User ID') || name.includes('user') || id.includes('user') || id.includes('login')) {
-        userInput = inp;
-        break;
-      }
-    }
-
-    // Fallback: first text input before password
-    if (!userInput && userInputs.length > 0) {
-      userInput = userInputs[0];
-    }
-
-    if (userInput && passInput) {
-      userInput.value = user;
-      userInput.dispatchEvent(new Event('input', { bubbles: true }));
-      userInput.dispatchEvent(new Event('change', { bubbles: true }));
-      passInput.value = pass;
-      passInput.dispatchEvent(new Event('input', { bubbles: true }));
-      passInput.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    }
-    return false;
-  }, username, password);
-
-  if (!loginSuccess) {
-    console.error('  ❌ Could not find login fields');
-    return false;
-  }
-
-  // Click login button
-  await page.evaluate(() => {
-    const buttons = document.querySelectorAll('button, input[type="submit"], a.btn, a[class*="login" i]');
-    for (const btn of buttons) {
-      const text = (btn.textContent || btn.value || '').toLowerCase();
-      if (text.includes('log in') || text.includes('login') || text.includes('sign in') || text.includes('submit')) {
-        btn.click();
-        return;
-      }
-    }
-    // Fallback: submit the form
-    const form = document.querySelector('form');
-    if (form) form.submit();
-  });
-
-  // Wait for navigation
-  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
-  await delay(CONFIG.loginWait);
-
-  // Check if login succeeded - should be on search page now
-  const afterLoginUrl = page.url();
-  console.log(`  After login URL: ${afterLoginUrl}`);
-
-  const loggedIn = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    // If we see the search form, we're in
-    return text.includes('Party Name') || text.includes('Case Search') ||
-           text.includes('Docket Number') || text.includes('Case Jacket');
-  });
-
-  if (loggedIn) {
-    console.log('  ✅ Login successful');
+  if (isSearchPage) {
+    console.log('  ✅ Already logged in');
     return true;
   }
 
-  // Check for error messages
-  const errorMsg = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    if (text.includes('Authentication Failed')) return 'Authentication Failed';
-    if (text.includes('locked')) return 'Account locked';
-    if (text.includes('invalid') || text.includes('Invalid')) return 'Invalid credentials';
-    return null;
+  // Diagnostic: dump all form fields on the page
+  const pageInfo = await page.evaluate(() => {
+    const forms = document.querySelectorAll('form');
+    const inputs = document.querySelectorAll('input');
+    const formInfo = [];
+    forms.forEach((f, i) => {
+      formInfo.push({ index: i, action: f.action, method: f.method, id: f.id, name: f.name });
+    });
+    const inputInfo = [];
+    inputs.forEach(inp => {
+      inputInfo.push({ 
+        type: inp.type, name: inp.name, id: inp.id, 
+        placeholder: inp.placeholder, value: inp.value ? '[has value]' : '[empty]',
+        visible: inp.offsetParent !== null
+      });
+    });
+    const pageTitle = document.title;
+    const bodySnippet = document.body.innerText.substring(0, 500);
+    return { pageTitle, forms: formInfo, inputs: inputInfo, bodySnippet, url: window.location.href };
   });
 
-  if (errorMsg) {
-    console.error(`  ❌ Login failed: ${errorMsg}`);
-  } else {
-    console.error('  ❌ Login failed - unexpected page after login');
+  console.log(`  Page title: ${pageInfo.pageTitle}`);
+  console.log(`  Page URL: ${pageInfo.url}`);
+  console.log(`  Forms found: ${pageInfo.forms.length}`);
+  pageInfo.forms.forEach(f => console.log(`    Form: action=${f.action} method=${f.method} id=${f.id}`));
+  console.log(`  Inputs found: ${pageInfo.inputs.length}`);
+  pageInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name=${i.name} id=${i.id} placeholder=${i.placeholder}`));
+  console.log(`  Body snippet: ${pageInfo.bodySnippet.substring(0, 200)}`);
+
+  // Strategy 1: IBM WebSEAL PKMS login form (field names: "username" and "password")
+  // Strategy 2: Standard form with various input names
+  // Strategy 3: Any text input + password input combo
+  
+  const loginSuccess = await page.evaluate((user, pass) => {
+    // Collect all inputs
+    const allInputs = Array.from(document.querySelectorAll('input'));
+    
+    let userInput = null;
+    let passInput = null;
+    
+    // ---- Strategy 1: IBM WebSEAL PKMS standard fields ----
+    userInput = document.querySelector('input[name="username"]');
+    passInput = document.querySelector('input[name="password"]');
+    
+    // ---- Strategy 2: Common NJ Courts field names ----
+    if (!userInput) userInput = document.querySelector('input[name="userid"]');
+    if (!userInput) userInput = document.querySelector('input[name="userId"]');
+    if (!userInput) userInput = document.querySelector('input[name="j_username"]');
+    if (!userInput) userInput = document.querySelector('input[name="login"]');
+    if (!passInput) passInput = document.querySelector('input[name="j_password"]');
+    if (!passInput) passInput = document.querySelector('input[type="password"]');
+    
+    // ---- Strategy 3: ID-based lookup ----
+    if (!userInput) userInput = document.querySelector('input[id*="user" i]');
+    if (!userInput) userInput = document.querySelector('input[id*="login" i]');
+    if (!userInput) userInput = document.querySelector('input[id*="userid" i]');
+    
+    // ---- Strategy 4: First visible text input + first password input ----
+    if (!userInput) {
+      for (const inp of allInputs) {
+        if ((inp.type === 'text' || inp.type === '') && inp.offsetParent !== null) {
+          userInput = inp;
+          break;
+        }
+      }
+    }
+    if (!passInput) {
+      for (const inp of allInputs) {
+        if (inp.type === 'password' && inp.offsetParent !== null) {
+          passInput = inp;
+          break;
+        }
+      }
+    }
+    
+    if (!userInput || !passInput) {
+      return { success: false, reason: `userInput=${!!userInput}, passInput=${!!passInput}` };
+    }
+    
+    // Fill fields using multiple methods for maximum compatibility
+    // Native value setter (bypasses React/Angular/JSF frameworks)
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    
+    nativeInputValueSetter.call(userInput, user);
+    userInput.dispatchEvent(new Event('input', { bubbles: true }));
+    userInput.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    nativeInputValueSetter.call(passInput, pass);
+    passInput.dispatchEvent(new Event('input', { bubbles: true }));
+    passInput.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    return { success: true, userField: userInput.name || userInput.id, passField: passInput.name || passInput.id };
+  }, username, password);
+
+  if (!loginSuccess.success) {
+    console.error(`  ❌ Could not find login fields: ${loginSuccess.reason}`);
+    return false;
+  }
+  
+  console.log(`  ✓ Filled fields: user=${loginSuccess.userField}, pass=${loginSuccess.passField}`);
+
+  // Click login/submit button
+  const clickResult = await page.evaluate(() => {
+    // Try submit buttons first
+    const submitBtns = document.querySelectorAll('input[type="submit"]');
+    if (submitBtns.length > 0) {
+      submitBtns[0].click();
+      return `Clicked input[type=submit]: ${submitBtns[0].value || submitBtns[0].name}`;
+    }
+    
+    // Try buttons
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      const text = (btn.textContent || '').toLowerCase().trim();
+      if (text.includes('log') || text.includes('sign') || text.includes('submit') || text.includes('continue')) {
+        btn.click();
+        return `Clicked button: ${text}`;
+      }
+    }
+    
+    // Try links styled as buttons
+    const links = document.querySelectorAll('a');
+    for (const a of links) {
+      const text = (a.textContent || '').toLowerCase().trim();
+      if (text.includes('log in') || text.includes('login') || text.includes('sign in')) {
+        a.click();
+        return `Clicked link: ${text}`;
+      }
+    }
+    
+    // Last resort: submit the first form
+    const form = document.querySelector('form');
+    if (form) {
+      form.submit();
+      return 'Submitted form directly';
+    }
+    
+    return 'No submit mechanism found';
+  });
+  
+  console.log(`  Submit: ${clickResult}`);
+
+  // Wait for navigation after login
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {
+    console.log('  ⚠ Navigation timeout after login click (may be normal for AJAX)');
+  });
+  await delay(CONFIG.loginWait);
+
+  // Check where we ended up
+  const afterLoginUrl = page.url();
+  console.log(`  After login URL: ${afterLoginUrl}`);
+
+  // Check if login succeeded
+  const postLoginCheck = await page.evaluate(() => {
+    const text = document.body.innerText || '';
+    const title = document.title || '';
+    return {
+      hasSearchForm: text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number') || text.includes('Case Jacket'),
+      hasError: text.includes('Authentication Failed') || text.includes('Invalid') || text.includes('locked') || text.includes('incorrect'),
+      title,
+      snippet: text.substring(0, 300)
+    };
+  });
+
+  console.log(`  Post-login title: ${postLoginCheck.title}`);
+  
+  if (postLoginCheck.hasSearchForm) {
+    console.log('  ✅ Login successful - search form found');
+    return true;
   }
 
+  if (postLoginCheck.hasError) {
+    console.error(`  ❌ Login failed - error on page`);
+    console.error(`  Page snippet: ${postLoginCheck.snippet}`);
+    return false;
+  }
+
+  // May have landed on an intermediate page - try navigating to search directly
+  console.log('  ⚠ Not on search page yet, trying direct navigation...');
+  await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+  await delay(3000);
+
+  const finalCheck = await page.evaluate(() => {
+    const text = document.body.innerText || '';
+    return text.includes('Party Name') || text.includes('Case Search') || text.includes('Docket Number');
+  });
+
+  if (finalCheck) {
+    console.log('  ✅ Login successful (after redirect)');
+    return true;
+  }
+
+  console.error('  ❌ Login failed - could not reach search page');
+  console.error(`  Final URL: ${page.url()}`);
+  const finalSnippet = await page.evaluate(() => document.body.innerText.substring(0, 500));
+  console.error(`  Page content: ${finalSnippet}`);
   return false;
 }
 
