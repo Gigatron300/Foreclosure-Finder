@@ -5,7 +5,6 @@
   const TOKEN = '__AUTH_TOKEN__';
   const TEST_MODE = __TEST_MODE__;
 
-  // Only run on NJ Courts Civil Case Search page
   const HOST_OK =
     window.location.href.includes('njcourts.gov') &&
     window.location.href.toLowerCase().includes('civilcasesearch');
@@ -19,7 +18,7 @@
   const DELAY = 1500;
 
   // ─────────────────────────────────────────────────────────────
-  // UI Panel (lives on the main page; will not disappear)
+  // UI Panel
   // ─────────────────────────────────────────────────────────────
   if (document.getElementById('csc-panel')) document.getElementById('csc-panel').remove();
 
@@ -54,12 +53,14 @@
   window._cscStop = false;
 
   const S = { o: 0, c: 0, n: 0, e: 0, done: 0, total: 0 };
+
   const log = (m, cls = 'i') => {
     const d = document.getElementById('csc-log');
     if (!d) return;
     d.innerHTML += `<div class="l-${cls}">${m}</div>`;
     d.scrollTop = d.scrollHeight;
   };
+
   const upd = () => {
     const p = S.total > 0 ? Math.round((S.done / S.total) * 100) : 0;
     const fill = document.getElementById('csc-fill');
@@ -98,7 +99,6 @@
     return cleanText(s).split(' ').filter(t => t && t.length > 1 && !stop.has(t));
   }
 
-  // Dice coefficient (0..1)
   function dice(a, b) {
     const A = tokens(a);
     const B = tokens(b);
@@ -112,23 +112,18 @@
   function parseAnyDate(s) {
     if (!s) return null;
     const str = String(s);
-
-    // MM/DD/YYYY
     const m = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (m) {
       const mm = Number(m[1]), dd = Number(m[2]), yy = Number(m[3]);
       const dt = new Date(yy, mm - 1, dd);
       return isNaN(dt.getTime()) ? null : dt;
     }
-
-    // YYYY-MM-DD
     const i = str.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (i) {
       const yy = Number(i[1]), mm = Number(i[2]), dd = Number(i[3]);
       const dt = new Date(yy, mm - 1, dd);
       return isNaN(dt.getTime()) ? null : dt;
     }
-
     return null;
   }
 
@@ -138,7 +133,6 @@
     return Math.round(ms / (1000 * 60 * 60 * 24));
   }
 
-  // tolerant up to 120 days drift
   function dateScore(csvDate, siteDate) {
     const d = daysBetween(csvDate, siteDate);
     if (d === null) return 0.15;
@@ -155,8 +149,6 @@
     return 'UNKNOWN';
   }
 
-  // Parse for NJ Courts Party Name tab:
-  // Your backend "primaryDefendant" is typically "LAST FIRST" for individuals, or entity name.
   function parseDef(name) {
     const s = cleanText(name);
     if (!s) return null;
@@ -169,32 +161,27 @@
 
     if (!cleaned) return null;
 
-    // entity → put full string in Last name field
     if (/\b(LLC|INC|CORP|CORPORATION|CO|COMPANY|BANK|TRUST|AGENCY|AUTHORITY|MORTGAGE|FINANCE|ASSOCIATION|ASSN|HOUSING|SERVICING|SERVICES)\b/.test(cleaned)) {
       return { last: cleaned, first: '', mid: '' };
     }
 
-    // "LAST, FIRST"
     if (cleaned.includes(',')) {
       const [lastPart, rest] = cleaned.split(',', 2);
       const restParts = (rest || '').trim().split(' ').filter(Boolean);
       return { last: lastPart.trim(), first: restParts[0] || '', mid: restParts[1] || '' };
     }
 
-    // "LAST FIRST" (Camden parser uses Name as-is; often LAST FIRST)
     const parts = cleaned.split(' ').filter(Boolean);
     if (parts.length === 1) return { last: parts[0], first: '', mid: '' };
     return { last: parts[0], first: parts[1] || '', mid: parts[2] || '' };
   }
 
-  // Get values from your *server’s* case object shape (camden-enrichment.js)
+  // Server object shape
   function getInstrument(c) {
     return c.instrumentNumber || c.instrument || c.instrNum || '';
   }
   function getDefendant(c) {
-    // primaryDefendant is the best single defendant chosen by pipeline
-    // fallbacks just in case
-    return c.primaryDefendant || (Array.isArray(c.defendants) ? c.defendants[0] : '') || (Array.isArray(c.allDefendants) ? c.allDefendants[0] : '') || '';
+    return c.primaryDefendant || (Array.isArray(c.allDefendants) ? c.allDefendants[0] : '') || '';
   }
   function getPlaintiff(c) {
     return c.primaryPlaintiff || (Array.isArray(c.plaintiffs) ? c.plaintiffs[0] : '') || '';
@@ -203,9 +190,6 @@
     return parseAnyDate(c.filingDateISO) || parseAnyDate(c.filingDate) || null;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Save back to server
-  // ─────────────────────────────────────────────────────────────
   async function save(instrumentNumber, courtData) {
     try {
       await fetch(`${SERVER}/api/camden/court-status-update`, {
@@ -219,7 +203,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Hidden IFRAME (all NJ Courts navigation happens here)
+  // Hidden IFRAME navigation helpers (fixes your "table not found")
   // ─────────────────────────────────────────────────────────────
   const oldFrame = document.getElementById('csc-hidden-frame');
   if (oldFrame) oldFrame.remove();
@@ -240,51 +224,154 @@
     new Promise((resolve, reject) => {
       const t0 = Date.now();
       const tick = () => {
-        if (Date.now() - t0 > 25000) return reject(new Error('Iframe timed out loading NJ Courts page'));
-        const w = frame.contentWindow;
+        if (Date.now() - t0 > 30000) return reject(new Error('Iframe timed out loading NJ Courts page'));
         const d = frame.contentDocument;
-        if (w && d && d.body && d.readyState === 'complete') return resolve();
+        if (d && d.body && d.readyState === 'complete') return resolve();
         setTimeout(tick, 200);
       };
       tick();
     });
 
-  function waitForFrameUpdate(timeout = 25000) {
+  // Wait for either:
+  // - full iframe navigation load, OR
+  // - DOM mutation (JSF partial update)
+  function waitForFrameSettle(timeout = 30000) {
     return new Promise((resolve) => {
-      const d = frame.contentDocument;
-      if (!d || !d.body) return resolve();
-
       let done = false;
       const finish = () => {
-        if (!done) { done = true; resolve(); }
+        if (done) return;
+        done = true;
+        resolve();
       };
 
-      const obs = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-          if (m.addedNodes.length > 3 || m.removedNodes.length > 3) {
-            obs.disconnect();
-            setTimeout(finish, 1200);
-            return;
-          }
-        }
-      });
+      // full navigation
+      const onLoad = () => {
+        // allow JSF to paint
+        setTimeout(finish, 600);
+      };
+      frame.addEventListener('load', onLoad, { once: true });
 
-      obs.observe(d.body, { childList: true, subtree: true });
-      setTimeout(() => {
-        try { obs.disconnect(); } catch {}
-        finish();
-      }, timeout);
+      // partial update
+      const d = frame.contentDocument;
+      if (d && d.body) {
+        const obs = new MutationObserver((mutations) => {
+          for (const m of mutations) {
+            if (m.addedNodes.length || m.removedNodes.length) {
+              obs.disconnect();
+              setTimeout(finish, 600);
+              return;
+            }
+          }
+        });
+        obs.observe(d.body, { childList: true, subtree: true });
+
+        setTimeout(() => {
+          try { obs.disconnect(); } catch {}
+          finish();
+        }, timeout);
+        return;
+      }
+
+      setTimeout(finish, timeout);
     });
   }
 
+  function docNow() {
+    return frame.contentDocument;
+  }
+
   function clickPartyTabInFrame() {
-    const d = frame.contentDocument;
-    const t = d && d.querySelector('a[href="#tabs-2"]');
-    if (t) t.click();
+    const d = docNow();
+    if (!d) return;
+
+    // different NJ builds sometimes use anchors or buttons; try both
+    const a = d.querySelector('a[href="#tabs-2"]');
+    if (a) { a.click(); return; }
+
+    // fallback: button/tab text
+    const candidates = Array.from(d.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+    const tab = candidates.find(el => /search by party name/i.test((el.textContent || el.value || '').trim()));
+    if (tab) tab.click();
+  }
+
+  async function ensurePartySearchTab() {
+    clickPartyTabInFrame();
+    await wait(400);
+  }
+
+  function findPartyTable(d) {
+    if (!d) return null;
+    return (
+      d.getElementById('searchByPartyNameForm:idPartyTable') ||
+      d.querySelector('[id$=":idPartyTable"]') ||
+      d.querySelector('table[id*="idPartyTable"]') ||
+      null
+    );
+  }
+
+  async function searchInFrame(last, first, mid) {
+    await ensurePartySearchTab();
+
+    // ALWAYS grab fresh doc/window references
+    let d = docNow();
+    const w = frame.contentWindow;
+    if (!d || !w) return null;
+
+    // Some pages default to Business — force Individual
+    const indiv = d.querySelector('input[type="radio"][value="I"], input[type="radio"][id*="individual"]');
+    if (indiv && !indiv.checked) {
+      indiv.click();
+      await waitForFrameSettle(15000);
+      d = docNow();
+    }
+
+    const lf =
+      d.getElementById('searchByPartyNameForm:partyLName') ||
+      d.querySelector('input[id$=":partyLName"]');
+    const ff =
+      d.getElementById('searchByPartyNameForm:partyFName') ||
+      d.querySelector('input[id$=":partyFName"]');
+    const mf =
+      d.getElementById('searchByPartyNameForm:partyMName') ||
+      d.querySelector('input[id$=":partyMName"]');
+
+    if (!lf || !ff || !mf) return null;
+
+    const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;
+    const setVal = (el, val) => {
+      setter.call(el, val);
+      el.dispatchEvent(new w.Event('input', { bubbles: true }));
+      el.dispatchEvent(new w.Event('change', { bubbles: true }));
+    };
+
+    setVal(lf, '');
+    setVal(ff, '');
+    setVal(mf, '');
+    await wait(100);
+
+    setVal(lf, last);
+    setVal(ff, first);
+    setVal(mf, mid || '');
+    await wait(200);
+
+    const btn =
+      d.getElementById('searchByPartyNameForm:btnPartyNameSearch') ||
+      d.querySelector('button[id$=":btnPartyNameSearch"], input[id$=":btnPartyNameSearch"]');
+
+    if (!btn) return null;
+
+    btn.click();
+
+    // Wait for either full navigation OR partial update, then re-grab document
+    await waitForFrameSettle(30000);
+    await wait(400);
+
+    d = docNow();
+    return findPartyTable(d);
   }
 
   async function goBackToResultsInFrame() {
-    const d = frame.contentDocument;
+    let d = docNow();
     if (!d) return;
 
     const candidates = Array.from(d.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
@@ -295,56 +382,14 @@
 
     if (backBtn) {
       backBtn.click();
-      await waitForFrameUpdate();
-      await wait(800);
+      await waitForFrameSettle(30000);
+      await wait(300);
       return;
     }
 
     try { frame.contentWindow.history.back(); } catch {}
-    await waitForFrameUpdate();
-    await wait(800);
-  }
-
-  async function searchInFrame(last, first, mid) {
-    const d = frame.contentDocument;
-    const w = frame.contentWindow;
-    if (!d || !w) return null;
-
-    clickPartyTabInFrame();
-    await wait(800);
-
-    const lf = d.getElementById('searchByPartyNameForm:partyLName');
-    const ff = d.getElementById('searchByPartyNameForm:partyFName');
-    const mf = d.getElementById('searchByPartyNameForm:partyMName');
-    if (!lf) return null;
-
-    const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;
-
-    const setVal = (el, val) => {
-      setter.call(el, val);
-      el.dispatchEvent(new w.Event('input', { bubbles: true }));
-      el.dispatchEvent(new w.Event('change', { bubbles: true }));
-    };
-
-    setVal(lf, '');
-    setVal(ff, '');
-    setVal(mf, '');
-    await wait(150);
-
-    setVal(lf, last);
-    setVal(ff, first);
-    setVal(mf, mid || '');
-    await wait(500);
-
-    const btn = d.getElementById('searchByPartyNameForm:btnPartyNameSearch');
-    if (!btn) return null;
-
-    btn.click();
-    await wait(250);
-    await waitForFrameUpdate(25000);
-    await wait(800);
-
-    return d.getElementById('searchByPartyNameForm:idPartyTable');
+    await waitForFrameSettle(30000);
+    await wait(300);
   }
 
   function extractRowSignals(rowEl) {
@@ -355,18 +400,23 @@
   }
 
   async function getDetailsInFrame(rowIdx) {
-    const d = frame.contentDocument;
+    let d = docNow();
     if (!d) return null;
 
-    const linkId = `searchByPartyNameForm:idPartyTable:${rowIdx}:lnkSrchByDocNum`;
-    const link = d.getElementById(linkId);
+    const link =
+      d.getElementById(`searchByPartyNameForm:idPartyTable:${rowIdx}:lnkSrchByDocNum`) ||
+      d.querySelector(`#searchByPartyNameForm\\:idPartyTable\\:${rowIdx}\\:lnkSrchByDocNum`) ||
+      d.querySelector(`[id$=":idPartyTable:${rowIdx}:lnkSrchByDocNum"]`);
+
     if (!link) return null;
 
     link.click();
-    await waitForFrameUpdate(25000);
-    await wait(500);
+    await waitForFrameSettle(30000);
+    await wait(400);
 
-    const text = d.body ? d.body.innerText : '';
+    d = docNow();
+    const text = d && d.body ? d.body.innerText : '';
+
     const gm = (p) => {
       const m = text.match(p);
       return m ? (m[1] || '').trim() : '';
@@ -382,8 +432,8 @@
     };
 
     await goBackToResultsInFrame();
-    clickPartyTabInFrame();
-    await wait(500);
+    await ensurePartySearchTab();
+    await wait(300);
 
     return details;
   }
@@ -396,7 +446,6 @@
     const plaintiff = getPlaintiff(caseObj) || '';
     const csvDate = getFilingDate(caseObj);
 
-    // quick score from table rows
     const prelim = rows
       .map((row, idx) => {
         const sig = extractRowSignals(row);
@@ -435,17 +484,11 @@
         'i'
       );
 
-      if (!best || finalScore > best.finalScore) {
-        best = { details, finalScore };
-      }
+      if (!best || finalScore > best.finalScore) best = { details, finalScore };
     }
 
     if (!best) return null;
-
-    if (best.finalScore < 0.32) {
-      return { notFound: true, best };
-    }
-
+    if (best.finalScore < 0.32) return { notFound: true, best };
     return { notFound: false, best };
   }
 
@@ -475,7 +518,6 @@
     return;
   }
 
-  // Only check cases missing/unknown court status (supports multiple historical field names)
   cases = cases.filter(c => {
     const cs = c.courtStatus || c.court_status || c.court?.status || '';
     return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
@@ -501,8 +543,8 @@
     const csvDate = getFilingDate(c);
 
     log(`\n🔎 [${i + 1}/${cases.length}] ${instr || '(no instrumentNumber)'}`, 's');
-    log(`  Defendant (primaryDefendant): ${defName || '(missing)'}`, 'i');
-    log(`  Plaintiff (primaryPlaintiff): ${plaintiff || '(missing)'}`, 'i');
+    log(`  Defendant: ${defName || '(missing)'}`, 'i');
+    log(`  Plaintiff: ${plaintiff || '(missing)'}`, 'i');
     if (csvDate) log(`  Filing date: ${csvDate.toLocaleDateString()}`, 'i');
 
     const parsed = parseDef(defName);
@@ -516,8 +558,8 @@
     const table = await searchInFrame(parsed.last, parsed.first, parsed.mid);
     if (!table) {
       S.e++; S.done++; upd();
-      log('  ❌ Search failed (table not found)', 'err');
-      await save(instr, { status: 'ERROR', message: 'Search failed (table not found)' });
+      log('  ❌ Search failed (results table not found)', 'err');
+      await save(instr, { status: 'ERROR', message: 'Search failed (results table not found)' });
       continue;
     }
 
@@ -558,7 +600,6 @@
     else S.n++;
 
     S.done++; upd();
-
     log(`  ✅ Best match score=${pick.best.finalScore.toFixed(3)} → ${normalized}`, 'ok');
 
     await save(instr, {
