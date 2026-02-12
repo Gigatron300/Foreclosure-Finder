@@ -390,17 +390,62 @@ async function searchByPartyName(page, defendant) {
     }
   }
 
-  // Click "Search By Party Name" tab to make sure we're on the right tab
-  await page.evaluate(() => {
-    const tabs = document.querySelectorAll('a[href="#tabs-2"], li a');
-    for (const tab of tabs) {
-      if (tab.textContent.includes('Party Name')) {
-        tab.click();
-        return;
+  // CRITICAL: Click "Search By Party Name" tab first
+  // The page defaults to "Search By Docket Number" tab, so we MUST switch tabs
+  // before the party name form fields become active/visible
+  const tabClicked = await page.evaluate(() => {
+    // Method 1: Find the tab link by href
+    const tabLink = document.querySelector('a[href="#tabs-2"]');
+    if (tabLink) { tabLink.click(); return 'href-tabs-2'; }
+
+    // Method 2: Find by text content
+    const allLinks = document.querySelectorAll('a, li');
+    for (const el of allLinks) {
+      if (el.textContent.trim() === 'Search By Party Name') {
+        el.click();
+        return 'text-match';
       }
     }
+
+    // Method 3: Find the tab containing "Party Name" and click it
+    const tabItems = document.querySelectorAll('li[role="tab"], li.ui-tabs-header, .ui-tabs-nav li');
+    for (const li of tabItems) {
+      if (li.textContent.includes('Party Name')) {
+        const link = li.querySelector('a') || li;
+        link.click();
+        return 'tab-role';
+      }
+    }
+
+    return 'not-found';
   });
-  await delay(500);
+  console.log(`     Tab click result: ${tabClicked}`);
+  
+  // Wait for tab content to render (JSF tabs may need time to swap content)
+  await delay(1500);
+
+  // Verify the party name form is now visible
+  const formReady = await page.evaluate(() => {
+    const lastField = document.getElementById('searchByPartyNameForm:partyLName');
+    if (!lastField) return { ready: false, reason: 'partyLName field not found' };
+    // Check if field is visible (not hidden by tab)
+    const rect = lastField.getBoundingClientRect();
+    return { ready: rect.height > 0, reason: `field height=${rect.height}` };
+  });
+  console.log(`     Party name form ready: ${JSON.stringify(formReady)}`);
+
+  if (!formReady.ready) {
+    // Try jQuery-based tab activation (many JSF sites use jQuery UI tabs)
+    await page.evaluate(() => {
+      if (typeof jQuery !== 'undefined') {
+        jQuery('#tabs').tabs('option', 'active', 1); // 0=Docket, 1=Party Name
+      }
+      // Also try clicking the second tab directly
+      const tabHeaders = document.querySelectorAll('.ui-tabs-anchor, [role="tab"] a, .ui-tabs-nav a');
+      if (tabHeaders.length >= 2) tabHeaders[1].click();
+    });
+    await delay(1500);
+  }
 
   // Clear and fill the form using EXACT field IDs
   await page.evaluate(({ last, first, middle }) => {
@@ -479,6 +524,39 @@ async function searchByPartyName(page, defendant) {
   });
 
   console.log(`     Found ${results.length} search results`);
+  
+  // If no results, log diagnostic info about page state
+  if (results.length === 0) {
+    const diagnostics = await page.evaluate(() => {
+      const table = document.getElementById('searchByPartyNameForm:idPartyTable');
+      const lastField = document.getElementById('searchByPartyNameForm:partyLName');
+      const bodyText = document.body.innerText.substring(0, 800);
+      
+      // Check if we see "No data available" or other messages
+      const tableText = table ? table.textContent.trim().substring(0, 200) : 'TABLE NOT FOUND';
+      const lastValue = lastField ? lastField.value : 'FIELD NOT FOUND';
+      
+      // Check which tab is active
+      const activeTab = document.querySelector('.ui-tabs-active a, .ui-state-active a, li[aria-selected="true"] a');
+      const activeTabText = activeTab ? activeTab.textContent.trim() : 'unknown';
+      
+      // Check if there's an error message
+      const errorMsgs = document.querySelectorAll('.error, .errorMessage, .ui-messages-error');
+      const errors = Array.from(errorMsgs).map(e => e.textContent.trim());
+      
+      return {
+        tableText,
+        lastNameValue: lastValue,
+        activeTab: activeTabText,
+        errors,
+        pageSnippet: bodyText.substring(0, 400)
+      };
+    });
+    console.log(`     Diagnostics: tab="${diagnostics.activeTab}", lastName="${diagnostics.lastNameValue}"`);
+    console.log(`     Table content: ${diagnostics.tableText.substring(0, 100)}`);
+    if (diagnostics.errors.length > 0) console.log(`     Errors: ${diagnostics.errors.join('; ')}`);
+    console.log(`     Page snippet: ${diagnostics.pageSnippet.substring(0, 200)}`);
+  }
   results.forEach((r, i) => {
     console.log(`       ${i + 1}. ${r.docketNumber} | ${r.venue} | ${r.caseCaption.substring(0, 50)}... | ${r.filedDate}`);
   });
