@@ -81,22 +81,24 @@
   }
 
   // Wait for JSF page navigation (form submission reloads the page)
-  function waitForPageUpdate(timeout=12000) {
+  function waitForPageUpdate(timeout=15000) {
     return new Promise(resolve => {
       let resolved = false;
       const done = () => { if(!resolved){resolved=true;resolve();} };
-      // Watch for DOM changes indicating new content loaded
+      
+      // Method 1: Watch for significant DOM changes
       const obs = new MutationObserver((mutations) => {
-        // Look for significant DOM changes (table updates, page reloads)
         for (const m of mutations) {
-          if (m.addedNodes.length > 0 || m.removedNodes.length > 0) {
+          if (m.addedNodes.length > 3 || m.removedNodes.length > 3) {
             obs.disconnect();
-            setTimeout(done, 1500); // Extra wait for rendering
+            setTimeout(done, 2000); // Wait for rendering to settle
             return;
           }
         }
       });
       obs.observe(document.body, { childList:true, subtree:true });
+      
+      // Method 2: Timeout fallback
       setTimeout(() => { obs.disconnect(); done(); }, timeout);
     });
   }
@@ -110,32 +112,45 @@
   // ── Search ──
   async function search(last, first, mid) {
     clickPartyTab();
-    await wait(300);
+    await wait(800);
 
     const lf = document.getElementById('searchByPartyNameForm:partyLName');
     const ff = document.getElementById('searchByPartyNameForm:partyFName');
     const mf = document.getElementById('searchByPartyNameForm:partyMName');
     if (!lf) { log('  ❌ Form not found!','err'); return null; }
 
-    setter.call(lf, last); lf.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(ff, first); ff.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(mf, mid||''); mf.dispatchEvent(new Event('change',{bubbles:true}));
+    // Clear fields first
+    setter.call(lf, ''); lf.dispatchEvent(new Event('change',{bubbles:true}));
+    setter.call(ff, ''); ff.dispatchEvent(new Event('change',{bubbles:true}));
+    setter.call(mf, ''); mf.dispatchEvent(new Event('change',{bubbles:true}));
+    await wait(200);
+
+    // Fill fields
+    setter.call(lf, last); lf.dispatchEvent(new Event('input',{bubbles:true})); lf.dispatchEvent(new Event('change',{bubbles:true}));
+    setter.call(ff, first); ff.dispatchEvent(new Event('input',{bubbles:true})); ff.dispatchEvent(new Event('change',{bubbles:true}));
+    setter.call(mf, mid||''); mf.dispatchEvent(new Event('input',{bubbles:true})); mf.dispatchEvent(new Event('change',{bubbles:true}));
+
+    await wait(500); // Let JSF process the input events
 
     const btn = document.getElementById('searchByPartyNameForm:btnPartyNameSearch');
     if (!btn) { log('  ❌ Search button not found!','err'); return null; }
     btn.click();
 
     await waitForPageUpdate();
+    await wait(1000); // Extra breathing room
 
-    // Check for CAPTCHA
-    if (document.body.innerText.includes('Captcha')) {
-      log('  ⚠ CAPTCHA! Try refreshing and re-running.','w');
-      return null;
-    }
-
-    // Parse results
+    // Parse results - don't check for CAPTCHA banner text since it persists from session start
+    // Instead, check if the results table has actual data rows
     const table = document.getElementById('searchByPartyNameForm:idPartyTable');
-    if (!table) return [];
+    if (!table) {
+      // No table at all - might be a real CAPTCHA block or page didn't load
+      const pageText = document.body.innerText.substring(0, 500);
+      if (pageText.includes('Captcha') && !pageText.includes('Search For Case')) {
+        log('  ⚠ CAPTCHA blocked session. Refresh the page and re-run.','w');
+        return null;
+      }
+      return [];
+    }
 
     const rows = table.querySelectorAll('tbody tr');
     const results = [];
