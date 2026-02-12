@@ -190,6 +190,37 @@
   }
 
   // ── Get case details (click into jacket, extract, come back) ──
+
+async function goBackToResults() {
+  // Try to click a real "Back to Search Results" control (more reliable than history.back)
+  const candidates = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+
+  const backBtn =
+    candidates.find(el => /back to search results/i.test((el.textContent || el.value || '').trim())) ||
+    candidates.find(el => /search results/i.test((el.textContent || el.value || '').trim()) && /back/i.test((el.textContent || el.value || '').trim())) ||
+    candidates.find(el => /back/i.test((el.textContent || el.value || '').trim()));
+
+  if (backBtn) {
+    backBtn.click();
+    await waitForPageUpdate();
+    await wait(800);
+  } else {
+    // fallback
+    window.history.back();
+    await waitForPageUpdate();
+    await wait(800);
+  }
+
+  // If we're still not back on the search form, try navigating to the search page URL directly
+  const lf = document.getElementById('searchByPartyNameForm:partyLName');
+  if (!lf) {
+    log('  ⚠ Still on jacket page — forcing return to search page…','w');
+    window.location.href = SEARCH_URL;
+    // NOTE: This will reload the page and stop the script run.
+    // If you want auto-resume after reload, we can add sessionStorage resume logic.
+  }
+}
+
   async function getDetails(rowIdx) {
     // Click the docket link
     const linkId = `searchByPartyNameForm:idPartyTable:${rowIdx}:lnkSrchByDocNum`;
@@ -217,18 +248,14 @@
       initDate: gm(/Case Initiation Date:\s*(\d{2}\/\d{2}\/\d{4})/),
       dispDate: gm(/Disposition Date:\s*(\d{2}\/\d{2}\/\d{4})/)
     };
+// Navigate back to search results
+await goBackToResults();
 
-    // Navigate back to search
-    // Use browser back button instead of JSF Back button (more reliable)
-    window.history.back();
-    await waitForPageUpdate();
-    await wait(1000);
+// Re-click party name tab after going back
+clickPartyTab();
+await wait(500);
 
-    // Re-click party name tab after going back
-    clickPartyTab();
-    await wait(500);
-
-    return details;
+return details;
   }
 
   // ── Fetch cases ──
