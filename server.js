@@ -5,7 +5,8 @@ const fs = require('fs').promises;
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
-const { enrichCourtStatus } = require('./scrapers/nj-courts-status');
+// NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
+// Court status is now checked via browser-based bookmarklet (court-status-bookmarklet.js)
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -518,62 +519,60 @@ app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
   res.json({ inProgress: isCamdenEnriching, lastStatus: lastCamdenEnrichStatus });
 });
 
-// ============== NJ COURTS STATUS ENRICHMENT ==============
+// ============== NJ COURTS STATUS (BROWSER-BASED) ==============
+// Instead of Puppeteer (blocked by CAPTCHA), court status is checked via a
+// bookmarklet that runs in the user's browser on the NJ Courts search page.
+// The bookmarklet fetches cases from this server, searches NJ Courts, and
+// POSTs results back one at a time.
 
-let isCourtStatusEnriching = false;
-let lastCourtStatusEnrichStatus = null;
+// Serve the bookmarklet script with config injected
+app.get('/api/camden/court-status-script', (req, res) => {
+  const token = req.query.token || '';
+  const testMode = req.query.test === 'true';
+  const serverUrl = `${req.protocol}://${req.get('host')}`;
 
-app.post('/api/camden/court-status', checkAuth, async (req, res) => {
-  if (isCourtStatusEnriching) {
-    return res.status(429).json({ error: 'Court status enrichment already in progress', status: lastCourtStatusEnrichStatus });
-  }
-
+  const fs2 = require('fs');
+  let script;
   try {
-    await fs.access(CAMDEN_DATA_FILE);
+    script = fs2.readFileSync(path.join(__dirname, 'scrapers', 'court-status-bookmarklet.js'), 'utf8');
   } catch (e) {
-    return res.status(400).json({ error: 'No Camden data found. Upload and process a CSV first.', needsCsv: true });
+    return res.status(500).send('// Error: court-status-bookmarklet.js not found');
   }
 
-  if (!process.env.NJ_COURTS_USER || !process.env.NJ_COURTS_PASS) {
-    return res.status(400).json({ 
-      error: 'NJ Courts credentials not configured. Set NJ_COURTS_USER and NJ_COURTS_PASS environment variables on Render.' 
-    });
-  }
+  script = script.replace(/__SERVER_URL__/g, serverUrl);
+  script = script.replace(/__AUTH_TOKEN__/g, token);
+  script = script.replace(/__TEST_MODE__/g, testMode.toString());
 
-  const testMode = req.body.testMode === true;
-  isCourtStatusEnriching = true;
-  lastCourtStatusEnrichStatus = { started: new Date().toISOString(), status: 'running', testMode };
-  res.json({ message: testMode ? 'Court status check started (10 cases)' : 'Court status check started', status: lastCourtStatusEnrichStatus });
-
-  try {
-    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
-    let data = JSON.parse(content);
-
-    data = await enrichCourtStatus(data, { testMode, testLimit: 10 });
-
-    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
-
-    const openCases = data.cases.filter(c => c.courtStatus === 'OPEN').length;
-    const closedCases = data.cases.filter(c => c.courtStatus === 'CLOSED').length;
-    lastCourtStatusEnrichStatus = {
-      completed: new Date().toISOString(),
-      status: 'completed',
-      totalCases: data.totalCases,
-      openCases,
-      closedCases,
-      courtStatusSummary: data.courtStatusSummary,
-      testMode
-    };
-  } catch (error) {
-    lastCourtStatusEnrichStatus = { completed: new Date().toISOString(), status: 'error', error: error.message };
-    console.error('Court status enrichment error:', error);
-  } finally {
-    isCourtStatusEnriching = false;
-  }
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(script);
 });
 
-app.get('/api/camden/court-status/status', checkAuth, (req, res) => {
-  res.json({ inProgress: isCourtStatusEnriching, lastStatus: lastCourtStatusEnrichStatus });
+// Receive individual case court status updates from the bookmarklet
+app.post('/api/camden/court-status-update', cors(), checkAuth, async (req, res) => {
+  try {
+    const { instrumentNumber, courtData } = req.body;
+    if (!instrumentNumber || !courtData) {
+      return res.status(400).json({ error: 'instrumentNumber and courtData required' });
+    }
+
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+
+    const caseIdx = data.cases.findIndex(c => c.instrumentNumber === instrumentNumber);
+    if (caseIdx === -1) {
+      return res.status(404).json({ error: `Case ${instrumentNumber} not found` });
+    }
+
+    Object.assign(data.cases[caseIdx], courtData);
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+
+    console.log(`⚖️ ${instrumentNumber} → ${courtData.courtStatus} (${courtData.courtDisposition || 'N/A'})`);
+    res.json({ success: true, instrumentNumber, status: courtData.courtStatus });
+  } catch (error) {
+    console.error('Court status update error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Export Camden CSV
