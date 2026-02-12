@@ -784,8 +784,9 @@ async function enrichCourtStatus(data, options = {}) {
 
       try {
         // Parse defendant name from the case
-        const defendantName = c.partyCode === 'R' ? c.name : c.crossName;
-        const plaintiffName = c.partyCode === 'R' ? c.crossName : c.name;
+        // Case objects from parseCamdenCSV have: primaryDefendant, primaryPlaintiff, defendantNames[], plaintiffNames[]
+        const defendantName = c.primaryDefendant || (c.defendantNames && c.defendantNames[0]) || '';
+        const plaintiffName = c.primaryPlaintiff || (c.plaintiffNames && c.plaintiffNames[0]) || '';
 
         const defendant = parseDefendantName(defendantName);
         if (!defendant) {
@@ -810,7 +811,7 @@ async function enrichCourtStatus(data, options = {}) {
         }
 
         // Find best matching result
-        const match = findBestMatch(results, plaintiffName, c.date);
+        const match = findBestMatch(results, plaintiffName, c.filingDate || c.date);
 
         if (!match) {
           console.log(`${prefix} ❌ No confident match for ${defendant.lastName}`);
