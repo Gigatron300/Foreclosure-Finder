@@ -73,6 +73,135 @@
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ─────────────────────────────────────────────────────────────
+  // Utilities: parsing + scoring
+  // ─────────────────────────────────────────────────────────────
+  function parseDef(name) {
+    if (!name) return null;
+    const p = name
+      .toUpperCase()
+      .replace(/\b(JR|SR|II|III|IV)\b\.?/g, '')
+      .replace(/[^\w\s]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter((x) => x);
+    return p.length ? { last: p[0], first: p[1] || '', mid: p[2] || '' } : null;
+  }
+
+  function normStatus(s) {
+    if (!s) return 'UNKNOWN';
+    const u = String(s).toUpperCase();
+    if (/CLOSED|DISMISSED|DISPOSED|SETTLED|TERMINATED/.test(u)) return 'CLOSED';
+    if (/OPEN|ACTIVE|PENDING/.test(u)) return 'OPEN';
+    return 'UNKNOWN';
+  }
+
+  function cleanText(s) {
+    return String(s || '')
+      .toUpperCase()
+      .replace(/&/g, ' AND ')
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function tokens(s) {
+    const stop = new Set([
+      'THE','A','AN','OF','AND','OR','TO','IN','ON','FOR','AT','BY','WITH',
+      'LLC','INC','CORP','CORPORATION','CO','COMPANY','N','A','NA','FKA','AKA',
+      'BANK','TRUST','MORTGAGE','SERVICES','SERVICE','ASSOCIATION','ASSN',
+      'DEUTSCHE','WELLS','FARGO' // (optional mild bias reduction; can remove if you don’t want)
+    ]);
+    return cleanText(s)
+      .split(' ')
+      .filter(t => t && t.length > 1 && !stop.has(t));
+  }
+
+  // Dice coefficient on token overlap (0..1)
+  function dice(a, b) {
+    const A = tokens(a);
+    const B = tokens(b);
+    if (!A.length || !B.length) return 0;
+
+    const setB = new Set(B);
+    let inter = 0;
+    for (const t of A) if (setB.has(t)) inter++;
+
+    return (2 * inter) / (A.length + B.length);
+  }
+
+  function parseAnyDate(s) {
+    if (!s) return null;
+
+    // MM/DD/YYYY anywhere
+    const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) {
+      const mm = Number(m[1]), dd = Number(m[2]), yy = Number(m[3]);
+      const dt = new Date(yy, mm - 1, dd);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    // ISO-ish: YYYY-MM-DD
+    const i = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (i) {
+      const yy = Number(i[1]), mm = Number(i[2]), dd = Number(i[3]);
+      const dt = new Date(yy, mm - 1, dd);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    return null;
+  }
+
+  function daysBetween(a, b) {
+    if (!a || !b) return null;
+    const ms = Math.abs(a.getTime() - b.getTime());
+    return Math.round(ms / (1000 * 60 * 60 * 24));
+  }
+
+  // Date score: tolerant up to ~120 days (because site dates can drift)
+  function dateScore(csvDate, siteDate) {
+    const d = daysBetween(csvDate, siteDate);
+    if (d === null) return 0.15; // small non-zero so date doesn't kill match if missing
+    const cap = 120;
+    const x = Math.min(d, cap);
+    return 1 - x / cap; // 1..0
+  }
+
+  function getCaseFilingDate(caseObj) {
+    return (
+      parseAnyDate(caseObj.filingDate) ||
+      parseAnyDate(caseObj.filing_date) ||
+      parseAnyDate(caseObj.dateOfFiling) ||
+      parseAnyDate(caseObj.date_of_filing) ||
+      parseAnyDate(caseObj.recordedDate) ||
+      parseAnyDate(caseObj.recorded_date) ||
+      null
+    );
+  }
+
+  function getPlaintiff(caseObj) {
+    return (
+      caseObj.plaintiffName ||
+      caseObj.plaintiff ||
+      caseObj.plaintiff_name ||
+      caseObj.plaintiffEntity ||
+      caseObj.plaintiff_entity ||
+      ''
+    );
+  }
+
+  async function save(instrNum, data) {
+    try {
+      await fetch(`${SERVER}/api/camden/court-status-update`, {
+        method: 'POST',
+        headers: { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instrumentNumber: instrNum, courtData: data }),
+      });
+    } catch (e) {
+      log(`  ⚠ Save fail: ${e.message}`, 'w');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Hidden IFRAME (all NJ Courts navigation happens here)
   // ─────────────────────────────────────────────────────────────
   const oldFrame = document.getElementById('csc-hidden-frame');
@@ -103,7 +232,7 @@
       tick();
     });
 
-  function waitForFrameUpdate(timeout = 15000) {
+  function waitForFrameUpdate(timeout = 20000) {
     return new Promise((resolve) => {
       const d = frame.contentDocument;
       if (!d || !d.body) return resolve();
@@ -140,38 +269,6 @@
     if (t) t.click();
   }
 
-  function parseDef(name) {
-    if (!name) return null;
-    const p = name
-      .toUpperCase()
-      .replace(/\b(JR|SR|II|III|IV)\b\.?/g, '')
-      .trim()
-      .split(/\s+/)
-      .filter((x) => x);
-    return p.length ? { last: p[0], first: p[1] || '', mid: p[2] || '' } : null;
-  }
-
-  function normStatus(s) {
-    if (!s) return 'UNKNOWN';
-    const u = String(s).toUpperCase();
-    if (/CLOSED|DISMISSED|DISPOSED|SETTLED|TERMINATED/.test(u)) return 'CLOSED';
-    if (/OPEN|ACTIVE|PENDING/.test(u)) return 'OPEN';
-    return 'UNKNOWN';
-  }
-
-  async function save(instrNum, data) {
-    try {
-      await fetch(`${SERVER}/api/camden/court-status-update`, {
-        method: 'POST',
-        headers: { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instrumentNumber: instrNum, courtData: data }),
-      });
-    } catch (e) {
-      log(`  ⚠ Save fail: ${e.message}`, 'w');
-    }
-  }
-
-  // More reliable than history.back() in JSF land: click real "Back" control if it exists
   async function goBackToResultsInFrame() {
     const d = frame.contentDocument;
     if (!d) return;
@@ -189,10 +286,7 @@
       return;
     }
 
-    // fallback
-    try {
-      frame.contentWindow.history.back();
-    } catch {}
+    try { frame.contentWindow.history.back(); } catch {}
     await waitForFrameUpdate();
     await wait(800);
   }
@@ -212,26 +306,20 @@
 
     const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;
 
-    // clear
-    setter.call(lf, '');
-    lf.dispatchEvent(new w.Event('change', { bubbles: true }));
-    setter.call(ff, '');
-    ff.dispatchEvent(new w.Event('change', { bubbles: true }));
-    setter.call(mf, '');
-    mf.dispatchEvent(new w.Event('change', { bubbles: true }));
+    const clearSet = (el, val) => {
+      setter.call(el, val);
+      el.dispatchEvent(new w.Event('input', { bubbles: true }));
+      el.dispatchEvent(new w.Event('change', { bubbles: true }));
+    };
+
+    clearSet(lf, '');
+    clearSet(ff, '');
+    clearSet(mf, '');
     await wait(150);
 
-    // fill
-    setter.call(lf, last);
-    lf.dispatchEvent(new w.Event('input', { bubbles: true }));
-    lf.dispatchEvent(new w.Event('change', { bubbles: true }));
-    setter.call(ff, first);
-    ff.dispatchEvent(new w.Event('input', { bubbles: true }));
-    ff.dispatchEvent(new w.Event('change', { bubbles: true }));
-    setter.call(mf, mid || '');
-    mf.dispatchEvent(new w.Event('input', { bubbles: true }));
-    mf.dispatchEvent(new w.Event('change', { bubbles: true }));
-
+    clearSet(lf, last);
+    clearSet(ff, first);
+    clearSet(mf, mid || '');
     await wait(500);
 
     const btn = d.getElementById('searchByPartyNameForm:btnPartyNameSearch');
@@ -239,14 +327,26 @@
 
     btn.click();
 
-    // IMPORTANT: this may trigger a full navigation *inside the iframe*.
-    // Wait for iframe to settle post-search.
+    // This may trigger a full navigation inside iframe
     await wait(250);
-    await waitForFrameUpdate(20000);
+    await waitForFrameUpdate(25000);
     await wait(800);
 
     const table = d.getElementById('searchByPartyNameForm:idPartyTable');
     return table;
+  }
+
+  // Extract quick info from a search result row without opening jacket
+  function extractRowSignals(rowEl) {
+    const t = cleanText(rowEl ? rowEl.innerText : '');
+    const dates = t.match(/\d{2}\/\d{2}\/\d{4}/g) || [];
+    const firstDate = dates.length ? parseAnyDate(dates[0]) : null;
+
+    // caption-like chunk
+    // Often "PLAINTIFF V DEFENDANT" appears somewhere in row text
+    const caption = t;
+
+    return { rowText: t, caption, firstDate };
   }
 
   async function getDetailsInFrame(rowIdx) {
@@ -258,7 +358,7 @@
     if (!link) return null;
 
     link.click();
-    await waitForFrameUpdate(20000);
+    await waitForFrameUpdate(25000);
     await wait(500);
 
     const text = d.body ? d.body.innerText : '';
@@ -281,6 +381,77 @@
     await wait(500);
 
     return details;
+  }
+
+  // Choose best match using:
+  // - Defendant similarity (row + jacket caption)
+  // - Plaintiff similarity (row + jacket caption)
+  // - Date proximity (row date or jacket initiation date vs CSV filing date)
+  async function pickBestMatch(table, caseObj, defName) {
+    const d = frame.contentDocument;
+    if (!d || !table) return null;
+
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    if (!rows.length) return null;
+
+    const plaintiff = getPlaintiff(caseObj);
+    const csvDate = getCaseFilingDate(caseObj);
+
+    // 1) cheap scoring from row text first
+    const prelim = rows.map((row, idx) => {
+      const sig = extractRowSignals(row);
+      const defSim = dice(defName, sig.caption);
+      const plSim = dice(plaintiff, sig.caption);
+      const dScore = dateScore(csvDate, sig.firstDate);
+      const score = (0.55 * defSim) + (0.30 * plSim) + (0.15 * dScore);
+      return { idx, score, defSim, plSim, dScore, firstDate: sig.firstDate };
+    }).sort((a, b) => b.score - a.score);
+
+    const topK = Math.min(5, prelim.length);
+    const candidates = prelim.slice(0, topK);
+
+    log(`  🔎 ${rows.length} results → checking top ${topK} candidates`, 'i');
+
+    // 2) refine by opening jackets (more accurate caption + initiation date)
+    let best = null;
+
+    for (const cand of candidates) {
+      if (window._cscStop) break;
+
+      // open jacket for candidate row
+      const details = await getDetailsInFrame(cand.idx);
+      if (!details) continue;
+
+      const cap = details.caption || '';
+      const initDt = parseAnyDate(details.initDate) || null;
+
+      const defSim2 = Math.max(cand.defSim, dice(defName, cap));
+      const plSim2 = Math.max(cand.plSim, dice(plaintiff, cap));
+      const dScore2 = dateScore(csvDate, initDt);
+
+      // weights: defendant most important; plaintiff next; date last (but still meaningful)
+      const finalScore = (0.55 * defSim2) + (0.30 * plSim2) + (0.15 * dScore2);
+
+      log(
+        `  • candidate row ${cand.idx + 1}: score=${finalScore.toFixed(3)} (def=${defSim2.toFixed(2)} pl=${plSim2.toFixed(2)} date=${dScore2.toFixed(2)})`,
+        'i'
+      );
+
+      if (!best || finalScore > best.finalScore) {
+        best = { rowIdx: cand.idx, details, finalScore, defSim2, plSim2, dScore2 };
+      }
+    }
+
+    if (!best) return null;
+
+    // Safety threshold: if *everything* is weak, treat as not found
+    // (You can lower this if you want it to “always pick something”.)
+    if (best.finalScore < 0.32) {
+      log(`  ⚠ Best match score too low (${best.finalScore.toFixed(3)}). Treating as NOT_FOUND.`, 'w');
+      return { notFound: true, best };
+    }
+
+    return { notFound: false, best };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -327,57 +498,61 @@
     const c = cases[i];
     const instr = c.instrumentNumber || c.instrument_number || c.instrument || '';
     const defName = c.defendantName || c.defendant || c.name || '';
+    const plaintiff = getPlaintiff(c);
+    const csvDate = getCaseFilingDate(c);
 
-    log(`\n🔎 [${i + 1}/${cases.length}] ${instr} — ${defName}`, 's');
+    log(`\n🔎 [${i + 1}/${cases.length}] ${instr}`, 's');
+    log(`  Defendant: ${defName}`, 'i');
+    if (plaintiff) log(`  Plaintiff: ${plaintiff}`, 'i');
+    if (csvDate) log(`  CSV filing date: ${csvDate.toLocaleDateString()}`, 'i');
 
     const def = parseDef(defName);
     if (!def) {
-      S.e++;
-      S.done++;
-      upd();
+      S.e++; S.done++; upd();
       log('  ❌ Could not parse defendant name', 'err');
-      await save(instr, { status: 'ERROR', message: 'Could not parse defendant name' });
+      await save(instr, { courtStatus: 'ERROR', courtMessage: 'Could not parse defendant name' });
       continue;
     }
 
-    // Run search inside iframe (no panel disappearance now)
     const table = await searchInFrame(def.last, def.first, def.mid);
 
     if (!table) {
-      S.e++;
-      S.done++;
-      upd();
+      S.e++; S.done++; upd();
       log('  ❌ Search failed (table not found)', 'err');
-      await save(instr, { status: 'ERROR', message: 'Search failed (table not found)' });
+      await save(instr, { courtStatus: 'ERROR', courtMessage: 'Search failed (table not found)' });
       continue;
     }
 
-    const d = frame.contentDocument;
     const rows = table.querySelectorAll('tbody tr');
     if (!rows || rows.length === 0) {
-      S.n++;
-      S.done++;
-      upd();
+      S.n++; S.done++; upd();
       log('  ❌ No results found', 'w');
-      await save(instr, { status: 'NOT_FOUND' });
+      await save(instr, { courtStatus: 'NOT_FOUND' });
       continue;
     }
 
-    // Take first result (same behavior as your existing flow)
-    // If you want “best match” logic (by name similarity), tell me and I’ll add it.
-    const details = await getDetailsInFrame(0);
+    // BEST MATCH selection (defendant + plaintiff + filing date proximity)
+    const pick = await pickBestMatch(table, c, defName);
 
-    if (!details) {
-      S.e++;
-      S.done++;
-      upd();
-      log('  ❌ Could not open jacket / extract details', 'err');
-      await save(instr, { status: 'ERROR', message: 'Could not open jacket / extract' });
+    if (!pick) {
+      S.e++; S.done++; upd();
+      log('  ❌ Could not evaluate candidates', 'err');
+      await save(instr, { courtStatus: 'ERROR', courtMessage: 'Could not evaluate candidates' });
       continue;
     }
+
+    if (pick.notFound) {
+      S.n++; S.done++; upd();
+      await save(instr, {
+        courtStatus: 'NOT_FOUND',
+        courtMessage: `Low-confidence best match (score=${pick.best.finalScore.toFixed(3)})`,
+      });
+      continue;
+    }
+
+    const details = pick.best.details;
 
     const normalized = normStatus(details.status);
-
     if (normalized === 'OPEN') S.o++;
     else if (normalized === 'CLOSED') S.c++;
     else S.n++;
@@ -385,16 +560,17 @@
     S.done++;
     upd();
 
-    log(`  ✅ ${normalized} — ${details.status || 'UNKNOWN'}`, 'ok');
+    log(`  ✅ Best match score=${pick.best.finalScore.toFixed(3)} → ${normalized}`, 'ok');
 
     await save(instr, {
-      status: normalized,
-      rawStatus: details.status || '',
-      disposition: details.disposition || '',
-      caseType: details.caseType || '',
-      caption: details.caption || '',
-      initiationDate: details.initDate || '',
-      dispositionDate: details.dispDate || '',
+      courtStatus: normalized,
+      courtRawStatus: details.status || '',
+      courtDisposition: details.disposition || '',
+      courtCaseType: details.caseType || '',
+      courtCaption: details.caption || '',
+      courtInitiationDate: details.initDate || '',
+      courtDispositionDate: details.dispDate || '',
+      courtMatchScore: pick.best.finalScore,
     });
 
     await wait(DELAY);
