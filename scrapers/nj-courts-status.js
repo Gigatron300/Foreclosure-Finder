@@ -1,10 +1,24 @@
-// NJ Courts Case Status Enrichment
-// Logs into NJ eCourts portal, searches by defendant name,
-// matches foreclosure cases by plaintiff + date proximity,
-// and extracts case status (Open/Closed) and disposition.
+// NJ Courts Case Status Enrichment - REWRITTEN
+// Based on actual browser observation of portal.njcourts.gov navigation flow
+//
+// FLOW (observed Feb 2026):
+// 1. Navigate to https://portal.njcourts.gov → redirects to Enterprise Portal dashboard
+// 2. Dashboard has tiles: "eCourts Home", "Find a Case - Public Access", etc.
+// 3. Clicking "Find a Case - Public Access" opens dropdown with options:
+//    - "Search Civil and Foreclosure Cases" ← this is what we need
+// 4. That opens new tab to: https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces
+// 5. Search page has tabs: "Search By Docket Number" and "Search By Party Name"
+// 6. Party Name form fields (exact IDs from DOM):
+//    - Last:   searchByPartyNameForm:partyLName
+//    - First:  searchByPartyNameForm:partyFName
+//    - Middle: searchByPartyNameForm:partyMName
+//    - Search: searchByPartyNameForm:btnPartyNameSearch
+// 7. Results table ID: searchByPartyNameForm:idPartyTable
+//    Columns: Name | Venue | Docket Number | Case Caption | Case Initiation Date
+// 8. Docket link uses JSF: myfaces.oam.submitForm('searchByPartyNameForm','searchByPartyNameForm:idPartyTable:{row}:lnkSrchByDocNum')
+// 9. Case jacket page shows: Case Status (Active/etc), Case Disposition (Open/Dismissed/etc)
 //
 // Credentials: Set NJ_COURTS_USER and NJ_COURTS_PASS env vars on Render
-// Portal: https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces
 
 const puppeteerExtra = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -15,72 +29,54 @@ puppeteerExtra.use(StealthPlugin());
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const CONFIG = {
-  loginUrl: 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces',
-  portalLoginUrl: 'https://portal.njcourts.gov/webe20/MPAWeb/login.faces',
+  // The portal home page - after login, this is the dashboard with tiles
+  portalUrl: 'https://portal.njcourts.gov',
+  // Direct URL to the civil case search page (works if session is already authenticated)
   searchUrl: 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces',
-  requestDelay: 1500,       // Delay between searches
-  loginWait: 5000,          // Wait after login for session
-  pageLoadWait: 3000,       // Wait for search results
-  batchSize: 10,            // Pause every N cases
-  batchPause: 5000,         // Pause duration between batches
-  maxRetries: 2,            // Retry failed searches
+  // Alternative search URL (sometimes the path changes slightly after navigation)
+  searchUrlAlt: 'https://portal.njcourts.gov/CIVILCaseJacketWeb/pages/civilCaseSearch.faces',
+  requestDelay: 2000,
+  loginWait: 5000,
+  pageLoadWait: 3000,
+  batchSize: 10,
+  batchPause: 5000,
+  maxRetries: 2,
 };
 
 // ============================================================
 // Name parsing helpers
 // ============================================================
 
-/**
- * Extract searchable last name from defendant name string
- * "HENDERSON LAKISHA N" → { lastName: "HENDERSON", firstName: "LAKISHA" }
- * "GLADDEN DEAN" → { lastName: "GLADDEN", firstName: "DEAN" }
- * "SMITH JR JOHN" → { lastName: "SMITH", firstName: "JOHN" }
- */
 function parseDefendantName(fullName) {
   if (!fullName) return null;
-
   let name = fullName.toUpperCase().trim();
-
-  // Remove common suffixes
   name = name.replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '').trim();
-  // Remove extra whitespace
   name = name.replace(/\s+/g, ' ');
-
   const parts = name.split(' ').filter(p => p.length > 0);
   if (parts.length === 0) return null;
-
-  // Camden CSV format is "LASTNAME FIRSTNAME MIDDLE"
   return {
     lastName: parts[0],
     firstName: parts.length > 1 ? parts[1] : '',
+    middleName: parts.length > 2 ? parts[2] : '',
     fullParts: parts,
-    searchName: parts[0]  // Search by last name only for broader results
+    searchName: parts[0]
   };
 }
 
-/**
- * Extract plaintiff last name for matching against case caption
- * "CITIZENS BANK" → "CITIZENS"
- * "NATIONSTAR MORTGAGE LLC" → "NATIONSTAR"
- * "GOREE TAMMY" → "GOREE"
- */
 function parsePlaintiffForMatch(plaintiffName) {
   if (!plaintiffName) return '';
   const upper = plaintiffName.toUpperCase().trim();
-  // Remove entity suffixes for matching
   const cleaned = upper.replace(/\b(LLC|INC|CORP|N\.?A\.?|BANK|MORTGAGE|SERVICING|TRUST|LP|L\.P\.)\b/g, '').trim();
-  // First significant word
   const parts = cleaned.split(/\s+/).filter(p => p.length > 2);
   return parts[0] || upper.split(/\s+/)[0] || '';
 }
 
 // ============================================================
-// Browser & Login
+// Browser launch
 // ============================================================
 
 async function launchBrowser() {
   console.log('  🚀 Launching browser with stealth plugin...');
-  
   return puppeteerExtra.launch({
     headless: 'new',
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -98,227 +94,128 @@ async function launchBrowser() {
   });
 }
 
+// ============================================================
+// Login - handles the Enterprise Portal (Pega) flow
+// ============================================================
+
 async function loginToNJCourts(page, username, password) {
   console.log('  🔑 Logging into NJ Courts portal...');
 
-  // Additional anti-detection measures
+  // Anti-detection
   await page.evaluateOnNewDocument(() => {
-    // Override webdriver property
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    // Override languages
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-    // Fix Chrome object
     window.chrome = { runtime: {} };
-    // Fix permissions
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) =>
-      parameters.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission })
-        : originalQuery(parameters);
-    // Remove automation indicators
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
   });
 
-  // Set extra headers to look more like a real browser
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-  });
-
-  // Navigate to the civil case search - it will redirect to login
-  console.log('  Navigating to portal...');
-  await page.goto(CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-  await delay(8000);  // Longer wait for Incapsula challenge to complete
+  // Step 1: Navigate to portal - it may redirect to login or straight to dashboard
+  console.log('  → Navigating to portal.njcourts.gov...');
+  await page.goto(CONFIG.portalUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+  await delay(3000);
 
   let currentUrl = page.url();
   console.log(`  Current URL: ${currentUrl}`);
 
-  // ---- RAW HTML DUMP for diagnostics ----
-  const rawHtml = await page.content();
-  console.log(`  Raw HTML length: ${rawHtml.length}`);
-  console.log(`  HTML first 500 chars: ${rawHtml.substring(0, 500)}`);
-
-  // Check for Incapsula/bot block
-  if (rawHtml.includes('Incapsula') || rawHtml.includes('_Incapsula') || rawHtml.includes('visid_incap')) {
-    console.log('  ⚠ Incapsula challenge detected, waiting longer for it to resolve...');
-    
-    // Wait for Incapsula challenge to complete (it usually auto-redirects)
-    for (let i = 0; i < 10; i++) {
-      await delay(3000);
-      const newHtml = await page.content();
-      console.log(`  Challenge attempt ${i+1}/10, HTML length: ${newHtml.length}`);
-      
-      if (!newHtml.includes('Incapsula') && !newHtml.includes('_Incapsula')) {
-        console.log('  ✅ Incapsula challenge passed!');
-        break;
-      }
-      
-      // Check if we got redirected
-      const newUrl = page.url();
-      if (newUrl !== currentUrl) {
-        console.log(`  Redirected to: ${newUrl}`);
-        currentUrl = newUrl;
-      }
-    }
+  // Check if we landed on the dashboard (already authenticated via session)
+  let pageText = await page.evaluate(() => document.body.innerText.substring(0, 1000));
+  
+  if (pageText.includes('Find a Case') || pageText.includes('Portal Home Page')) {
+    console.log('  ✅ Already on portal dashboard (session active)');
+    return await navigateToSearchPage(page);
   }
 
-  // Check for meta refresh redirect
-  const metaRefresh = rawHtml.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["']([^"']+)["']/i);
-  if (metaRefresh) {
-    console.log(`  Meta refresh found: ${metaRefresh[1]}`);
-    const urlMatch = metaRefresh[1].match(/url=(.+)/i);
-    if (urlMatch) {
-      console.log(`  Following meta refresh to: ${urlMatch[1]}`);
-      await page.goto(urlMatch[1], { waitUntil: 'networkidle2', timeout: 30000 });
-      await delay(5000);
-      console.log(`  After redirect URL: ${page.url()}`);
-    }
-  }
-
-  // Wait for content to render (JS SPA)
-  let hasContent = false;
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const check = await page.evaluate(() => ({
-      inputs: document.querySelectorAll('input').length,
-      bodyLen: document.body.innerHTML.length,
-      hasText: document.body.innerText.trim().length > 50,
-      frames: document.querySelectorAll('iframe, frame').length,
-      hasIncapsula: document.body.innerHTML.includes('Incapsula')
-    }));
-
-    if ((check.inputs > 0 || check.hasText) && !check.hasIncapsula) {
-      console.log(`  Content loaded (attempt ${attempt + 1}): ${check.inputs} inputs, bodyLen=${check.bodyLen}, frames=${check.frames}`);
-      hasContent = true;
-      break;
-    }
-    
-    if (attempt === 5) {
-      // After a few tries, check if we need to navigate somewhere else
-      const curUrl = page.url();
-      console.log(`  Still waiting at attempt ${attempt + 1}. URL: ${curUrl}`);
-      
-      // Try the portal root
-      if (curUrl.includes('civilCaseSearch') || curUrl.includes('Incapsula')) {
-        console.log('  Trying portal root instead...');
-        await page.goto('https://portal.njcourts.gov/', { waitUntil: 'networkidle2', timeout: 30000 });
-        await delay(5000);
-        const rootHtml = await page.content();
-        console.log(`  Portal root HTML length: ${rootHtml.length}`);
-        console.log(`  Portal root first 500: ${rootHtml.substring(0, 500)}`);
-      }
-    }
-
-    console.log(`  Waiting for content (attempt ${attempt + 1}/12)...`);
-    await delay(3000);
-  }
-
-  // Full diagnostic dump
-  const pageInfo = await page.evaluate(() => ({
-    title: document.title,
-    url: window.location.href,
-    forms: Array.from(document.querySelectorAll('form')).map(f => ({ action: f.action, method: f.method, id: f.id })),
-    inputs: Array.from(document.querySelectorAll('input')).map(i => ({ type: i.type, name: i.name, id: i.id, placeholder: i.placeholder })),
-    bodyText: document.body.innerText.substring(0, 500),
-    bodyHtmlLen: document.body.innerHTML.length,
-    iframes: Array.from(document.querySelectorAll('iframe, frame')).map(f => ({ src: f.src, id: f.id })),
-    scripts: Array.from(document.querySelectorAll('script[src]')).map(s => s.src).slice(0, 5)
-  }));
-
-  console.log(`  Page title: "${pageInfo.title}"`);
-  console.log(`  Body text: "${pageInfo.bodyText.substring(0, 300)}"`);
-  console.log(`  Forms: ${pageInfo.forms.length}, Inputs: ${pageInfo.inputs.length}`);
-  pageInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name="${i.name}" id="${i.id}"`));
-  pageInfo.forms.forEach(f => console.log(`    Form: action=${f.action} method=${f.method}`));
-  console.log(`  Iframes: ${pageInfo.iframes.length}`);
-  pageInfo.iframes.forEach(f => console.log(`    Iframe: src=${f.src} id=${f.id}`));
-  console.log(`  Scripts: ${pageInfo.scripts.join(', ')}`);
-
-  // Check iframes for login form
-  const allFrames = page.frames();
-  for (const frame of allFrames) {
-    if (frame === page.mainFrame()) continue;
-    try {
-      const fInfo = await frame.evaluate(() => ({
-        url: window.location.href,
-        inputs: Array.from(document.querySelectorAll('input')).map(i => ({ type: i.type, name: i.name, id: i.id })),
-        bodyText: document.body.innerText.substring(0, 200)
-      }));
-      if (fInfo.inputs.length > 0) {
-        console.log(`  Frame ${fInfo.url}: ${fInfo.inputs.length} inputs found`);
-        fInfo.inputs.forEach(i => console.log(`    Input: type=${i.type} name="${i.name}" id="${i.id}"`));
-      }
-    } catch (e) {
-      console.log(`  Frame [cross-origin]: ${frame.url()}`);
-    }
-  }
-
-  // ---- Already on search page? ----
-  if (pageInfo.bodyText.includes('Party Name') || pageInfo.bodyText.includes('Case Search')) {
-    console.log('  ✅ Already logged in!');
+  // Check if we landed on the search page directly
+  if (pageText.includes('Party Name') || pageText.includes('Search For Case') || pageText.includes('Docket Number')) {
+    console.log('  ✅ Already on search page');
     return true;
   }
 
-  // ---- Attempt login ----
-  if (pageInfo.inputs.length === 0) {
-    // No inputs found anywhere - the page is blocked or completely JS-rendered
-    console.error('  ❌ No login form found. Site may still be blocking headless browser.');
-    console.error('  Full HTML dump:');
-    const fullHtml = await page.content();
-    // Log in chunks to avoid truncation
-    for (let i = 0; i < Math.min(fullHtml.length, 3000); i += 500) {
-      console.log(`  HTML[${i}]: ${fullHtml.substring(i, i + 500)}`);
+  // We're on a login page - find and fill the form
+  console.log('  📋 Looking for login form...');
+  
+  // Wait for page to fully render (may have JS-rendered login form)
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const formInfo = await page.evaluate(() => {
+      const inputs = document.querySelectorAll('input');
+      const inputList = [];
+      inputs.forEach(i => {
+        if (i.type !== 'hidden') {
+          inputList.push({ type: i.type, name: i.name, id: i.id });
+        }
+      });
+      return {
+        url: window.location.href,
+        title: document.title,
+        bodyTextSnippet: document.body.innerText.substring(0, 300),
+        visibleInputs: inputList
+      };
+    });
+
+    console.log(`  Attempt ${attempt + 1}: ${formInfo.visibleInputs.length} visible inputs, title="${formInfo.title}"`);
+
+    if (formInfo.visibleInputs.length >= 2) {
+      // Found a login form
+      break;
     }
-    return false;
+
+    // Check for Incapsula/bot block
+    if (formInfo.bodyTextSnippet.includes('Request unsuccessful') || formInfo.bodyTextSnippet.includes('Incapsula')) {
+      console.error('  ❌ Blocked by Incapsula/Imperva bot detection');
+      return false;
+    }
+
+    await delay(3000);
   }
 
-  // Fill login fields
+  // Fill login form
   const loginResult = await page.evaluate((user, pass) => {
-    const allInputs = Array.from(document.querySelectorAll('input'));
-    let userInput = null, passInput = null;
+    // IBM WebSEAL PKMS login uses 'username' and 'password' field names
+    let userInput = document.querySelector('input[name="username"]');
+    let passInput = document.querySelector('input[name="password"]');
     
-    // Try by name
-    userInput = document.querySelector('input[name="username"]');
-    passInput = document.querySelector('input[name="password"]');
+    // Fallback selectors
     if (!userInput) userInput = document.querySelector('input[name="userid"]') || document.querySelector('input[name="j_username"]');
     if (!passInput) passInput = document.querySelector('input[name="j_password"]') || document.querySelector('input[type="password"]');
     
-    // Try by ID
-    if (!userInput) userInput = document.querySelector('input[id*="user" i]') || document.querySelector('input[id*="login" i]');
-    
-    // Fallback
-    if (!userInput) userInput = allInputs.find(i => (i.type === 'text' || i.type === '') && i.offsetParent !== null);
-    if (!passInput) passInput = allInputs.find(i => i.type === 'password');
-    
-    if (!userInput || !passInput) return { success: false };
-    
-    // Use native value setter to bypass JSF input interception
+    // Last resort: find by type
+    if (!userInput) {
+      const allInputs = Array.from(document.querySelectorAll('input'));
+      userInput = allInputs.find(i => (i.type === 'text' || i.type === '') && i.offsetParent !== null);
+    }
+    if (!passInput) {
+      passInput = document.querySelector('input[type="password"]');
+    }
+
+    if (!userInput || !passInput) {
+      return { success: false, error: 'Could not find login fields' };
+    }
+
+    // Use native setter to bypass JSF input interception
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     setter.call(userInput, user);
     userInput.dispatchEvent(new Event('input', { bubbles: true }));
     userInput.dispatchEvent(new Event('change', { bubbles: true }));
-    
+
     setter.call(passInput, pass);
     passInput.dispatchEvent(new Event('input', { bubbles: true }));
     passInput.dispatchEvent(new Event('change', { bubbles: true }));
-    
+
     return { success: true, userField: userInput.name || userInput.id, passField: passInput.name || passInput.id };
   }, username, password);
 
   if (!loginResult.success) {
-    console.error('  ❌ Could not find login form fields');
+    console.error(`  ❌ ${loginResult.error}`);
+    const htmlSnippet = await page.evaluate(() => document.body.innerHTML.substring(0, 2000));
+    console.error(`  Page HTML: ${htmlSnippet}`);
     return false;
   }
 
   console.log(`  Filled login: user=${loginResult.userField}, pass=${loginResult.passField}`);
   await delay(500);
 
-  // Click submit
-  const clicked = await page.evaluate(() => {
+  // Submit login form
+  const submitted = await page.evaluate(() => {
+    // Try standard submit buttons
     const btns = document.querySelectorAll('button, input[type="submit"], input[type="button"], a');
     for (const btn of btns) {
       const text = (btn.textContent || btn.value || '').toLowerCase();
@@ -327,13 +224,16 @@ async function loginToNJCourts(page, username, password) {
         return true;
       }
     }
-    // Fallback: submit the form
-    const form = document.querySelector('form');
-    if (form) { form.submit(); return true; }
+    // Fallback: submit the form containing the password field
+    const passField = document.querySelector('input[type="password"]');
+    if (passField) {
+      const form = passField.closest('form');
+      if (form) { form.submit(); return true; }
+    }
     return false;
   });
 
-  if (!clicked) {
+  if (!submitted) {
     console.error('  ❌ Could not find submit button');
     return false;
   }
@@ -342,364 +242,483 @@ async function loginToNJCourts(page, username, password) {
   await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
   await delay(CONFIG.loginWait);
 
-  // Check if we landed on search page
-  const afterLogin = await page.evaluate(() => ({
-    url: window.location.href,
-    text: document.body.innerText.substring(0, 500)
-  }));
+  // Check where we landed
+  currentUrl = page.url();
+  pageText = await page.evaluate(() => document.body.innerText.substring(0, 1000));
+  console.log(`  After login URL: ${currentUrl}`);
+  console.log(`  After login text snippet: ${pageText.substring(0, 200)}`);
 
-  console.log(`  After login URL: ${afterLogin.url}`);
-  console.log(`  After login text: ${afterLogin.text.substring(0, 200)}`);
-
-  if (afterLogin.text.includes('Party Name') || afterLogin.text.includes('Case Search') || afterLogin.url.includes('civilCaseSearch')) {
-    console.log('  ✅ Login successful (on search page)');
-    return true;
-  }
-
-  if (afterLogin.text.includes('Invalid') || afterLogin.text.includes('incorrect') || afterLogin.text.includes('failed')) {
+  if (pageText.includes('Invalid') || pageText.includes('incorrect') || pageText.includes('failed')) {
     console.error('  ❌ Login failed - invalid credentials');
     return false;
   }
 
-  // May need to navigate to search page after login
-  if (!afterLogin.url.includes('civilCaseSearch')) {
-    console.log('  Navigating to search page after login...');
-    await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
-    await delay(3000);
-    const searchCheck = await page.evaluate(() => document.body.innerText.includes('Party Name'));
-    if (searchCheck) { console.log('  ✅ Login successful (after redirect)'); return true; }
+  // If we're on the portal dashboard, navigate to search
+  if (pageText.includes('Find a Case') || pageText.includes('Portal Home Page')) {
+    console.log('  ✅ Login successful - on portal dashboard');
+    return await navigateToSearchPage(page);
   }
 
-  console.error('  ❌ Login failed');
-  return false;
+  // If we're already on search page
+  if (pageText.includes('Party Name') || pageText.includes('Search For Case')) {
+    console.log('  ✅ Login successful - on search page');
+    return true;
+  }
+
+  // Try navigating directly to search page (session should be active now)
+  console.log('  ⚠ Not on expected page, trying direct navigation to search...');
+  return await navigateToSearchPage(page);
 }
 
 // ============================================================
-// Search & Match
+// Navigate from dashboard to search page
 // ============================================================
 
-/**
- * Search for a defendant by last name on the NJ Courts portal
- * Returns array of search result rows
- */
-async function searchByPartyName(page, lastName) {
-  // Make sure we're on the search page
-  const onSearchPage = await page.evaluate(() => {
-    const text = document.body.innerText || '';
-    return text.includes('Party Name') || text.includes('Case Search');
-  });
+async function navigateToSearchPage(page) {
+  console.log('  📍 Navigating to Civil Case Search page...');
 
-  if (!onSearchPage) {
-    await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
-    await delay(2000);
+  // Try direct URL first (faster if session cookies are set)
+  await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+  await delay(3000);
+
+  let pageText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+  
+  if (pageText.includes('Search For Case') || pageText.includes('Party Name') || pageText.includes('Docket Number')) {
+    console.log('  ✅ On search page (direct URL)');
+    return true;
   }
 
-  // Clear any previous search and fill in party name
-  await page.evaluate((name) => {
-    // Find the Party Name input - try by label, placeholder, or ID
-    const allInputs = document.querySelectorAll('input[type="text"]');
-    let partyInput = null;
+  // Try alternative URL
+  await page.goto(CONFIG.searchUrlAlt, { waitUntil: 'networkidle2', timeout: 30000 });
+  await delay(3000);
 
-    for (const inp of allInputs) {
-      const id = (inp.id || '').toLowerCase();
-      const name_ = (inp.name || '').toLowerCase();
-      const placeholder = (inp.placeholder || '').toLowerCase();
-      const label = inp.closest('tr')?.textContent?.toLowerCase() || 
-                    inp.closest('div')?.textContent?.toLowerCase() || '';
+  pageText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+  
+  if (pageText.includes('Search For Case') || pageText.includes('Party Name') || pageText.includes('Docket Number')) {
+    console.log('  ✅ On search page (alt URL)');
+    return true;
+  }
 
-      if (id.includes('party') || name_.includes('party') || 
-          placeholder.includes('party') || label.includes('party name')) {
-        partyInput = inp;
-        break;
-      }
-    }
+  // Last resort: go to portal dashboard and click the tile
+  console.log('  ⚠ Direct URL failed, trying portal dashboard tile click...');
+  await page.goto(CONFIG.portalUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+  await delay(3000);
 
-    // Fallback: first text input that's not docket
-    if (!partyInput) {
-      for (const inp of allInputs) {
-        const id = (inp.id || '').toLowerCase();
-        if (!id.includes('docket') && !id.includes('number')) {
-          partyInput = inp;
-          break;
-        }
-      }
-    }
-
-    if (partyInput) {
-      partyInput.value = '';
-      partyInput.value = name;
-      partyInput.dispatchEvent(new Event('input', { bubbles: true }));
-      partyInput.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    }
-    return false;
-  }, lastName);
-
-  await delay(500);
-
-  // Click search button
-  await page.evaluate(() => {
-    const buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a');
-    for (const btn of buttons) {
-      const text = (btn.textContent || btn.value || '').toLowerCase().trim();
-      if (text === 'search' || text.includes('search')) {
-        btn.click();
+  // Click "Find a Case - Public Access" tile
+  const tileClicked = await page.evaluate(() => {
+    const allLinks = document.querySelectorAll('a, button, div, span');
+    for (const el of allLinks) {
+      if (el.textContent.includes('Find a Case')) {
+        el.click();
         return true;
       }
     }
     return false;
   });
 
-  // Wait for results
-  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-  await delay(CONFIG.pageLoadWait);
+  if (tileClicked) {
+    await delay(2000);
+    // Click "Search Civil and Foreclosure Cases" from the dropdown
+    const searchClicked = await page.evaluate(() => {
+      const allLinks = document.querySelectorAll('a, li, span, div');
+      for (const el of allLinks) {
+        if (el.textContent.includes('Search Civil and Foreclosure')) {
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    });
 
-  // Extract search results with HARDCODED column positions
-  // Based on NJ Courts General Equity search results table:
-  // Column 0: Name, Column 1: Venue, Column 2: Docket Number, Column 3: Case Caption, Column 4: Case Initiation Date
-  const results = await page.evaluate(() => {
-    const rows = [];
-    
-    // Find the DataTable results (it has class 'dataTable' or contains docket links)
-    const tables = document.querySelectorAll('table');
-    
-    for (const table of tables) {
-      const allRows = table.querySelectorAll('tr');
+    if (searchClicked) {
+      // Wait for new tab/page to load
+      await delay(5000);
       
-      for (let i = 0; i < allRows.length; i++) {
-        const row = allRows[i];
-        const cells = row.querySelectorAll('td');
-        
-        // Need at least 5 columns for a data row
-        if (cells.length < 5) continue;
-        
-        // Skip header/footer rows
-        const rowText = row.textContent.toLowerCase();
-        if (rowText.includes('showing') || rowText.includes('previous') || rowText.includes('next')) continue;
-        if (row.querySelector('th')) continue;
-        
-        // HARDCODED column positions based on actual NJ Courts table structure:
-        // 0=Name, 1=Venue, 2=Docket Number, 3=Case Caption, 4=Case Initiation Date
-        const name = cells[0] ? cells[0].textContent.trim() : '';
-        const venue = cells[1] ? cells[1].textContent.trim() : '';
-        const docketNumber = cells[2] ? cells[2].textContent.trim() : '';
-        const caseCaption = cells[3] ? cells[3].textContent.trim() : '';
-        const filedDate = cells[4] ? cells[4].textContent.trim() : '';
-        
-        // Get the docket link (it's in the Docket Number column)
-        const docketLink = cells[2] ? cells[2].querySelector('a') : null;
-        const detailLink = docketLink ? docketLink.href : '';
-        
-        // Only add if we have a docket number (confirms it's a real result row)
-        if (docketNumber && docketNumber.match(/F-\d+/)) {
-          rows.push({
-            name,
-            venue,
-            docketNumber,
-            caseCaption,
-            filedDate,
-            detailLink,
-            status: '',
-            disposition: '',
-            caseType: ''
-          });
+      // Check if a new page opened (the portal opens it in a new tab)
+      const pages = await page.browser().pages();
+      for (const p of pages) {
+        const pUrl = p.url();
+        if (pUrl.includes('civilCaseSearch') || pUrl.includes('CIVILCaseJacket')) {
+          // Switch to this page
+          console.log('  ✅ Found search page in new tab');
+          return true; // The caller will need to use this page
         }
       }
     }
-    
-    return rows;
+  }
+
+  console.error('  ❌ Could not navigate to search page');
+  console.error(`  Final URL: ${page.url()}`);
+  return false;
+}
+
+// ============================================================
+// Get the active search page (may be in a different tab)
+// ============================================================
+
+async function getSearchPage(browser) {
+  const pages = await browser.pages();
+  for (const p of pages) {
+    const url = p.url();
+    if (url.includes('civilCaseSearch') || url.includes('CIVILCaseJacket')) {
+      return p;
+    }
+  }
+  return pages[pages.length - 1]; // fallback to last page
+}
+
+// ============================================================
+// Search by party name using exact JSF form IDs
+// ============================================================
+
+async function searchByPartyName(page, defendant) {
+  const { lastName, firstName, middleName } = defendant;
+  
+  // Make sure we're on the search page
+  const onSearchPage = await page.evaluate(() => {
+    return document.getElementById('searchByPartyNameForm:partyLName') !== null;
   });
 
-  console.log(`    Found ${results.length} search results`);
+  if (!onSearchPage) {
+    // Try navigating back to search
+    const searchUrls = [CONFIG.searchUrl, CONFIG.searchUrlAlt];
+    for (const url of searchUrls) {
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
+      await delay(2000);
+      const found = await page.evaluate(() => document.getElementById('searchByPartyNameForm:partyLName') !== null);
+      if (found) break;
+    }
+  }
+
+  // Click "Search By Party Name" tab to make sure we're on the right tab
+  await page.evaluate(() => {
+    const tabs = document.querySelectorAll('a[href="#tabs-2"], li a');
+    for (const tab of tabs) {
+      if (tab.textContent.includes('Party Name')) {
+        tab.click();
+        return;
+      }
+    }
+  });
+  await delay(500);
+
+  // Clear and fill the form using EXACT field IDs
+  await page.evaluate(({ last, first, middle }) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    
+    const lastField = document.getElementById('searchByPartyNameForm:partyLName');
+    const firstField = document.getElementById('searchByPartyNameForm:partyFName');
+    const middleField = document.getElementById('searchByPartyNameForm:partyMName');
+
+    if (lastField) {
+      setter.call(lastField, last);
+      lastField.dispatchEvent(new Event('input', { bubbles: true }));
+      lastField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (firstField) {
+      setter.call(firstField, first);
+      firstField.dispatchEvent(new Event('input', { bubbles: true }));
+      firstField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (middleField) {
+      setter.call(middleField, middle || '');
+      middleField.dispatchEvent(new Event('input', { bubbles: true }));
+      middleField.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, { last: lastName, first: firstName, middle: middleName || '' });
+
+  await delay(300);
+
+  // Click the Search button using exact ID
+  await page.evaluate(() => {
+    const searchBtn = document.getElementById('searchByPartyNameForm:btnPartyNameSearch');
+    if (searchBtn) {
+      searchBtn.click();
+      return true;
+    }
+    // Fallback: try the dummy button
+    const dummyBtn = document.getElementById('searchByPartyNameForm:searchBtnDummy');
+    if (dummyBtn) {
+      dummyBtn.click();
+      return true;
+    }
+    return false;
+  });
+
+  // Wait for page to reload with results (JSF form submission)
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+  await delay(CONFIG.pageLoadWait);
+
+  // Extract results from the known table ID
+  const results = await page.evaluate(() => {
+    const table = document.getElementById('searchByPartyNameForm:idPartyTable');
+    if (!table) return [];
+
+    const rows = table.querySelectorAll('tbody tr');
+    const data = [];
+
+    rows.forEach((row, index) => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length < 5) return;
+
+      // Check if this is a "No data available" row
+      const rowText = row.textContent.trim();
+      if (rowText.includes('No data available') || rowText.includes('No matching records')) return;
+
+      data.push({
+        rowIndex: index,
+        name: cells[0] ? cells[0].textContent.trim() : '',
+        venue: cells[1] ? cells[1].textContent.trim() : '',
+        docketNumber: cells[2] ? cells[2].textContent.trim() : '',
+        caseCaption: cells[3] ? cells[3].textContent.trim() : '',
+        filedDate: cells[4] ? cells[4].textContent.trim() : ''
+      });
+    });
+
+    return data;
+  });
+
+  console.log(`     Found ${results.length} search results`);
   results.forEach((r, i) => {
-    console.log(`      ${i + 1}. ${r.docketNumber} | Venue: ${r.venue} | ${r.caseCaption.substring(0, 40)}...`);
+    console.log(`       ${i + 1}. ${r.docketNumber} | ${r.venue} | ${r.caseCaption.substring(0, 50)}... | ${r.filedDate}`);
   });
 
   return results;
 }
 
-/**
- * Match search results to a specific lis pendens case
- * Now that we have proper column extraction:
- * - Venue should be "CAMDEN" 
- * - Docket should start with "F-" for foreclosure
- * - Caption should contain defendant name
- */
-function findBestMatch(searchResults, lispendenCase) {
-  const defendantParts = parseDefendantName(lispendenCase.primaryDefendant);
-  const lisPendensDate = lispendenCase.filingDate ? new Date(lispendenCase.filingDate) : null;
+// ============================================================
+// Click into a case jacket to get status details
+// ============================================================
 
-  console.log(`      Looking for defendant: ${defendantParts?.lastName}`);
+async function getCaseDetails(page, result) {
+  const rowIndex = result.rowIndex;
 
-  const candidates = [];
-
-  for (const result of searchResults) {
-    let matchScore = 0;
-    const caption = (result.caseCaption || '').toUpperCase();
-    const venue = (result.venue || '').toUpperCase();
-    const docket = (result.docketNumber || '').toUpperCase();
-
-    // Must be Camden venue
-    if (!venue.includes('CAMDEN')) {
-      console.log(`      Skip ${docket}: wrong venue "${venue}"`);
-      continue;
+  // Click the docket number link using JSF's form submission pattern
+  const clicked = await page.evaluate((idx) => {
+    // The link ID pattern: searchByPartyNameForm:idPartyTable:{rowIndex}:lnkSrchByDocNum
+    const linkId = `searchByPartyNameForm:idPartyTable:${idx}:lnkSrchByDocNum`;
+    const link = document.getElementById(linkId);
+    if (link) {
+      link.click();
+      return { clicked: true, method: 'directId' };
     }
-    matchScore += 10;
 
-    // Must be foreclosure (docket starts with F-)
-    if (!docket.startsWith('F-')) {
-      console.log(`      Skip ${docket}: not foreclosure`);
-      continue;
-    }
-    matchScore += 20;
-
-    // Defendant name should be in caption (e.g., "NEW JERSEY HOUSING A VS DOWNING LAUREN")
-    if (defendantParts && defendantParts.lastName) {
-      if (caption.includes(defendantParts.lastName)) {
-        matchScore += 25;
-        console.log(`      ✓ ${docket}: found defendant ${defendantParts.lastName} in caption`);
-        
-        // Bonus for first name match
-        if (defendantParts.firstName && caption.includes(defendantParts.firstName)) {
-          matchScore += 10;
+    // Fallback: find the link in the row
+    const table = document.getElementById('searchByPartyNameForm:idPartyTable');
+    if (table) {
+      const rows = table.querySelectorAll('tbody tr');
+      if (rows[idx]) {
+        const docketLink = rows[idx].querySelector('td:nth-child(3) a');
+        if (docketLink) {
+          docketLink.click();
+          return { clicked: true, method: 'rowQuery' };
         }
-      } else {
-        console.log(`      Skip ${docket}: defendant ${defendantParts.lastName} not in caption "${caption.substring(0, 50)}"`);
-        continue;
       }
     }
 
-    // Date proximity bonus (not required)
+    // Last fallback: use JSF's submitForm directly
+    if (typeof myfaces !== 'undefined' && myfaces.oam && myfaces.oam.submitForm) {
+      myfaces.oam.submitForm('searchByPartyNameForm', linkId);
+      return { clicked: true, method: 'jsfSubmit' };
+    }
+
+    return { clicked: false };
+  }, rowIndex);
+
+  if (!clicked.clicked) {
+    console.log(`     ⚠ Could not click docket link for row ${rowIndex}`);
+    return null;
+  }
+
+  console.log(`     Clicked docket link (method: ${clicked.method}), waiting for case jacket...`);
+
+  // Wait for navigation to case jacket page
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+  await delay(2000);
+
+  // Extract case details from the case jacket page
+  const details = await page.evaluate(() => {
+    const getText = (labelText) => {
+      // Find a label element containing the text, then get the next sibling's text
+      const allElements = document.querySelectorAll('td, th, span, div, label');
+      for (const el of allElements) {
+        const text = el.textContent.trim();
+        if (text === labelText || text === labelText + ':') {
+          // Get the next sibling element
+          let next = el.nextElementSibling;
+          if (next) return next.textContent.trim();
+          
+          // Try parent's next sibling (for table layout)
+          const parent = el.parentElement;
+          if (parent && parent.nextElementSibling) {
+            return parent.nextElementSibling.textContent.trim();
+          }
+        }
+      }
+      return '';
+    };
+
+    // The case jacket has a table with label:value pairs
+    // Based on actual DOM observation:
+    // "Case Status:" followed by value (e.g., "Active")
+    // "Case Disposition:" followed by value (e.g., "Open")
+    // "Case Caption:" followed by value
+    // "Case Type:" followed by value
+    // "Venue:" followed by value
+
+    // More reliable: scan all text content for known patterns
+    const bodyText = document.body.innerText;
+    
+    let caseStatus = '';
+    let caseDisposition = '';
+    let caseCaption = '';
+    let caseType = '';
+    let venue = '';
+    let dispositionDate = '';
+    let caseInitDate = '';
+
+    // Look for these patterns in the page text
+    const statusMatch = bodyText.match(/Case Status:\s*(\S+)/);
+    if (statusMatch) caseStatus = statusMatch[1].trim();
+
+    const dispMatch = bodyText.match(/Case Disposition:\s*(.+?)(?:\n|Case|Court|Venue|$)/);
+    if (dispMatch) caseDisposition = dispMatch[1].trim();
+
+    const captionMatch = bodyText.match(/Case Caption:\s*(.+?)(?:\n|Court|$)/);
+    if (captionMatch) caseCaption = captionMatch[1].trim();
+
+    const typeMatch = bodyText.match(/Case Type:\s*(.+?)(?:\n|Case|$)/);
+    if (typeMatch) caseType = typeMatch[1].trim();
+
+    const venueMatch = bodyText.match(/Venue:\s*(\S+)/);
+    if (venueMatch) venue = venueMatch[1].trim();
+
+    const initDateMatch = bodyText.match(/Case Initiation Date:\s*(\d{2}\/\d{2}\/\d{4})/);
+    if (initDateMatch) caseInitDate = initDateMatch[1];
+
+    const dispDateMatch = bodyText.match(/Disposition Date:\s*(\d{2}\/\d{2}\/\d{4})/);
+    if (dispDateMatch) dispositionDate = dispDateMatch[1];
+
+    // Also get the docket number from the page header
+    const docketMatch = bodyText.match(/Docket Number:\s*(.*?)(?:\n|$)/);
+    const docketNumber = docketMatch ? docketMatch[1].trim() : '';
+
+    return {
+      docketNumber,
+      caseStatus,
+      caseDisposition,
+      caseCaption,
+      caseType,
+      venue,
+      dispositionDate,
+      caseInitDate,
+      pageUrl: window.location.href,
+      // Debug info
+      bodySnippet: bodyText.substring(0, 500)
+    };
+  });
+
+  console.log(`     Case Status: ${details.caseStatus}, Disposition: ${details.caseDisposition}`);
+
+  // Navigate back to search page for next search
+  await page.evaluate(() => {
+    const backBtn = document.querySelector('button[type="button"]');
+    if (backBtn && (backBtn.textContent.includes('Back') || backBtn.value === 'Back')) {
+      backBtn.click();
+      return true;
+    }
+    return false;
+  });
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
+  await delay(1500);
+
+  return details;
+}
+
+// ============================================================
+// Match best result from search results
+// ============================================================
+
+function findBestMatch(results, plaintiff, lisPendensDateStr) {
+  if (!results || results.length === 0) return null;
+
+  const plaintiffKeyword = parsePlaintiffForMatch(plaintiff);
+  let lisPendensDate = null;
+  if (lisPendensDateStr) {
+    try { lisPendensDate = new Date(lisPendensDateStr); } catch (e) {}
+  }
+
+  console.log(`     Matching: plaintiff="${plaintiffKeyword}", LP date=${lisPendensDateStr}`);
+
+  const candidates = [];
+
+  for (const result of results) {
+    let matchScore = 0;
+    const caption = (result.caseCaption || '').toUpperCase();
+    const venue = (result.venue || '').toUpperCase();
+    const docket = result.docketNumber || '';
+
+    // Must be Camden venue
+    if (venue.includes('CAMDEN')) matchScore += 10;
+    else continue; // Skip non-Camden results
+
+    // Must be a foreclosure docket (starts with F-)
+    if (docket.startsWith('F-')) matchScore += 10;
+
+    // Plaintiff name in caption
+    if (plaintiffKeyword && caption.includes(plaintiffKeyword)) {
+      matchScore += 15;
+    }
+
+    // Date proximity
     if (lisPendensDate && result.filedDate) {
       try {
         const caseDate = new Date(result.filedDate);
         const daysDiff = Math.abs((lisPendensDate - caseDate) / (1000 * 60 * 60 * 24));
-        
-        if (daysDiff <= 60) matchScore += 10;
+        if (daysDiff <= 14) matchScore += 15;
+        else if (daysDiff <= 60) matchScore += 10;
         else if (daysDiff <= 180) matchScore += 5;
+        else if (daysDiff <= 365) matchScore += 2;
       } catch (e) {}
     }
 
+    console.log(`       Candidate: ${docket} "${caption.substring(0, 40)}..." score=${matchScore}`);
     candidates.push({ ...result, matchScore });
   }
 
-  // Sort by score, return best match
   candidates.sort((a, b) => b.matchScore - a.matchScore);
-  
-  if (candidates.length > 0) {
-    console.log(`      Best match: ${candidates[0].docketNumber} (score: ${candidates[0].matchScore})`);
+
+  if (candidates.length > 0 && candidates[0].matchScore >= 20) {
+    console.log(`     ✅ Best match: ${candidates[0].docketNumber} (score: ${candidates[0].matchScore})`);
     return candidates[0];
   }
-  
+
+  console.log('     ❌ No confident match found');
   return null;
 }
 
-/**
- * Click into a case jacket to get full status details from the detail page
- * The detail page shows: Case Status, Case Disposition, Case Type, Venue, etc.
- */
-async function getCaseDetails(page, result) {
-  // If there's a detail link, click into it to get the actual status
-  if (result.detailLink) {
-    try {
-      console.log(`      Opening case detail: ${result.detailLink}`);
-      await page.goto(result.detailLink, { waitUntil: 'networkidle2', timeout: 20000 });
-      await delay(2000);
+// ============================================================
+// Normalize status
+// ============================================================
 
-      // Extract case details from the case jacket page
-      // Based on NJ Courts case detail page structure:
-      // Case Status: Active, Case Disposition: Open, Case Type: Residential Mortgage Foreclosure, etc.
-      const details = await page.evaluate(() => {
-        const text = document.body.innerText || '';
-        const html = document.body.innerHTML || '';
-        
-        // Helper to find field value - looks for "Label: Value" pattern
-        const getField = (labels) => {
-          for (const label of labels) {
-            // Try regex pattern for "Label: Value" or "Label Value"
-            const patterns = [
-              new RegExp(label + ':\\s*([^\\n]+)', 'i'),
-              new RegExp(label + '\\s*:\\s*([^\\n]+)', 'i'),
-              new RegExp(label + '\\s+([A-Za-z]+)', 'i')
-            ];
-            
-            for (const regex of patterns) {
-              const match = text.match(regex);
-              if (match && match[1]) {
-                return match[1].trim().split('\n')[0].trim();
-              }
-            }
-          }
-          return '';
-        };
-        
-        // Extract all the key fields from the case detail page
-        const caseStatus = getField(['Case Status']);
-        const caseDisposition = getField(['Case Disposition']);
-        const caseType = getField(['Case Type']);
-        const venue = getField(['Venue']);
-        const caseCaption = getField(['Case Caption']);
-        const filedDate = getField(['Case Initiation Date', 'Filed Date', 'Initiation Date']);
-        const dispositionDate = getField(['Disposition Date']);
-        const judge = getField(['Judge']);
-        const court = getField(['Court']);
-        
-        return {
-          caseStatus,
-          caseDisposition,
-          caseType,
-          venue,
-          caseCaption,
-          filedDate,
-          dispositionDate,
-          judge,
-          court,
-          // Include raw text snippet for debugging
-          rawTextSnippet: text.substring(0, 500)
-        };
-      });
-
-      console.log(`      Case Status: ${details.caseStatus}, Disposition: ${details.caseDisposition}`);
-
-      return {
-        docketNumber: result.docketNumber,
-        caseStatus: details.caseStatus,
-        caseDisposition: details.caseDisposition,
-        caseCaption: details.caseCaption || result.caseCaption,
-        caseType: details.caseType,
-        venue: details.venue || result.venue,
-        filedDate: details.filedDate || result.filedDate,
-        dispositionDate: details.dispositionDate,
-        judge: details.judge,
-        detailLink: result.detailLink
-      };
-    } catch (err) {
-      console.log(`      ⚠ Could not load case jacket: ${err.message}`);
-    }
+function normalizeStatus(statusText) {
+  if (!statusText) return 'UNKNOWN';
+  const upper = statusText.toUpperCase();
+  if (upper.includes('CLOSED') || upper.includes('DISMISSED') ||
+      upper.includes('DISPOSED') || upper.includes('RESOLVED') ||
+      upper.includes('SETTLED') || upper.includes('TERMINATED')) {
+    return 'CLOSED';
   }
-
-  // Return what we have from search results if we couldn't get detail page
-  return {
-    docketNumber: result.docketNumber,
-    caseStatus: result.status || '',
-    caseDisposition: result.disposition || '',
-    caseCaption: result.caseCaption,
-    caseType: result.caseType,
-    venue: result.venue,
-    filedDate: result.filedDate
-  };
+  if (upper.includes('OPEN') || upper.includes('ACTIVE') || upper.includes('PENDING')) {
+    return 'OPEN';
+  }
+  return 'UNKNOWN';
 }
 
 // ============================================================
 // Main enrichment function
 // ============================================================
 
-/**
- * Enrich Camden cases with NJ Courts case status
- * @param {Object} data - The camden-pipeline.json data object
- * @param {Object} options - { testMode, testLimit, skipAlreadyEnriched }
- * @returns {Object} Updated data object with courtStatus fields on each case
- */
 async function enrichCourtStatus(data, options = {}) {
   const { testMode = false, testLimit = 10, skipAlreadyEnriched = true } = options;
 
@@ -717,7 +736,6 @@ async function enrichCourtStatus(data, options = {}) {
     cases = cases.slice(0, testLimit);
   }
 
-  // Skip cases already permanently marked as CLOSED (dismissed cases never need re-checking)
   const toProcess = skipAlreadyEnriched
     ? cases.filter(c => !c.courtStatus || (c.courtStatus !== 'CLOSED'))
     : cases;
@@ -733,28 +751,30 @@ async function enrichCourtStatus(data, options = {}) {
   console.log(`Portal: portal.njcourts.gov\n`);
 
   let browser = null;
-  let page = null;
+  let searchPage = null;
   let found = 0, notFound = 0, errors = 0;
   let closedCount = 0, openCount = 0;
 
   try {
     browser = await launchBrowser();
-    page = await browser.newPage();
+    const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
 
     // Login
     const loggedIn = await loginToNJCourts(page, username, password);
     if (!loggedIn) {
-      console.error('❌ Could not log in to NJ Courts. Aborting status enrichment.');
-      await browser.close();
+      console.error('❌ Could not log in to NJ Courts. Aborting.');
       return data;
     }
+
+    // Get the search page (might be in a different tab after portal navigation)
+    searchPage = await getSearchPage(browser);
 
     // Process each case
     for (let i = 0; i < toProcess.length; i++) {
       const c = toProcess[i];
-      const prefix = `  ${i + 1}/${toProcess.length}`;
+      const prefix = `${i + 1}/${toProcess.length}`;
 
       // Batch pause
       if (i > 0 && i % CONFIG.batchSize === 0) {
@@ -762,67 +782,76 @@ async function enrichCourtStatus(data, options = {}) {
         await delay(CONFIG.batchPause);
       }
 
-      const defendant = parseDefendantName(c.primaryDefendant);
-      if (!defendant) {
-        console.log(`${prefix} ⚠ ${c.instrumentNumber} - No defendant name to search`);
-        c.courtStatus = 'UNKNOWN';
-        c.courtStatusNote = 'No defendant name available';
-        errors++;
-        continue;
-      }
-
       try {
+        // Parse defendant name from the case
+        const defendantName = c.partyCode === 'R' ? c.name : c.crossName;
+        const plaintiffName = c.partyCode === 'R' ? c.crossName : c.name;
+
+        const defendant = parseDefendantName(defendantName);
+        if (!defendant) {
+          console.log(`${prefix} ⚠ Could not parse defendant name: ${defendantName}`);
+          c.courtStatus = 'SKIP';
+          c.courtStatusNote = 'Could not parse name';
+          continue;
+        }
+
+        console.log(`\n${prefix} 🔍 Searching: ${defendant.lastName}, ${defendant.firstName} (plaintiff: ${plaintiffName})`);
+
+        // Search by party name
+        const results = await searchByPartyName(searchPage, defendant);
         await delay(CONFIG.requestDelay);
 
-        // Navigate back to search page for each search
-        await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
-        await delay(1500);
-
-        // Search by defendant last name
-        const searchResults = await searchByPartyName(page, defendant.lastName);
-
-        if (searchResults.length === 0) {
-          console.log(`${prefix} ❌ ${c.instrumentNumber} ${defendant.lastName} → No results`);
+        if (!results || results.length === 0) {
+          console.log(`${prefix} ❌ No results for ${defendant.lastName}`);
           c.courtStatus = 'NOT_FOUND';
-          c.courtStatusNote = `No court records found for ${defendant.lastName}`;
+          c.courtStatusNote = 'No search results';
           notFound++;
           continue;
         }
 
-        // Find best match
-        const match = findBestMatch(searchResults, c);
+        // Find best matching result
+        const match = findBestMatch(results, plaintiffName, c.date);
 
         if (!match) {
-          console.log(`${prefix} ❌ ${c.instrumentNumber} ${defendant.lastName} → ${searchResults.length} results, no Camden foreclosure match`);
+          console.log(`${prefix} ❌ No confident match for ${defendant.lastName}`);
           c.courtStatus = 'NOT_FOUND';
-          c.courtStatusNote = `${searchResults.length} results but no matching Camden foreclosure`;
+          c.courtStatusNote = `${results.length} results, no match`;
           notFound++;
           continue;
         }
 
-        // Get detailed case info
-        const details = await getCaseDetails(page, match);
+        // Click into the case jacket to get detailed status
+        const details = await getCaseDetails(searchPage, match);
 
-        // Update the case
-        c.courtStatus = normalizeStatus(details.caseStatus);
-        c.courtDisposition = details.caseDisposition || '';
-        c.courtDocketNumber = details.docketNumber || '';
-        c.courtCaseCaption = details.caseCaption || '';
-        c.courtCaseType = details.caseType || '';
-        c.courtFiledDate = details.filedDate || '';
-        c.courtMatchScore = match.matchScore;
-        c.courtStatusEnrichedAt = new Date().toISOString();
+        if (!details) {
+          console.log(`${prefix} ⚠ Could not load case details for ${match.docketNumber}`);
+          c.courtStatus = 'ERROR';
+          c.courtStatusNote = 'Could not load case jacket';
+          errors++;
+          continue;
+        }
+
+        // Update case with court status
+        c.courtDocketNumber = match.docketNumber;
+        c.courtStatus = normalizeStatus(details.caseStatus + ' ' + details.caseDisposition);
+        c.courtStatusRaw = details.caseStatus;
+        c.courtDisposition = details.caseDisposition;
+        c.courtCaseType = details.caseType;
+        c.courtCaseCaption = details.caseCaption || match.caseCaption;
+        c.courtFiledDate = details.caseInitDate || match.filedDate;
+        c.courtDispositionDate = details.dispositionDate;
+        c.courtStatusNote = `Matched: score ${match.matchScore}`;
 
         const statusEmoji = c.courtStatus === 'CLOSED' ? '🔴' : c.courtStatus === 'OPEN' ? '🟢' : '⚪';
         if (c.courtStatus === 'CLOSED') closedCount++;
         else if (c.courtStatus === 'OPEN') openCount++;
 
         const dispNote = c.courtDisposition ? ` (${c.courtDisposition})` : '';
-        console.log(`${prefix} ${statusEmoji} ${c.instrumentNumber} ${defendant.lastName} → ${details.docketNumber} ${c.courtStatus}${dispNote} [match:${match.matchScore}]`);
+        console.log(`${prefix} ${statusEmoji} ${c.instrumentNumber} ${defendant.lastName} → ${match.docketNumber} ${c.courtStatus}${dispNote} [score:${match.matchScore}]`);
         found++;
 
       } catch (err) {
-        console.log(`${prefix} ⚠ ${c.instrumentNumber} ${defendant.lastName} → Error: ${err.message.slice(0, 50)}`);
+        console.log(`${prefix} ⚠ Error: ${err.message.slice(0, 80)}`);
         c.courtStatus = 'ERROR';
         c.courtStatusNote = err.message;
         errors++;
@@ -855,23 +884,6 @@ async function enrichCourtStatus(data, options = {}) {
   console.log(`  Open: ${openCount} 🟢 | Closed: ${closedCount} 🔴`);
 
   return data;
-}
-
-/**
- * Normalize case status to OPEN/CLOSED/UNKNOWN
- */
-function normalizeStatus(statusText) {
-  if (!statusText) return 'UNKNOWN';
-  const upper = statusText.toUpperCase();
-  if (upper.includes('CLOSED') || upper.includes('DISMISSED') || 
-      upper.includes('DISPOSED') || upper.includes('RESOLVED') ||
-      upper.includes('SETTLED') || upper.includes('TERMINATED')) {
-    return 'CLOSED';
-  }
-  if (upper.includes('OPEN') || upper.includes('ACTIVE') || upper.includes('PENDING')) {
-    return 'OPEN';
-  }
-  return 'UNKNOWN';
 }
 
 module.exports = {
