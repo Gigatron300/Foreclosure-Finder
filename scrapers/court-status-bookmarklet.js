@@ -5,7 +5,7 @@
   const TOKEN = '__AUTH_TOKEN__';
   const TEST_MODE = __TEST_MODE__;
 
-  // Safety check: only run on NJ Courts Civil Case Search page
+  // Only run on NJ Courts Civil Case Search page
   const HOST_OK =
     window.location.href.includes('njcourts.gov') &&
     window.location.href.toLowerCase().includes('civilcasesearch');
@@ -27,7 +27,7 @@
   panel.id = 'csc-panel';
   panel.innerHTML = `
     <style>
-      #csc-panel { position:fixed;top:8px;right:8px;width:380px;z-index:99999;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;font-family:system-ui,sans-serif;font-size:12px;box-shadow:0 4px 24px rgba(0,0,0,.6);border:1px solid #334155;max-height:85vh;display:flex;flex-direction:column; }
+      #csc-panel { position:fixed;top:8px;right:8px;width:390px;z-index:99999;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;font-family:system-ui,sans-serif;font-size:12px;box-shadow:0 4px 24px rgba(0,0,0,.6);border:1px solid #334155;max-height:85vh;display:flex;flex-direction:column; }
       #csc-panel h3{margin:0 0 6px;color:#38bdf8;font-size:14px}
       #csc-bar{height:5px;background:#1e293b;border-radius:3px;margin:6px 0;overflow:hidden}
       #csc-fill{height:100%;width:0%;background:linear-gradient(90deg,#38bdf8,#818cf8);border-radius:3px;transition:width .3s}
@@ -60,7 +60,6 @@
     d.innerHTML += `<div class="l-${cls}">${m}</div>`;
     d.scrollTop = d.scrollHeight;
   };
-
   const upd = () => {
     const p = S.total > 0 ? Math.round((S.done / S.total) * 100) : 0;
     const fill = document.getElementById('csc-fill');
@@ -80,7 +79,7 @@
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ─────────────────────────────────────────────────────────────
-  // Text utilities + matching
+  // Text + scoring utilities
   // ─────────────────────────────────────────────────────────────
   function cleanText(s) {
     return String(s || '')
@@ -96,9 +95,7 @@
       'THE','A','AN','OF','AND','OR','TO','IN','ON','FOR','AT','BY','WITH',
       'LLC','INC','CORP','CORPORATION','CO','COMPANY','N','A','NA','FKA','AKA'
     ]);
-    return cleanText(s)
-      .split(' ')
-      .filter(t => t && t.length > 1 && !stop.has(t));
+    return cleanText(s).split(' ').filter(t => t && t.length > 1 && !stop.has(t));
   }
 
   // Dice coefficient (0..1)
@@ -116,13 +113,15 @@
     if (!s) return null;
     const str = String(s);
 
-    const m = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    // MM/DD/YYYY
+    const m = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (m) {
       const mm = Number(m[1]), dd = Number(m[2]), yy = Number(m[3]);
       const dt = new Date(yy, mm - 1, dd);
       return isNaN(dt.getTime()) ? null : dt;
     }
 
+    // YYYY-MM-DD
     const i = str.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (i) {
       const yy = Number(i[1]), mm = Number(i[2]), dd = Number(i[3]);
@@ -139,10 +138,10 @@
     return Math.round(ms / (1000 * 60 * 60 * 24));
   }
 
-  // Date proximity score (tolerant up to 120d)
+  // tolerant up to 120 days drift
   function dateScore(csvDate, siteDate) {
     const d = daysBetween(csvDate, siteDate);
-    if (d === null) return 0.15; // small non-zero if missing
+    if (d === null) return 0.15;
     const cap = 120;
     const x = Math.min(d, cap);
     return 1 - x / cap;
@@ -156,8 +155,8 @@
     return 'UNKNOWN';
   }
 
-  // Robust defendant parsing for NJ Courts Party Name tab.
-  // Your CSV recipient names are often "LAST FIRST" (no comma).
+  // Parse for NJ Courts Party Name tab:
+  // Your backend "primaryDefendant" is typically "LAST FIRST" for individuals, or entity name.
   function parseDef(name) {
     const s = cleanText(name);
     if (!s) return null;
@@ -170,7 +169,7 @@
 
     if (!cleaned) return null;
 
-    // Entity: search with whole string in last-name field
+    // entity → put full string in Last name field
     if (/\b(LLC|INC|CORP|CORPORATION|CO|COMPANY|BANK|TRUST|AGENCY|AUTHORITY|MORTGAGE|FINANCE|ASSOCIATION|ASSN|HOUSING|SERVICING|SERVICES)\b/.test(cleaned)) {
       return { last: cleaned, first: '', mid: '' };
     }
@@ -182,113 +181,30 @@
       return { last: lastPart.trim(), first: restParts[0] || '', mid: restParts[1] || '' };
     }
 
-    // "LAST FIRST" (your CSV convention)
+    // "LAST FIRST" (Camden parser uses Name as-is; often LAST FIRST)
     const parts = cleaned.split(' ').filter(Boolean);
     if (parts.length === 1) return { last: parts[0], first: '', mid: '' };
     return { last: parts[0], first: parts[1] || '', mid: parts[2] || '' };
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // CSV-row grouping using your Party Code rule:
-  // R = recipient (defendant)
-  // D = serving party (plaintiff)
-  // Group by Instr#
-  // ─────────────────────────────────────────────────────────────
-  function getInstrumentNumber(row) {
-    return (
-      row.instrumentNumber ||
-      row.instrument_number ||
-      row.instrument ||
-      row['Instr#'] ||
-      row['Instr #'] ||
-      row['Instr'] ||
-      ''
-    );
+  // Get values from your *server’s* case object shape (camden-enrichment.js)
+  function getInstrument(c) {
+    return c.instrumentNumber || c.instrument || c.instrNum || '';
   }
-
-  function getPartyCode(row) {
-    return String(row['Party Code'] || row.partyCode || row.party_code || '').trim().toUpperCase();
+  function getDefendant(c) {
+    // primaryDefendant is the best single defendant chosen by pipeline
+    // fallbacks just in case
+    return c.primaryDefendant || (Array.isArray(c.defendants) ? c.defendants[0] : '') || (Array.isArray(c.allDefendants) ? c.allDefendants[0] : '') || '';
   }
-
-  function getRowName(row) {
-    return String(row['Name'] || row.name || '').trim();
+  function getPlaintiff(c) {
+    return c.primaryPlaintiff || (Array.isArray(c.plaintiffs) ? c.plaintiffs[0] : '') || '';
   }
-
-  function getRowCrossName(row) {
-    return String(row['Cross Name'] || row.crossName || row.cross_name || '').trim();
-  }
-
-  function getRowDate(row) {
-    return parseAnyDate(row['Date'] || row.date || row.filingDate || row.filing_date || null);
-  }
-
-  function uniqJoin(names) {
-    const out = [];
-    const seen = new Set();
-    for (const n of (names || []).map(x => (x || '').trim()).filter(Boolean)) {
-      const key = cleanText(n);
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(n);
-      }
-    }
-    return out.join(' | ');
-  }
-
-  function groupRowsToCases(rawRows) {
-    const byInstr = new Map();
-
-    for (const row of rawRows || []) {
-      const instr = getInstrumentNumber(row);
-      if (!instr) continue;
-
-      if (!byInstr.has(instr)) {
-        byInstr.set(instr, {
-          instrumentNumber: instr,
-          filingDate: null,
-          defendants: [],
-          plaintiffs: [],
-          _rows: []
-        });
-      }
-
-      const grp = byInstr.get(instr);
-      grp._rows.push(row);
-
-      const pc = getPartyCode(row);
-      const name = getRowName(row);
-      const cross = getRowCrossName(row);
-
-      // Per your confirmed rule:
-      if (pc === 'R') {
-        if (name) grp.defendants.push(name);
-        // cross may contain plaintiff in some row formats; keep as optional extra signal
-        if (cross) grp.plaintiffs.push(cross);
-      } else if (pc === 'D') {
-        // Serving party often appears in Cross Name on your file
-        if (cross) grp.plaintiffs.push(cross);
-        if (name) grp.plaintiffs.push(name);
-      }
-
-      const dt = getRowDate(row);
-      if (!grp.filingDate && dt) grp.filingDate = dt;
-    }
-
-    const cases = [];
-    for (const grp of byInstr.values()) {
-      cases.push({
-        instrumentNumber: grp.instrumentNumber,
-        filingDate: grp.filingDate,
-        defendantName: uniqJoin(grp.defendants),
-        plaintiffName: uniqJoin(grp.plaintiffs),
-        _rows: grp._rows
-      });
-    }
-    return cases;
+  function getFilingDate(c) {
+    return parseAnyDate(c.filingDateISO) || parseAnyDate(c.filingDate) || null;
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Server save
+  // Save back to server
   // ─────────────────────────────────────────────────────────────
   async function save(instrumentNumber, courtData) {
     try {
@@ -303,8 +219,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Hidden IFRAME: all NJ Courts navigation happens here
-  // (so the dock never disappears)
+  // Hidden IFRAME (all NJ Courts navigation happens here)
   // ─────────────────────────────────────────────────────────────
   const oldFrame = document.getElementById('csc-hidden-frame');
   if (oldFrame) oldFrame.remove();
@@ -341,10 +256,7 @@
 
       let done = false;
       const finish = () => {
-        if (!done) {
-          done = true;
-          resolve();
-        }
+        if (!done) { done = true; resolve(); }
       };
 
       const obs = new MutationObserver((mutations) => {
@@ -428,8 +340,6 @@
     if (!btn) return null;
 
     btn.click();
-
-    // May trigger full navigation inside iframe
     await wait(250);
     await waitForFrameUpdate(25000);
     await wait(800);
@@ -439,9 +349,9 @@
 
   function extractRowSignals(rowEl) {
     const t = cleanText(rowEl ? rowEl.innerText : '');
-    const dates = t.match(/\d{2}\/\d{2}\/\d{4}/g) || [];
+    const dates = t.match(/\d{1,2}\/\d{1,2}\/\d{4}/g) || [];
     const firstDate = dates.length ? parseAnyDate(dates[0]) : null;
-    return { rowText: t, caption: t, firstDate };
+    return { caption: t, firstDate };
   }
 
   async function getDetailsInFrame(rowIdx) {
@@ -467,8 +377,8 @@
       disposition: gm(/Case Disposition:\s*(.+?)(?:\n|Case|Court|Venue|$)/),
       caseType: gm(/Case Type:\s*(.+?)(?:\n|Case|$)/),
       caption: gm(/Case Caption:\s*(.+?)(?:\n|Court|$)/),
-      initDate: gm(/Case Initiation Date:\s*(\d{2}\/\d{2}\/\d{4})/),
-      dispDate: gm(/Disposition Date:\s*(\d{2}\/\d{2}\/\d{4})/)
+      initDate: gm(/Case Initiation Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/),
+      dispDate: gm(/Disposition Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/)
     };
 
     await goBackToResultsInFrame();
@@ -478,22 +388,15 @@
     return details;
   }
 
-  // Best-match selection based on:
-  // - Defendant similarity
-  // - Plaintiff similarity
-  // - Date proximity (CSV filing date vs NJ Courts initiation date)
   async function pickBestMatch(table, caseObj) {
-    const d = frame.contentDocument;
-    if (!d || !table) return null;
-
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     if (!rows.length) return null;
 
-    const defName = caseObj.defendantName || '';
-    const plaintiff = caseObj.plaintiffName || '';
-    const csvDate = caseObj.filingDate || null;
+    const defName = getDefendant(caseObj) || '';
+    const plaintiff = getPlaintiff(caseObj) || '';
+    const csvDate = getFilingDate(caseObj);
 
-    // 1) quick scoring from row text
+    // quick score from table rows
     const prelim = rows
       .map((row, idx) => {
         const sig = extractRowSignals(row);
@@ -501,7 +404,7 @@
         const plSim = dice(plaintiff, sig.caption);
         const dScore = dateScore(csvDate, sig.firstDate);
         const score = (0.55 * defSim) + (0.30 * plSim) + (0.15 * dScore);
-        return { idx, score, defSim, plSim, dScore, firstDate: sig.firstDate };
+        return { idx, score, defSim, plSim, dScore };
       })
       .sort((a, b) => b.score - a.score);
 
@@ -510,7 +413,6 @@
 
     log(`  🔎 ${rows.length} results → checking top ${topK} jackets`, 'i');
 
-    // 2) refine by opening jackets
     let best = null;
 
     for (const cand of candidates) {
@@ -534,13 +436,12 @@
       );
 
       if (!best || finalScore > best.finalScore) {
-        best = { rowIdx: cand.idx, details, finalScore };
+        best = { details, finalScore };
       }
     }
 
     if (!best) return null;
 
-    // Low-confidence cutoff (adjust if you want it to always pick something)
     if (best.finalScore < 0.32) {
       return { notFound: true, best };
     }
@@ -549,7 +450,7 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Main: fetch rows → group by instrument → search NJ Courts
+  // Main
   // ─────────────────────────────────────────────────────────────
   log('🧱 Loading hidden NJ Courts session (iframe)...', 's');
 
@@ -562,31 +463,30 @@
 
   log('📡 Fetching cases from your server...', 's');
 
-  let rawRows = [];
+  let cases = [];
   try {
     const r = await fetch(`${SERVER}/api/camden?sortBy=daysSinceFiling&sortOrder=desc`, {
       headers: { 'X-Auth-Token': TOKEN }
     });
     const data = await r.json();
-    rawRows = (data.cases || []);
+    cases = (data.cases || []);
   } catch (e) {
     log(`❌ Could not fetch cases: ${e.message}`, 'err');
     return;
   }
 
-  // Group by Instr# using Party Code rule
-  let cases = groupRowsToCases(rawRows);
-
-  // (Optional) only keep ones missing status — but if server doesn’t store status on grouped,
-  // this won’t filter anything. Keeping them all is safe; you can re-enable if your server stores.
-  cases = cases.filter(c => c.instrumentNumber);
+  // Only check cases missing/unknown court status (supports multiple historical field names)
+  cases = cases.filter(c => {
+    const cs = c.courtStatus || c.court_status || c.court?.status || '';
+    return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
+  });
 
   if (TEST_MODE) cases = cases.slice(0, 10);
 
   S.total = cases.length;
   upd();
 
-  log(`✅ Loaded ${cases.length} instrument groups to check`, 'ok');
+  log(`✅ Loaded ${cases.length} cases to check`, 'ok');
 
   for (let i = 0; i < cases.length; i++) {
     if (window._cscStop) {
@@ -595,24 +495,21 @@
     }
 
     const c = cases[i];
-    const instr = c.instrumentNumber;
-    const defName = c.defendantName || '';
-    const plaintiff = c.plaintiffName || '';
-    const csvDate = c.filingDate || null;
+    const instr = getInstrument(c);
+    const defName = getDefendant(c);
+    const plaintiff = getPlaintiff(c);
+    const csvDate = getFilingDate(c);
 
-    log(`\n🔎 [${i + 1}/${cases.length}] ${instr}`, 's');
-    log(`  Defendant (R): ${defName || '(missing)'}`, 'i');
-    log(`  Plaintiff (D): ${plaintiff || '(missing)'}`, 'i');
-    if (csvDate) log(`  CSV Date: ${csvDate.toLocaleDateString()}`, 'i');
+    log(`\n🔎 [${i + 1}/${cases.length}] ${instr || '(no instrumentNumber)'}`, 's');
+    log(`  Defendant (primaryDefendant): ${defName || '(missing)'}`, 'i');
+    log(`  Plaintiff (primaryPlaintiff): ${plaintiff || '(missing)'}`, 'i');
+    if (csvDate) log(`  Filing date: ${csvDate.toLocaleDateString()}`, 'i');
 
-    // If multiple defendants, search using first (NJ Courts search works best this way)
-    const primaryDef = (defName.split('|')[0] || '').trim();
-    const parsed = parseDef(primaryDef);
-
+    const parsed = parseDef(defName);
     if (!parsed || !parsed.last) {
       S.e++; S.done++; upd();
-      log('  ❌ Could not parse defendant name (R)', 'err');
-      await save(instr, { status: 'ERROR', message: 'Could not parse defendant name (R)', defendantName: defName, plaintiffName: plaintiff });
+      log('  ❌ Could not parse primaryDefendant', 'err');
+      await save(instr, { status: 'ERROR', message: 'Could not parse primaryDefendant', primaryDefendant: defName, primaryPlaintiff: plaintiff });
       continue;
     }
 
@@ -628,7 +525,7 @@
     if (!rows || rows.length === 0) {
       S.n++; S.done++; upd();
       log('  ❌ No results found', 'w');
-      await save(instr, { status: 'NOT_FOUND', defendantName: defName, plaintiffName: plaintiff, filingDate: csvDate ? csvDate.toISOString() : null });
+      await save(instr, { status: 'NOT_FOUND', primaryDefendant: defName, primaryPlaintiff: plaintiff, filingDate: csvDate ? csvDate.toISOString() : null });
       continue;
     }
 
@@ -646,8 +543,8 @@
       await save(instr, {
         status: 'NOT_FOUND',
         message: `Low-confidence match score=${pick.best.finalScore.toFixed(3)}`,
-        defendantName: defName,
-        plaintiffName: plaintiff,
+        primaryDefendant: defName,
+        primaryPlaintiff: plaintiff,
         filingDate: csvDate ? csvDate.toISOString() : null
       });
       continue;
@@ -673,8 +570,8 @@
       initiationDate: details.initDate || '',
       dispositionDate: details.dispDate || '',
       matchScore: pick.best.finalScore,
-      defendantName: defName,
-      plaintiffName: plaintiff,
+      primaryDefendant: defName,
+      primaryPlaintiff: plaintiff,
       filingDate: csvDate ? csvDate.toISOString() : null
     });
 
