@@ -529,7 +529,7 @@ app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
 app.get('/api/camden/court-status-script', (req, res) => {
   const token = req.query.token || '';
   const testMode = req.query.test === 'true';
-  const serverUrl = `${req.protocol}://${req.get('host')}`;
+  const serverUrl = `https://${req.get('host')}`;
 
   const fs2 = require('fs');
   let script;
