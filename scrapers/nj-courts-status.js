@@ -89,7 +89,8 @@ async function launchBrowser() {
       '--disable-background-networking',
       '--disable-blink-features=AutomationControlled',
       '--js-flags=--max-old-space-size=256',
-      '--window-size=1920,1080'
+      '--window-size=1920,1080',
+      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
   });
 }
@@ -105,8 +106,53 @@ async function loginToNJCourts(page, username, password) {
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
     window.chrome = { runtime: {} };
+    const originalQuery = window.navigator.permissions?.query;
+    if (originalQuery) {
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+    }
   });
+
+  // Set realistic viewport
+  await page.setViewport({ width: 1920, height: 1080 });
+
+  // ============================================================
+  // INCAPSULA/IMPERVA WARM-UP
+  // The NJ Courts site uses Incapsula bot detection which runs
+  // a JavaScript challenge and sets session cookies. We need to:
+  // 1. Visit the domain and let the challenge JS execute
+  // 2. Wait long enough for cookies to be set
+  // 3. ONLY THEN proceed to login/search
+  // Without this, the CAPTCHA challenge fails on form submission.
+  // ============================================================
+  console.log('  🔄 Warming up session (Incapsula challenge)...');
+  
+  // Visit the portal root first to trigger Incapsula JS challenge
+  await page.goto('https://portal.njcourts.gov/', { 
+    waitUntil: 'networkidle0', 
+    timeout: 30000 
+  }).catch(() => {});
+  await delay(5000); // Let Incapsula JS run and set cookies
+
+  // Also warm up the search page domain
+  await page.goto(CONFIG.searchUrl, { 
+    waitUntil: 'networkidle0', 
+    timeout: 30000 
+  }).catch(() => {});
+  await delay(3000);
+
+  // Check if search page loaded (already authenticated)
+  let warmupText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+  if (warmupText.includes('Search For Case') || warmupText.includes('Party Name')) {
+    console.log('  ✅ Already logged in! Search page accessible.');
+    return true;
+  }
+  console.log('  ✅ Warm-up complete, proceeding to login...');
 
   // Step 1: Navigate to portal - it may redirect to login or straight to dashboard
   console.log('  → Navigating to portal.njcourts.gov...');
@@ -493,6 +539,49 @@ async function searchByPartyName(page, defendant) {
   // Wait for page to reload with results (JSF form submission)
   await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
   await delay(CONFIG.pageLoadWait);
+
+  // Check for CAPTCHA error - if detected, wait and retry once
+  const captchaCheck = await page.evaluate(() => document.body.innerText.includes('Captcha'));
+  if (captchaCheck) {
+    console.log('     ⚠ CAPTCHA detected! Waiting 30 seconds and retrying...');
+    await delay(30000);
+    
+    // Reload the page and try again
+    await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {});
+    await delay(5000);
+    
+    // Re-click tab and re-fill form
+    await page.evaluate(() => {
+      const tabLink = document.querySelector('a[href="#tabs-2"]');
+      if (tabLink) tabLink.click();
+    });
+    await delay(1000);
+    
+    await page.evaluate(({ last, first, middle }) => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      const lf = document.getElementById('searchByPartyNameForm:partyLName');
+      const ff = document.getElementById('searchByPartyNameForm:partyFName');
+      const mf = document.getElementById('searchByPartyNameForm:partyMName');
+      if (lf) { setter.call(lf, last); lf.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (ff) { setter.call(ff, first); ff.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (mf) { setter.call(mf, middle); mf.dispatchEvent(new Event('change', { bubbles: true })); }
+    }, { last: lastName, first: firstName, middle: middleName || '' });
+    
+    await delay(300);
+    await page.evaluate(() => {
+      const btn = document.getElementById('searchByPartyNameForm:btnPartyNameSearch');
+      if (btn) btn.click();
+    });
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+    await delay(CONFIG.pageLoadWait);
+    
+    // Check again
+    const stillCaptcha = await page.evaluate(() => document.body.innerText.includes('Captcha'));
+    if (stillCaptcha) {
+      console.log('     ❌ CAPTCHA still active after retry. Skipping.');
+      return [];
+    }
+  }
 
   // Extract results from the known table ID
   const results = await page.evaluate(() => {
