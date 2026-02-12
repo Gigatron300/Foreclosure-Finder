@@ -664,52 +664,71 @@
             document.getElementById('courtStatusTestBtn').innerHTML = '⚡ Status Test (10)';
         }
 
-        async function checkCourtStatus(testMode = false) {
-            const btn = document.getElementById('courtStatusBtn');
-            const testBtn = document.getElementById('courtStatusTestBtn');
-            btn.disabled = true;
-            testBtn.disabled = true;
-            btn.innerHTML = testMode ? '⏳ Testing...' : '⏳ Checking court status... (may take a few minutes)';
+async function checkCourtStatus(testMode = false) {
+    // Get the server URL for the script
+    const serverUrl = window.location.origin;
+    const scriptUrl = `${serverUrl}/api/camden/court-status-script?token=${encodeURIComponent(authToken)}${testMode ? '&test=true' : ''}`;
+    const command = `fetch('${scriptUrl}').then(r=>r.text()).then(eval)`;
 
-            try {
-                const r = await fetch('/api/camden/court-status', {
-                    method: 'POST',
-                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ testMode })
-                });
-                const result = await r.json();
+    // Show instruction modal
+    const existing = document.getElementById('courtStatusModal');
+    if (existing) existing.remove();
 
-                if (result.error && !result.status) {
-                    alert(result.error);
-                    resetButtons();
-                    return;
-                }
-                if (r.status === 429) { alert('Court status check already in progress.'); resetButtons(); return; }
+    const modal = document.createElement('div');
+    modal.id = 'courtStatusModal';
+    modal.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+            <div style="background:#1e293b;border-radius:12px;padding:24px;max-width:560px;width:90%;color:#e2e8f0;font-family:system-ui,sans-serif;border:1px solid #334155">
+                <h2 style="margin:0 0 12px;color:#38bdf8;font-size:1.2rem">⚖️ Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
+                <p style="color:#94a3b8;font-size:.9rem;margin:0 0 16px;line-height:1.5">
+                    This runs directly in your browser to avoid CAPTCHA blocks. Three steps:
+                </p>
+                <div style="margin-bottom:16px">
+                    <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
+                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">1</span>
+                        <div>
+                            <b style="color:#e2e8f0">Log into NJ Courts</b><br>
+                            <a href="https://portal.njcourts.gov" target="_blank" style="color:#38bdf8;font-size:.85rem">portal.njcourts.gov</a>
+                            <span style="color:#64748b;font-size:.85rem"> → Find a Case → Search Civil and Foreclosure Cases</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
+                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">2</span>
+                        <div>
+                            <b style="color:#e2e8f0">Open the console</b><br>
+                            <span style="color:#94a3b8;font-size:.85rem">Press <kbd style="background:#334155;padding:2px 6px;border-radius:3px;font-size:.8rem">F12</kbd> then click the <b>Console</b> tab</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:start">
+                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">3</span>
+                        <div>
+                            <b style="color:#e2e8f0">Paste this and press Enter:</b>
+                        </div>
+                    </div>
+                </div>
+                <div style="position:relative">
+                    <pre id="courtCmd" style="background:#0a0f1a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;color:#38bdf8;margin:0;white-space:pre-wrap;word-break:break-all;cursor:pointer" onclick="copyCourtCmd()" title="Click to copy">${command}</pre>
+                    <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">📋 Copy</button>
+                </div>
+                <p style="color:#64748b;font-size:.78rem;margin:8px 0 0;text-align:center">
+                    A progress panel will appear on the NJ Courts page. Results save automatically.
+                </p>
+                <div style="text-align:right;margin-top:12px">
+                    <button onclick="this.closest('#courtStatusModal').remove()" style="background:#334155;color:#94a3b8;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:.85rem">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
 
-                // Poll for completion
-                const check = async () => {
-                    const sr = await fetch('/api/camden/court-status/status', { headers: { 'X-Auth-Token': authToken } });
-                    const status = await sr.json();
-                    if (status.inProgress) {
-                        setTimeout(check, 4000);
-                    } else {
-                        resetButtons();
-                        loadData();
-                        if (status.lastStatus?.status === 'completed') {
-                            const s = status.lastStatus.courtStatusSummary || status.lastStatus;
-                            alert(`Done! ${s.matched || 0} cases matched. Open: ${s.openCases || 0}, Closed: ${s.closedCases || 0}`);
-                        } else if (status.lastStatus?.error) {
-                            alert('Error: ' + status.lastStatus.error);
-                        }
-                    }
-                };
-                setTimeout(check, 4000);
-            } catch (e) {
-                resetButtons();
-                alert('Error: ' + e.message);
-            }
-        }
-
+function copyCourtCmd() {
+    const text = document.getElementById('courtCmd').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('#courtStatusModal button[onclick="copyCourtCmd()"]');
+        if (btn) { btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 2000); }
+    });
+}
         function exportCSV() { window.open('/api/camden/export/csv', '_blank'); }
 
         function truncate(str, len) {
