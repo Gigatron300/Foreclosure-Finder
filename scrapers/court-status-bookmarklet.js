@@ -66,54 +66,45 @@
     const p = S.total > 0 ? Math.round((S.done / S.total) * 100) : 0;
     const fill = document.getElementById('csc-fill');
     const status = document.getElementById('csc-status');
-    if (fill) fill.style.width = p + '%';
-    if (status) status.textContent = `${S.done}/${S.total} (${p}%)`;
-    document.getElementById('cs-o').textContent = S.o;
-    document.getElementById('cs-c').textContent = S.c;
-    document.getElementById('cs-n').textContent = S.n;
-    document.getElementById('cs-e').textContent = S.e;
+    if (fill) fill.style.width = `${p}%`;
+    if (status) status.textContent = `${S.done} / ${S.total} (${p}%)`;
+    const eo = document.getElementById('cs-o');
+    const ec = document.getElementById('cs-c');
+    const en = document.getElementById('cs-n');
+    const ee = document.getElementById('cs-e');
+    if (eo) eo.textContent = S.o;
+    if (ec) ec.textContent = S.c;
+    if (en) en.textContent = S.n;
+    if (ee) ee.textContent = S.e;
   };
 
   // ─────────────────────────────────────────────────────────────
-  // Matching + parsing
+  // Helpers
   // ─────────────────────────────────────────────────────────────
-  function cleanText(s) {
-    return String(s || '')
-      .toUpperCase()
-      .replace(/&/g, ' AND ')
-      .replace(/[^\w\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function tokens(s) {
-    const stop = new Set([
-      'THE','A','AN','OF','AND','OR','TO','IN','ON','FOR','AT','BY','WITH',
-      'LLC','INC','CORP','CORPORATION','CO','COMPANY','N','A','NA','FKA','AKA'
-    ]);
-    return cleanText(s).split(' ').filter(t => t && t.length > 1 && !stop.has(t));
-  }
+  const cleanText = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
   function dice(a, b) {
-    const A = tokens(a);
-    const B = tokens(b);
-    if (!A.length || !B.length) return 0;
-    const setB = new Set(B);
+    const sa = cleanText(a), sb = cleanText(b);
+    if (!sa || !sb) return 0;
+    const bigrams = (s) => { const r = []; for (let i = 0; i < s.length - 1; i++) r.push(s.slice(i, i + 2)); return r; };
+    const ba = bigrams(sa), bb = bigrams(sb);
+    const setA = new Set(ba), setB = new Set(bb);
     let inter = 0;
-    for (const t of A) if (setB.has(t)) inter++;
-    return (2 * inter) / (A.length + B.length);
+    setA.forEach((x) => { if (setB.has(x)) inter++; });
+    return (2 * inter) / (ba.length + bb.length);
   }
 
-  function parseAnyDate(s) {
-    if (!s) return null;
-    const str = String(s);
-    const m = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (m) {
-      const mm = Number(m[1]), dd = Number(m[2]), yy = Number(m[3]);
-      const dt = new Date(yy, mm - 1, dd);
-      return isNaN(dt.getTime()) ? null : dt;
+  function parseAnyDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val) ? null : val;
+    const s = String(val).trim();
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) {
+      const dt = new Date(+mdy[3], +mdy[1] - 1, +mdy[2]);
+      return isNaN(dt) ? null : dt;
     }
-    return null;
+    const dt = new Date(s);
+    return isNaN(dt) ? null : dt;
   }
 
   function daysBetween(a, b) {
@@ -181,6 +172,10 @@
   function getPlaintiff(c) { return c.primaryPlaintiff || ''; }
   function getFilingDate(c) { return parseAnyDate(c.filingDateISO) || parseAnyDate(c.filingDate) || null; }
 
+  // ─────────────────────────────────────────────────────────────
+  // Save result to server
+  // FIX: Use "court" prefix on all field names to match dashboard
+  // ─────────────────────────────────────────────────────────────
   async function save(instrumentNumber, courtData) {
     try {
       await fetch(`${SERVER}/api/camden/court-status-update`, {
@@ -315,7 +310,8 @@
       caseCaption: pick(/Case Caption:\s*([^\n\r]+)/i),
       caseType: pick(/Case Type:\s*([^\n\r]+)/i),
       caseInitiationDate: pick(/Case Initiation Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
-      dispositionDate: pick(/Disposition Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i)
+      dispositionDate: pick(/Disposition Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
+      docketNumber: pick(/Docket Number:\s*([^\n\r]+)/i)
     };
   }
 
@@ -370,7 +366,7 @@
     return findResultsTable();
   }
 
-  // NEW: When multiple rows exist, click into each top row and decide using JACKET initiation date + caption
+  // When multiple rows exist, click into each top row and decide using JACKET initiation date + caption
   async function chooseBestByOpeningJackets(resultsTable, caseObj) {
     const rows = getRows(resultsTable);
     if (!rows.length) return { notFound: true, reason: 'No rows' };
@@ -445,8 +441,10 @@
     return;
   }
 
+  // Filter to only cases that haven't been checked yet
+  // FIX: Check for courtStatus field (with "court" prefix)
   cases = cases.filter(c => {
-    const cs = c.courtStatus || c.court_status || c.court?.status || '';
+    const cs = c.courtStatus || '';
     return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
   });
 
@@ -474,7 +472,11 @@
     if (!parsed || !parsed.last) {
       S.e++; S.done++; upd();
       log('  ❌ Could not parse defendant', 'err');
-      await save(instr, { status: 'ERROR', message: 'Could not parse defendant', primaryDefendant: defName, primaryPlaintiff: plaintiff });
+      // FIX: Use courtStatus field name (with "court" prefix)
+      await save(instr, { 
+        courtStatus: 'ERROR', 
+        courtStatusNote: 'Could not parse defendant name'
+      });
       continue;
     }
 
@@ -482,7 +484,11 @@
     if (!table) {
       S.e++; S.done++; upd();
       log('  ❌ Search failed (no results table)', 'err');
-      await save(instr, { status: 'ERROR', message: 'Search failed (no results table)' });
+      // FIX: Use courtStatus field name (with "court" prefix)
+      await save(instr, { 
+        courtStatus: 'ERROR', 
+        courtStatusNote: 'Search failed - no results table returned'
+      });
       continue;
     }
 
@@ -490,7 +496,11 @@
     if (choice.notFound) {
       S.n++; S.done++; upd();
       log(`  ❌ NOT_FOUND (${choice.reason})`, 'w');
-      await save(instr, { status: 'NOT_FOUND', message: choice.reason, primaryDefendant: defName, primaryPlaintiff: plaintiff, filingDate: csvDate ? csvDate.toISOString() : null });
+      // FIX: Use courtStatus field name (with "court" prefix)
+      await save(instr, { 
+        courtStatus: 'NOT_FOUND', 
+        courtStatusNote: choice.reason
+      });
       continue;
     }
 
@@ -505,19 +515,18 @@
 
     log(`  ✅ Jacket: status="${j.caseStatus}" disposition="${j.caseDisposition}" → ${cls.normalized}`, 'ok');
 
+    // FIX: Use "court" prefix on ALL field names to match dashboard expectations
     await save(instr, {
-      status: cls.normalized,
-      useful: cls.useful,
-      rawStatus: j.caseStatus || '',
-      disposition: j.caseDisposition || '',
-      caseType: j.caseType || '',
-      caption: j.caseCaption || '',
-      initiationDate: j.caseInitiationDate || '',
-      dispositionDate: j.dispositionDate || '',
-      matchScore: choice.best.finalScore || null,
-      primaryDefendant: defName,
-      primaryPlaintiff: plaintiff,
-      filingDate: csvDate ? csvDate.toISOString() : null
+      courtStatus: cls.normalized,
+      courtStatusRaw: j.caseStatus || '',
+      courtDisposition: j.caseDisposition || '',
+      courtCaseType: j.caseType || '',
+      courtCaseCaption: j.caseCaption || '',
+      courtFiledDate: j.caseInitiationDate || '',
+      courtDispositionDate: j.dispositionDate || '',
+      courtDocketNumber: j.docketNumber || '',
+      courtMatchScore: choice.best.finalScore || null,
+      courtStatusNote: `Matched with score ${(choice.best.finalScore * 100).toFixed(0)}%`
     });
 
     await wait(DELAY);
