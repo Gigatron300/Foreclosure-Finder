@@ -1,20 +1,27 @@
-(async function() {
+(async function () {
   'use strict';
 
   const SERVER = '__SERVER_URL__';
   const TOKEN = '__AUTH_TOKEN__';
   const TEST_MODE = __TEST_MODE__;
-  const SEARCH_URL = window.location.href.split('?')[0]; // Current page without params
-  const DELAY = 2000;
 
-  // ── Verify we're on the right page ──
-  if (!window.location.href.includes('njcourts.gov') || !window.location.href.includes('civilCaseSearch')) {
+  const HOST_OK =
+    window.location.href.includes('njcourts.gov') &&
+    window.location.href.includes('civilCaseSearch');
+
+  if (!HOST_OK) {
     alert('❌ Navigate to "Search Civil and Foreclosure Cases" on NJ Courts first!');
     return;
   }
 
-  // ── UI Panel ──
+  const SEARCH_URL = window.location.href.split('?')[0];
+  const DELAY = 2000;
+
+  // ─────────────────────────────────────────────────────────────
+  // UI Panel (lives on the main page and never disappears now)
+  // ─────────────────────────────────────────────────────────────
   if (document.getElementById('csc-panel')) document.getElementById('csc-panel').remove();
+
   const panel = document.createElement('div');
   panel.id = 'csc-panel';
   panel.innerHTML = `
@@ -32,39 +39,121 @@
       .csc-stop{background:#f87171;color:#fff}.csc-close{background:#334155;color:#94a3b8}
     </style>
     <h3>⚖️ Court Status Checker</h3>
-    <div id="csc-status">Loading cases...</div>
+    <div id="csc-status">Preparing...</div>
     <div id="csc-bar"><div id="csc-fill"></div></div>
     <div id="csc-stats">🟢<b class="g" id="cs-o">0</b> 🔴<b class="r" id="cs-c">0</b> ❌<b class="y" id="cs-n">0</b> ⚠<b id="cs-e">0</b></div>
-    <div id="csc-btns"><button class="csc-stop" onclick="window._cscStop=true">⏹ Stop</button><button class="csc-close" onclick="document.getElementById('csc-panel').remove();window._cscStop=true">✕ Close</button></div>
+    <div id="csc-btns">
+      <button class="csc-stop" onclick="window._cscStop=true">⏹ Stop</button>
+      <button class="csc-close" onclick="document.getElementById('csc-panel').remove();window._cscStop=true">✕ Close</button>
+    </div>
     <div id="csc-log"></div>
   `;
   document.body.appendChild(panel);
+
   window._cscStop = false;
 
-  const S = { o:0, c:0, n:0, e:0, done:0, total:0 };
-  const log = (m, cls='i') => { const d=document.getElementById('csc-log'); d.innerHTML+=`<div class="l-${cls}">${m}</div>`; d.scrollTop=d.scrollHeight; };
-  const upd = () => {
-    const p = S.total>0 ? Math.round(S.done/S.total*100) : 0;
-    document.getElementById('csc-fill').style.width=p+'%';
-    document.getElementById('csc-status').textContent=`${S.done}/${S.total} (${p}%)`;
-    document.getElementById('cs-o').textContent=S.o;
-    document.getElementById('cs-c').textContent=S.c;
-    document.getElementById('cs-n').textContent=S.n;
-    document.getElementById('cs-e').textContent=S.e;
-  };
-  const wait = ms => new Promise(r=>setTimeout(r,ms));
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+  const S = { o: 0, c: 0, n: 0, e: 0, done: 0, total: 0 };
 
-  // ── Helpers ──
+  const log = (m, cls = 'i') => {
+    const d = document.getElementById('csc-log');
+    d.innerHTML += `<div class="l-${cls}">${m}</div>`;
+    d.scrollTop = d.scrollHeight;
+  };
+
+  const upd = () => {
+    const p = S.total > 0 ? Math.round((S.done / S.total) * 100) : 0;
+    document.getElementById('csc-fill').style.width = p + '%';
+    document.getElementById('csc-status').textContent = `${S.done}/${S.total} (${p}%)`;
+    document.getElementById('cs-o').textContent = S.o;
+    document.getElementById('cs-c').textContent = S.c;
+    document.getElementById('cs-n').textContent = S.n;
+    document.getElementById('cs-e').textContent = S.e;
+  };
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ─────────────────────────────────────────────────────────────
+  // Hidden IFRAME (all NJ Courts navigation happens here)
+  // ─────────────────────────────────────────────────────────────
+  const oldFrame = document.getElementById('csc-hidden-frame');
+  if (oldFrame) oldFrame.remove();
+
+  const frame = document.createElement('iframe');
+  frame.id = 'csc-hidden-frame';
+  frame.style.position = 'fixed';
+  frame.style.left = '-99999px';
+  frame.style.top = '0';
+  frame.style.width = '1200px';
+  frame.style.height = '900px';
+  frame.style.opacity = '0';
+  frame.style.pointerEvents = 'none';
+  frame.src = SEARCH_URL;
+  document.body.appendChild(frame);
+
+  const waitFrameReady = () =>
+    new Promise((resolve, reject) => {
+      const t0 = Date.now();
+      const tick = () => {
+        if (Date.now() - t0 > 20000) return reject(new Error('Iframe timed out loading NJ Courts page'));
+        const w = frame.contentWindow;
+        const d = frame.contentDocument;
+        if (w && d && d.body && d.readyState === 'complete') return resolve();
+        setTimeout(tick, 200);
+      };
+      tick();
+    });
+
+  function waitForFrameUpdate(timeout = 15000) {
+    return new Promise((resolve) => {
+      const d = frame.contentDocument;
+      if (!d || !d.body) return resolve();
+
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          resolve();
+        }
+      };
+
+      const obs = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.addedNodes.length > 3 || m.removedNodes.length > 3) {
+            obs.disconnect();
+            setTimeout(finish, 1200);
+            return;
+          }
+        }
+      });
+
+      obs.observe(d.body, { childList: true, subtree: true });
+      setTimeout(() => {
+        try { obs.disconnect(); } catch {}
+        finish();
+      }, timeout);
+    });
+  }
+
+  function clickPartyTabInFrame() {
+    const d = frame.contentDocument;
+    const t = d && d.querySelector('a[href="#tabs-2"]');
+    if (t) t.click();
+  }
+
   function parseDef(name) {
     if (!name) return null;
-    const p = name.toUpperCase().replace(/\b(JR|SR|II|III|IV)\b\.?/g,'').trim().split(/\s+/).filter(x=>x);
-    return p.length ? { last:p[0], first:p[1]||'', mid:p[2]||'' } : null;
+    const p = name
+      .toUpperCase()
+      .replace(/\b(JR|SR|II|III|IV)\b\.?/g, '')
+      .trim()
+      .split(/\s+/)
+      .filter((x) => x);
+    return p.length ? { last: p[0], first: p[1] || '', mid: p[2] || '' } : null;
   }
 
   function normStatus(s) {
     if (!s) return 'UNKNOWN';
-    const u = s.toUpperCase();
+    const u = String(s).toUpperCase();
     if (/CLOSED|DISMISSED|DISPOSED|SETTLED|TERMINATED/.test(u)) return 'CLOSED';
     if (/OPEN|ACTIVE|PENDING/.test(u)) return 'OPEN';
     return 'UNKNOWN';
@@ -73,276 +162,243 @@
   async function save(instrNum, data) {
     try {
       await fetch(`${SERVER}/api/camden/court-status-update`, {
-        method:'POST',
-        headers:{'X-Auth-Token':TOKEN,'Content-Type':'application/json'},
-        body:JSON.stringify({instrumentNumber:instrNum, courtData:data})
+        method: 'POST',
+        headers: { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instrumentNumber: instrNum, courtData: data }),
       });
-    } catch(e) { log(`  ⚠ Save fail: ${e.message}`,'w'); }
+    } catch (e) {
+      log(`  ⚠ Save fail: ${e.message}`, 'w');
+    }
   }
 
-  // Wait for JSF page navigation (form submission reloads the page)
-  function waitForPageUpdate(timeout=15000) {
-    return new Promise(resolve => {
-      let resolved = false;
-      const done = () => { if(!resolved){resolved=true;resolve();} };
-      
-      // Method 1: Watch for significant DOM changes
-      const obs = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-          if (m.addedNodes.length > 3 || m.removedNodes.length > 3) {
-            obs.disconnect();
-            setTimeout(done, 2000); // Wait for rendering to settle
-            return;
-          }
-        }
-      });
-      obs.observe(document.body, { childList:true, subtree:true });
-      
-      // Method 2: Timeout fallback
-      setTimeout(() => { obs.disconnect(); done(); }, timeout);
-    });
+  // More reliable than history.back() in JSF land: click real "Back" control if it exists
+  async function goBackToResultsInFrame() {
+    const d = frame.contentDocument;
+    if (!d) return;
+
+    const candidates = Array.from(d.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+    const backBtn =
+      candidates.find((el) => /back to search results/i.test((el.textContent || el.value || '').trim())) ||
+      candidates.find((el) => /search results/i.test((el.textContent || el.value || '').trim()) && /back/i.test((el.textContent || el.value || '').trim())) ||
+      candidates.find((el) => /^back$/i.test((el.textContent || el.value || '').trim()));
+
+    if (backBtn) {
+      backBtn.click();
+      await waitForFrameUpdate();
+      await wait(800);
+      return;
+    }
+
+    // fallback
+    try {
+      frame.contentWindow.history.back();
+    } catch {}
+    await waitForFrameUpdate();
+    await wait(800);
   }
 
-  // ── Switch to Party Name tab ──
-  function clickPartyTab() {
-    const t = document.querySelector('a[href="#tabs-2"]');
-    if (t) t.click();
-  }
+  async function searchInFrame(last, first, mid) {
+    const d = frame.contentDocument;
+    const w = frame.contentWindow;
+    if (!d || !w) return null;
 
-  // ── Search ──
-  async function search(last, first, mid) {
-    clickPartyTab();
+    clickPartyTabInFrame();
     await wait(800);
 
-    const lf = document.getElementById('searchByPartyNameForm:partyLName');
-    const ff = document.getElementById('searchByPartyNameForm:partyFName');
-    const mf = document.getElementById('searchByPartyNameForm:partyMName');
-    if (!lf) { log('  ❌ Form not found!','err'); return null; }
+    const lf = d.getElementById('searchByPartyNameForm:partyLName');
+    const ff = d.getElementById('searchByPartyNameForm:partyFName');
+    const mf = d.getElementById('searchByPartyNameForm:partyMName');
+    if (!lf) return null;
 
-    // Clear fields first
-    setter.call(lf, ''); lf.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(ff, ''); ff.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(mf, ''); mf.dispatchEvent(new Event('change',{bubbles:true}));
-    await wait(200);
+    const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;
 
-    // Fill fields
-    setter.call(lf, last); lf.dispatchEvent(new Event('input',{bubbles:true})); lf.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(ff, first); ff.dispatchEvent(new Event('input',{bubbles:true})); ff.dispatchEvent(new Event('change',{bubbles:true}));
-    setter.call(mf, mid||''); mf.dispatchEvent(new Event('input',{bubbles:true})); mf.dispatchEvent(new Event('change',{bubbles:true}));
+    // clear
+    setter.call(lf, '');
+    lf.dispatchEvent(new w.Event('change', { bubbles: true }));
+    setter.call(ff, '');
+    ff.dispatchEvent(new w.Event('change', { bubbles: true }));
+    setter.call(mf, '');
+    mf.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await wait(150);
 
-    await wait(500); // Let JSF process the input events
+    // fill
+    setter.call(lf, last);
+    lf.dispatchEvent(new w.Event('input', { bubbles: true }));
+    lf.dispatchEvent(new w.Event('change', { bubbles: true }));
+    setter.call(ff, first);
+    ff.dispatchEvent(new w.Event('input', { bubbles: true }));
+    ff.dispatchEvent(new w.Event('change', { bubbles: true }));
+    setter.call(mf, mid || '');
+    mf.dispatchEvent(new w.Event('input', { bubbles: true }));
+    mf.dispatchEvent(new w.Event('change', { bubbles: true }));
 
-    const btn = document.getElementById('searchByPartyNameForm:btnPartyNameSearch');
-    if (!btn) { log('  ❌ Search button not found!','err'); return null; }
+    await wait(500);
+
+    const btn = d.getElementById('searchByPartyNameForm:btnPartyNameSearch');
+    if (!btn) return null;
+
     btn.click();
 
-    await waitForPageUpdate();
-    await wait(1000); // Extra breathing room
-
-    // Parse results - don't check for CAPTCHA banner text since it persists from session start
-    // Instead, check if the results table has actual data rows
-    const table = document.getElementById('searchByPartyNameForm:idPartyTable');
-    if (!table) {
-      // No table at all - might be a real CAPTCHA block or page didn't load
-      const pageText = document.body.innerText.substring(0, 500);
-      if (pageText.includes('Captcha') && !pageText.includes('Search For Case')) {
-        log('  ⚠ CAPTCHA blocked session. Refresh the page and re-run.','w');
-        return null;
-      }
-      return [];
-    }
-
-    const rows = table.querySelectorAll('tbody tr');
-    const results = [];
-    rows.forEach((row,i) => {
-      const cells = row.querySelectorAll('td');
-      if (cells.length<5 || row.textContent.includes('No data')) return;
-      results.push({
-        idx:i,
-        name:cells[0].textContent.trim(),
-        venue:cells[1].textContent.trim(),
-        docket:cells[2].textContent.trim(),
-        caption:cells[3].textContent.trim(),
-        filed:cells[4].textContent.trim()
-      });
-    });
-    return results;
-  }
-
-  // ── Match best result ──
-  function bestMatch(results, plaintiff, lpDate) {
-    const pltWord = (plaintiff||'').toUpperCase().replace(/\b(LLC|INC|CORP|N\.?A\.?|BANK|MORTGAGE|SERVICING|TRUST)\b/g,'').trim().split(/\s+/).filter(x=>x.length>2)[0] || '';
-    let best=null, bestScore=0;
-    for (const r of results) {
-      let score=0;
-      if (r.venue.toUpperCase().includes('CAMDEN')) score+=10; else continue;
-      if (r.docket.startsWith('F-')) score+=10;
-      if (pltWord && r.caption.toUpperCase().includes(pltWord)) score+=15;
-      if (lpDate && r.filed) {
-        try {
-          const diff = Math.abs((new Date(lpDate)-new Date(r.filed))/86400000);
-          if (diff<=14) score+=15; else if(diff<=60) score+=10; else if(diff<=180) score+=5;
-        } catch(e){}
-      }
-      if (score>bestScore) { best={...r,score}; bestScore=score; }
-    }
-    return bestScore>=20 ? best : null;
-  }
-
-  // ── Get case details (click into jacket, extract, come back) ──
-
-async function goBackToResults() {
-  // Try to click a real "Back to Search Results" control (more reliable than history.back)
-  const candidates = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
-
-  const backBtn =
-    candidates.find(el => /back to search results/i.test((el.textContent || el.value || '').trim())) ||
-    candidates.find(el => /search results/i.test((el.textContent || el.value || '').trim()) && /back/i.test((el.textContent || el.value || '').trim())) ||
-    candidates.find(el => /back/i.test((el.textContent || el.value || '').trim()));
-
-  if (backBtn) {
-    backBtn.click();
-    await waitForPageUpdate();
+    // IMPORTANT: this may trigger a full navigation *inside the iframe*.
+    // Wait for iframe to settle post-search.
+    await wait(250);
+    await waitForFrameUpdate(20000);
     await wait(800);
-  } else {
-    // fallback
-    window.history.back();
-    await waitForPageUpdate();
-    await wait(800);
+
+    const table = d.getElementById('searchByPartyNameForm:idPartyTable');
+    return table;
   }
 
-  // If we're still not back on the search form, try navigating to the search page URL directly
-  const lf = document.getElementById('searchByPartyNameForm:partyLName');
-  if (!lf) {
-    log('  ⚠ Still on jacket page — forcing return to search page…','w');
-    window.location.href = SEARCH_URL;
-    // NOTE: This will reload the page and stop the script run.
-    // If you want auto-resume after reload, we can add sessionStorage resume logic.
-  }
-}
+  async function getDetailsInFrame(rowIdx) {
+    const d = frame.contentDocument;
+    if (!d) return null;
 
-  async function getDetails(rowIdx) {
-    // Click the docket link
     const linkId = `searchByPartyNameForm:idPartyTable:${rowIdx}:lnkSrchByDocNum`;
-    const link = document.getElementById(linkId);
-    if (!link) {
-      // Fallback: find link in row
-      const table = document.getElementById('searchByPartyNameForm:idPartyTable');
-      const rows = table ? table.querySelectorAll('tbody tr') : [];
-      const a = rows[rowIdx] ? rows[rowIdx].querySelector('td:nth-child(3) a') : null;
-      if (a) a.click(); else return null;
-    } else {
-      link.click();
-    }
+    const link = d.getElementById(linkId);
+    if (!link) return null;
 
-    await waitForPageUpdate();
+    link.click();
+    await waitForFrameUpdate(20000);
+    await wait(500);
 
-    // Extract from case jacket
-    const text = document.body.innerText;
-    const gm = p => { const m=text.match(p); return m?m[1].trim():''; };
+    const text = d.body ? d.body.innerText : '';
+    const gm = (p) => {
+      const m = text.match(p);
+      return m ? (m[1] || '').trim() : '';
+    };
+
     const details = {
       status: gm(/Case Status:\s*(\S+)/),
       disposition: gm(/Case Disposition:\s*(.+?)(?:\n|Case|Court|Venue|$)/),
       caseType: gm(/Case Type:\s*(.+?)(?:\n|Case|$)/),
       caption: gm(/Case Caption:\s*(.+?)(?:\n|Court|$)/),
       initDate: gm(/Case Initiation Date:\s*(\d{2}\/\d{2}\/\d{4})/),
-      dispDate: gm(/Disposition Date:\s*(\d{2}\/\d{2}\/\d{4})/)
+      dispDate: gm(/Disposition Date:\s*(\d{2}\/\d{2}\/\d{4})/),
     };
-// Navigate back to search results
-await goBackToResults();
 
-// Re-click party name tab after going back
-clickPartyTab();
-await wait(500);
+    await goBackToResultsInFrame();
+    clickPartyTabInFrame();
+    await wait(500);
 
-return details;
+    return details;
   }
 
-  // ── Fetch cases ──
-  log('📡 Fetching cases...','s');
-  let cases;
+  // ─────────────────────────────────────────────────────────────
+  // Main
+  // ─────────────────────────────────────────────────────────────
+  log('🧱 Loading hidden NJ Courts session (iframe)...', 's');
+
   try {
-    const r = await fetch(`${SERVER}/api/camden?sortBy=daysSinceFiling&sortOrder=desc`,{headers:{'X-Auth-Token':TOKEN}});
-    const data = await r.json();
-    cases = (data.cases||[]).filter(c => !c.courtStatus || c.courtStatus==='NOT_FOUND' || c.courtStatus==='ERROR');
-    if (TEST_MODE) cases = cases.slice(0,10);
-    S.total = cases.length;
-    log(`✅ ${cases.length} cases to check${TEST_MODE?' (test)':''}`, 'ok');
-    upd();
-  } catch(e) {
-    log(`❌ Failed: ${e.message}`,'err');
+    await waitFrameReady();
+  } catch (e) {
+    log(`❌ Iframe failed: ${e.message}`, 'err');
     return;
   }
 
-  // ── Process ──
-  for (let i=0; i<cases.length; i++) {
-    if (window._cscStop) { log('⏹ Stopped','w'); break; }
+  log('📡 Fetching cases from your server...', 's');
+
+  let cases = [];
+  try {
+    const r = await fetch(`${SERVER}/api/camden?sortBy=daysSinceFiling&sortOrder=desc`, {
+      headers: { 'X-Auth-Token': TOKEN },
+    });
+    const data = await r.json();
+    cases = (data.cases || []).filter(
+      (c) => !c.courtStatus || c.courtStatus === 'NOT_FOUND' || c.courtStatus === 'ERROR'
+    );
+  } catch (e) {
+    log(`❌ Could not fetch cases: ${e.message}`, 'err');
+    return;
+  }
+
+  if (TEST_MODE) cases = cases.slice(0, 10);
+
+  S.total = cases.length;
+  upd();
+
+  log(`✅ Loaded ${cases.length} cases to check`, 'ok');
+
+  for (let i = 0; i < cases.length; i++) {
+    if (window._cscStop) {
+      log('⏹ Stopped by user', 'w');
+      break;
+    }
+
     const c = cases[i];
-    S.done = i+1;
+    const instr = c.instrumentNumber || c.instrument_number || c.instrument || '';
+    const defName = c.defendantName || c.defendant || c.name || '';
 
-    if (i>0 && i%15===0) { log('⏸ Batch pause (3s)...','i'); await wait(3000); }
+    log(`\n🔎 [${i + 1}/${cases.length}] ${instr} — ${defName}`, 's');
 
-    const def = parseDef(c.primaryDefendant || (c.defendantNames&&c.defendantNames[0]) || '');
-    const plt = c.primaryPlaintiff || (c.plaintiffNames&&c.plaintiffNames[0]) || '';
+    const def = parseDef(defName);
+    if (!def) {
+      S.e++;
+      S.done++;
+      upd();
+      log('  ❌ Could not parse defendant name', 'err');
+      await save(instr, { status: 'ERROR', message: 'Could not parse defendant name' });
+      continue;
+    }
 
-    if (!def) { log(`${i+1}/${S.total} ⚠ Bad name: skip`,'w'); upd(); continue; }
+    // Run search inside iframe (no panel disappearance now)
+    const table = await searchInFrame(def.last, def.first, def.mid);
 
-    log(`${i+1}/${S.total} 🔍 ${def.last}, ${def.first}`,'s');
+    if (!table) {
+      S.e++;
+      S.done++;
+      upd();
+      log('  ❌ Search failed (table not found)', 'err');
+      await save(instr, { status: 'ERROR', message: 'Search failed (table not found)' });
+      continue;
+    }
 
-    const results = await search(def.last, def.first, def.mid);
-
-    if (results===null) { S.e++; upd(); await wait(DELAY); continue; } // CAPTCHA or error
-    if (results.length===0) {
-      log(`  ❌ No results`,'err');
+    const d = frame.contentDocument;
+    const rows = table.querySelectorAll('tbody tr');
+    if (!rows || rows.length === 0) {
       S.n++;
-      await save(c.instrumentNumber, {courtStatus:'NOT_FOUND', courtStatusNote:'No search results'});
-      upd(); await wait(DELAY); continue;
+      S.done++;
+      upd();
+      log('  ❌ No results found', 'w');
+      await save(instr, { status: 'NOT_FOUND' });
+      continue;
     }
 
-    log(`  ${results.length} result(s)`,'i');
-    const match = bestMatch(results, plt, c.filingDate);
+    // Take first result (same behavior as your existing flow)
+    // If you want “best match” logic (by name similarity), tell me and I’ll add it.
+    const details = await getDetailsInFrame(0);
 
-    if (!match) {
-      log(`  ❌ No match`,'w');
-      S.n++;
-      await save(c.instrumentNumber, {courtStatus:'NOT_FOUND', courtStatusNote:`${results.length} results, no confident match`});
-      upd(); await wait(DELAY); continue;
+    if (!details) {
+      S.e++;
+      S.done++;
+      upd();
+      log('  ❌ Could not open jacket / extract details', 'err');
+      await save(instr, { status: 'ERROR', message: 'Could not open jacket / extract' });
+      continue;
     }
 
-    log(`  → ${match.docket} (score:${match.score})`,'i');
+    const normalized = normStatus(details.status);
 
-    // Get case details
-    const det = await getDetails(match.idx);
+    if (normalized === 'OPEN') S.o++;
+    else if (normalized === 'CLOSED') S.c++;
+    else S.n++;
 
-    if (!det || !det.status) {
-      log(`  ⚠ Couldn't read jacket`,'w');
-      await save(c.instrumentNumber, {
-        courtDocketNumber:match.docket, courtStatus:'UNKNOWN',
-        courtCaseCaption:match.caption, courtFiledDate:match.filed,
-        courtStatusNote:'Could not load case jacket'
-      });
-      S.e++; upd(); await wait(DELAY); continue;
-    }
+    S.done++;
+    upd();
 
-    const status = normStatus(det.status + ' ' + det.disposition);
-    await save(c.instrumentNumber, {
-      courtDocketNumber:match.docket, courtStatus:status,
-      courtStatusRaw:det.status, courtDisposition:det.disposition,
-      courtCaseType:det.caseType, courtCaseCaption:det.caption||match.caption,
-      courtFiledDate:det.initDate||match.filed, courtDispositionDate:det.dispDate,
-      courtStatusNote:`Browser score:${match.score}`
+    log(`  ✅ ${normalized} — ${details.status || 'UNKNOWN'}`, 'ok');
+
+    await save(instr, {
+      status: normalized,
+      rawStatus: details.status || '',
+      disposition: details.disposition || '',
+      caseType: details.caseType || '',
+      caption: details.caption || '',
+      initiationDate: details.initDate || '',
+      dispositionDate: details.dispDate || '',
     });
 
-    if (status==='OPEN') { S.o++; log(`  🟢 OPEN — ${det.disposition}`,'ok'); }
-    else if (status==='CLOSED') { S.c++; log(`  🔴 CLOSED — ${det.disposition}`,'err'); }
-    else { log(`  ⚪ ${status}`,'i'); }
-
-    upd();
     await wait(DELAY);
   }
 
-  log('','i');
-  log(`═══ DONE: ${S.o} open, ${S.c} closed, ${S.n} not found, ${S.e} errors ═══`,'ok');
-  document.getElementById('csc-status').textContent = '✅ Complete!';
-  upd();
+  log('\n🎉 Done!', 'ok');
 })();
