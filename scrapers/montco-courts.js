@@ -101,10 +101,237 @@ function parseDate(dateStr) {
   return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
 }
 
-function calculateScore(c) {
-  // Legacy function - kept for compatibility
-  return calculateEnhancedScore(c);
+function calculateV3Score(c) {
+  // V3: 4-pillar scoring (Pressure, Resistance, Momentum, Fatigue)
+  // Goal: reduce double-counting and separate procedural noise from true leverage signals.
+  const docket = c.docket || {};
+  const entries = docket.entries || 0;
+  const docketText = (docket.allText || '').toUpperCase();
+  const docketTypes = (docket.allTypes || '').toUpperCase();
+  const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
+  const lastEventText = (docket.lastEventText || '').toUpperCase();
+  const lastEventType = (docket.lastEventType || '').toUpperCase();
+
+  const factors = [];
+  const push = (text, impact) => factors.push({ text, impact });
+
+  // Helpers
+  const includesAny = (hay, needles) => needles.some(n => hay.includes(n));
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+
+  const daysOpen = c.daysOpen || 0;
+
+  // ------------------------------------------------------------
+  // Pillar 1: PRESSURE STAGE (0–30)
+  // ------------------------------------------------------------
+  let pressure = 0;
+
+  // Age band (max 20)
+  if (daysOpen < 120) pressure += 0;
+  else if (daysOpen < 180) pressure += 5;
+  else if (daysOpen < 270) pressure += 12;
+  else if (daysOpen <= 540) pressure += 20;
+  else if (daysOpen <= 720) pressure += 15;
+  else pressure += 8;
+
+  push('🧱 Pressure: case age band', pressure);
+
+  // Acceleration events (max 10, but plaintiff MSJ granted can push toward the cap quickly)
+  let accel = 0;
+
+  const hasStayLifted = includesAny(docketText, ['STAY IS LIFTED', 'STAY LIFTED']);
+  const hasBkDischarge = docketText.includes('DISCHARGE') && docketText.includes('BANKRUPTCY');
+  const hasMSJ = docketText.includes('SUMMARY JUDGMENT') || docketTypes.includes('SUMMARY JUDGMENT');
+
+  // Plaintiff MSJ heuristics
+  const plaintiffToken = (c.plaintiff || '').toUpperCase().split(/\s+/).filter(Boolean)[0] || '';
+  const likelyPlaintiffMSJ =
+    hasMSJ && (
+      docketText.includes("PLT'S") ||
+      docketText.includes("PLTF") ||
+      docketText.includes('PLAINTIFF') ||
+      docketText.includes('BY PLAINTIFF') ||
+      docketText.includes("PLAINTIFF'S") ||
+      (plaintiffToken && docketText.includes(plaintiffToken))
+    );
+
+  const plaintiffMSJGranted = likelyPlaintiffMSJ && docketText.includes('GRANTED');
+  const plaintiffMSJFiled = likelyPlaintiffMSJ && !plaintiffMSJGranted;
+
+  if (hasStayLifted) accel += 5;
+  if (hasBkDischarge) accel += 5;
+  if (plaintiffMSJFiled) accel += 5;
+  if (plaintiffMSJGranted) accel += 10;
+
+  accel = clamp(accel, 0, 10);
+  if (accel) push('🧱 Pressure: acceleration events', accel);
+  pressure = clamp(pressure + accel, 0, 30);
+
+  // ------------------------------------------------------------
+  // Pillar 2: RESISTANCE LEVEL (−20 to +10)
+  // ------------------------------------------------------------
+  let resistance = 0;
+
+  const hasAnswerNewMatter = docketTypes.includes('ANSWER') && docketText.includes('NEW MATTER');
+  const hasCounterclaim = docketText.includes('COUNTERCLAIM');
+  const hasPrelimObj = docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS');
+  const hasOpposition = docketText.includes('OPPOSITION') || docketText.includes('OBJECTION');
+
+  const defendantFiledMSJ =
+    hasMSJ && (
+      docketText.includes('DEFENDANT') ||
+      docketText.includes("DEF'S") ||
+      docketText.includes("DEFT'S") ||
+      docketText.includes('BY DEFENDANT')
+    );
+
+  // Count a few "defensive" buckets
+  const defensiveFlags = [
+    hasAnswerNewMatter,
+    hasCounterclaim,
+    hasPrelimObj,
+    hasOpposition,
+    defendantFiledMSJ
+  ].filter(Boolean).length;
+
+  if (hasAnswerNewMatter) { resistance -= 5; push('🛡 Resistance: Answer & New Matter (active defense)', -5); }
+  if (hasCounterclaim) { resistance -= 10; push('🛡 Resistance: Counterclaim (strong resistance)', -10); }
+  if (hasPrelimObj) { resistance -= 5; push('🛡 Resistance: Preliminary Objections', -5); }
+  if (hasOpposition) { resistance -= 5; push('🛡 Resistance: Objection/Opposition', -5); }
+  if (defendantFiledMSJ) { resistance -= 10; push('🛡 Resistance: Defendant Summary Judgment motion', -10); }
+
+  // Cluster penalty: 2+ defensive categories inside the record
+  if (defensiveFlags >= 2) { resistance -= 5; push('🛡 Resistance: clustered defense (2+ defense signals)', -5); }
+
+  // Passivity bonus (only meaningful after 12 months)
+  if (daysOpen >= 365) {
+    if (defensiveFlags === 0) { resistance += 10; push('🛡 Resistance: no defensive filings after 12 months (passive defendant)', +10); }
+    else if (defensiveFlags === 1) { resistance += 5; push('🛡 Resistance: minimal defense after 12 months', +5); }
+  }
+
+  resistance = clamp(resistance, -20, 10);
+
+  // ------------------------------------------------------------
+  // Pillar 3: PROCEDURAL MOMENTUM (0–25)
+  // ------------------------------------------------------------
+  let momentum = 0;
+
+  const hasAltServiceMotion = docketText.includes('ALTERNATE SERVICE') || docketText.includes('MOTION FOR ALTERNATE SERVICE');
+  const altServiceGranted = hasAltServiceMotion && docketText.includes('GRANTED');
+  const postedPremises = docketText.includes('POSTED') && docketText.includes('PREMISES');
+  const serviceCompleted = docketText.includes('SERVICE') && (docketText.includes('COMPLETED') || docketText.includes('SERVED'));
+  const caseMgmt = docketText.includes('CIVIL CASE MANAGEMENT') || docketText.includes('CASE MANAGEMENT') || docketText.includes('DISCOVERY TO BE COMPLETED');
+  const ruleShowCauseGranted = (docketText.includes('RULE TO SHOW CAUSE') || docketTypes.includes('RULE')) && docketText.includes('GRANTED');
+  const praecipeReinstate = includesAny(docketText, ['PRAECIPE TO REINSTATE', 'PRAEC TO REINSTATE', 'REACTIVATE']);
+
+  if (hasAltServiceMotion) { momentum += 5; push('⚙️ Momentum: Motion for Alternate Service', +5); }
+  if (altServiceGranted) { momentum += 4; push('⚙️ Momentum: Alternate Service GRANTED', +4); }
+  if (postedPremises) { momentum += 5; push('⚙️ Momentum: Posted Premises', +5); }
+  if (serviceCompleted) { momentum += 3; push('⚙️ Momentum: Service completed/served', +3); }
+  if (praecipeReinstate) { momentum += 4; push('⚙️ Momentum: Reinstated/reactivated after pause', +4); }
+  if (caseMgmt) { momentum += 6; push('⚙️ Momentum: Case management / discovery track set', +6); }
+  if (plaintiffMSJGranted) { momentum += 10; push('⚙️ Momentum: Plaintiff Summary Judgment GRANTED', +10); }
+  if (ruleShowCauseGranted) { momentum += 5; push('⚙️ Momentum: Rule to Show Cause / related motion GRANTED', +5); }
+
+  momentum = clamp(momentum, 0, 25);
+
+  // ------------------------------------------------------------
+  // Pillar 4: EMOTIONAL FATIGUE (0–25)
+  // ------------------------------------------------------------
+  let fatigue = 0;
+
+  const continuances = docket.continuanceCount || 0;
+  if (continuances === 1) { fatigue += 5; push('😓 Fatigue: 1 continuance', +5); }
+  else if (continuances === 2) { fatigue += 8; push('😓 Fatigue: 2 continuances', +8); }
+  else if (continuances >= 3) { fatigue += 12; push(`😓 Fatigue: ${continuances} continuances`, +12); }
+
+  const hasConciliation = !!docket.hasConciliation || docketText.includes('CONCILIATION') || docketText.includes('MEDIATION');
+  if (hasConciliation && continuances >= 2) { fatigue += 5; push('😓 Fatigue: repeated conference continuations (conciliation/mod attempts stalling)', +5); }
+
+  // Silence context
+  const heavyDefense = defensiveFlags >= 2;
+  const plaintiffAggression = hasAltServiceMotion || postedPremises || caseMgmt || plaintiffMSJFiled || plaintiffMSJGranted || ruleShowCauseGranted;
+
+  if (daysSinceLastFiling >= 90) {
+    if (heavyDefense) { fatigue += 10; push('😓 Fatigue: silence after heavy defense (>90d)', +10); }
+    else if (plaintiffAggression && daysSinceLastFiling >= 120) { fatigue += 6; push('😓 Fatigue: silence after plaintiff push (>120d)', +6); }
+  }
+
+  // Bankruptcy attempt failed (treated as fatigue/pressure inflection)
+  const hasBankruptcy = !!docket.hasBankruptcy || docketText.includes('BANKRUPTCY');
+  if (hasBankruptcy && (hasBkDischarge || hasStayLifted)) { fatigue += 8; push('😓 Fatigue: bankruptcy attempt failed / protection ended', +8); }
+
+  fatigue = clamp(fatigue, 0, 25);
+
+  // ------------------------------------------------------------
+  // Recent filing penalty (V3: minimal + only when last event indicates active defense)
+  // ------------------------------------------------------------
+  // V3 principle: "recency" is not inherently bad—only bad if it reflects *defendant resistance*.
+  // Also: do NOT penalize when last event is a progress/admin milestone.
+  const lastEvent = (lastEventText || '').toUpperCase();
+  const isAdminOrProgressLast =
+    includesAny(lastEvent, [
+      'STAY IS LIFTED', 'STAY LIFTED',
+      'DISCHARGE ORDER OF BANKRUPTCY', 'DISCHARGE', 'BANKRUPTCY',
+      'PRAECIPE TO REINSTATE', 'PRAEC TO REINSTATE', 'REACTIVATE',
+      'ALTERNATE SERVICE', 'POSTED PREMISES', 'NOT FOUND', 'FAILURE OF SERVICE',
+      'CIVIL CASE MANAGEMENT', 'CASE MANAGEMENT', 'DISCOVERY TO BE COMPLETED',
+      'ORDER - SCHEDULING', 'CONCILIATION', 'CONFERENCE CONTINUED'
+    ]);
+
+  let recencyPenalty = 0;
+  if (!isAdminOrProgressLast && daysSinceLastFiling > 0 && daysSinceLastFiling < 30) {
+    // Only penalize if the recent docket entry smells like defendant resistance.
+    const isRecentDefense = includesAny(lastEvent, ['DEFENDANT', "DEF'S", "DEFT'S", 'OBJECTION', 'OPPOSITION', 'COUNTERCLAIM', 'PRELIMINARY OBJECTIONS']);
+    if (isRecentDefense) {
+      recencyPenalty = (daysSinceLastFiling < 14) ? -8 : -4; // smaller than v2
+      push('🔥 Recency: recent defendant resistance activity', recencyPenalty);
+    }
+  }
+
+  // Property address signal (small but useful)
+  let addr = 0;
+  if (c.propertyAddress) { addr = 3; push('📍 Has property address', +3); }
+  else { addr = -5; push('❓ No address found', -5); }
+
+  // Entity defendant dampener (keep modest)
+  let entityAdj = 0;
+  const defendant = (c.defendant || '').toUpperCase();
+  if (includesAny(defendant, ['LLC', 'INC', 'CORP', 'TRUST', 'ESTATE OF', 'BANK'])) {
+    entityAdj = -6;
+    push('🏢 Entity defendant (less motivated)', entityAdj);
+  }
+
+  // Combine
+  let score = pressure + resistance + momentum + fatigue + recencyPenalty + addr + entityAdj;
+
+  // Gentle normalization using docket count (avoid inflating admin-heavy cases)
+  // If entries are extremely high but defense signals are low, cap contribution by trimming a few points.
+  if (entries >= 15 && defensiveFlags === 0) {
+    score -= 4;
+    push('🧯 Noise control: high docket volume but low defense (trim)', -4);
+  }
+
+  score = clamp(score, 0, 100);
+
+  let grade;
+  if (score >= 80) grade = 'A';
+  else if (score >= 65) grade = 'B';
+  else if (score >= 50) grade = 'C';
+  else if (score >= 35) grade = 'D';
+  else grade = 'F';
+
+  // Add a compact pillar summary (helps debugging in UI)
+  push(`🧾 Pillars: Pressure ${pressure}/30, Resistance ${resistance}/10, Momentum ${momentum}/25, Fatigue ${fatigue}/25`, 0);
+
+  return { score, grade, factors };
 }
+
+function calculateScore(c) {
+  // V3 is now the default scoring model
+  return calculateV3Score(c);
+}
+
 
 function calculateEnhancedScore(c) {
   let score = 0;
