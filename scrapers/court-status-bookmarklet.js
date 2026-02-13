@@ -16,9 +16,7 @@
 
   const DELAY = 1200;
 
-  // ─────────────────────────────────────────────────────────────
-  // EXACT FIELD IDS FROM NJ COURTS (discovered via diagnostic)
-  // ─────────────────────────────────────────────────────────────
+  // EXACT FIELD IDS FROM NJ COURTS
   const FIELDS = {
     lastName: 'searchByPartyNameForm:partyLName',
     firstName: 'searchByPartyNameForm:partyFName',
@@ -49,7 +47,7 @@
       #csc-btns button{border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer}
       .csc-stop{background:#f87171;color:#fff}.csc-close{background:#334155;color:#94a3b8}
     </style>
-    <h3>⚖️ Court Status Checker v4</h3>
+    <h3>⚖️ Court Status Checker v5</h3>
     <div id="csc-status">Preparing...</div>
     <div id="csc-bar"><div id="csc-fill"></div></div>
     <div id="csc-stats">🟢<b class="g" id="cs-o">0</b> 🔴<b class="r" id="cs-c">0</b> ❌<b class="y" id="cs-n">0</b> ⚠<b id="cs-e">0</b></div>
@@ -177,47 +175,70 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Form interaction using EXACT field IDs
+  // HUMAN-LIKE TYPING - bypasses CAPTCHA detection
   // ─────────────────────────────────────────────────────────────
-
-  function setFieldValue(fieldId, value) {
+  async function humanType(fieldId, text) {
     const field = document.getElementById(fieldId);
     if (!field) {
       log(`  ⚠️ Field not found: ${fieldId}`, 'err');
       return false;
     }
 
-    // Clear and set value
-    field.value = '';
+    // Focus and clear
     field.focus();
-    field.value = value;
+    field.value = '';
+    field.dispatchEvent(new Event('focus', { bubbles: true }));
 
-    // Fire events for JSF
-    field.dispatchEvent(new Event('input', { bubbles: true }));
+    // Type character by character with realistic timing
+    for (const char of text) {
+      field.value += char;
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+      field.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
+      field.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
+      field.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+      
+      // Random delay between keystrokes (50-80ms) like human typing
+      await wait(50 + Math.random() * 30);
+    }
+
     field.dispatchEvent(new Event('change', { bubbles: true }));
     field.dispatchEvent(new Event('blur', { bubbles: true }));
 
     return true;
   }
 
-  function clickSearchButton() {
-    const btn = document.getElementById(FIELDS.searchButton);
-    if (!btn) {
-      log(`  ⚠️ Search button not found: ${FIELDS.searchButton}`, 'err');
+  async function humanClear(fieldId) {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    
+    field.focus();
+    field.value = '';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(50);
+  }
+
+  function humanClick(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) {
+      log(`  ⚠️ Element not found: ${elementId}`, 'err');
       return false;
     }
-    btn.click();
+
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
+
     return true;
   }
 
-  function ensureIndividualMode() {
-    const radio = document.getElementById(FIELDS.individualRadio);
-    if (radio && !radio.checked) {
-      radio.click();
-      return true;
-    }
-    return true;
-  }
+  // ─────────────────────────────────────────────────────────────
+  // Search functions
+  // ─────────────────────────────────────────────────────────────
 
   async function waitForResults(timeout = 20000) {
     const start = Date.now();
@@ -233,14 +254,18 @@
 
       // Check for "no results"
       const bodyText = document.body.innerText.toLowerCase();
-      if (bodyText.includes('no cases found') || bodyText.includes('no records found')) {
+      if (bodyText.includes('no cases found') || bodyText.includes('no records found') || bodyText.includes('returned 0 cases')) {
         return { success: true, table: null, noResults: true };
       }
 
-      // Check for error messages (wrong form submitted)
-      const pageText = document.body.innerText;
-      if (pageText.includes('Docket Sequence Number is required') || pageText.includes('Docket Year is required')) {
-        return { success: false, error: 'Wrong form submitted (Docket form instead of Party Name)' };
+      // Check for CAPTCHA error
+      if (bodyText.includes('captcha verification has failed')) {
+        return { success: false, error: 'CAPTCHA blocked - wait a few minutes and try again' };
+      }
+
+      // Check for wrong form error
+      if (bodyText.includes('docket sequence number is required') || bodyText.includes('docket year is required')) {
+        return { success: false, error: 'Wrong form submitted' };
       }
 
       await wait(500);
@@ -251,38 +276,40 @@
   async function doSearch(last, first, mid) {
     log(`  🔍 Searching: "${last}", "${first}" "${mid || ''}"`, 'i');
 
-    // Ensure Individual mode is selected
-    ensureIndividualMode();
-    await wait(100);
-
-    // Clear and fill the EXACT fields
-    log(`  ✏️ Setting Last Name: ${last}`, 'i');
-    if (!setFieldValue(FIELDS.lastName, last)) {
-      return { success: false, error: 'Could not set Last Name field' };
+    // Ensure Individual mode
+    const indRadio = document.getElementById(FIELDS.individualRadio);
+    if (indRadio && !indRadio.checked) {
+      indRadio.click();
+      await wait(100);
     }
-    await wait(150);
+
+    // Clear all fields first
+    await humanClear(FIELDS.lastName);
+    await humanClear(FIELDS.firstName);
+    await humanClear(FIELDS.middleName);
+
+    // Type in the names with human-like timing
+    log(`  ⌨️ Typing last name...`, 'i');
+    if (!await humanType(FIELDS.lastName, last)) {
+      return { success: false, error: 'Could not type last name' };
+    }
 
     if (first) {
-      log(`  ✏️ Setting First Name: ${first}`, 'i');
-      setFieldValue(FIELDS.firstName, first);
-      await wait(150);
-    } else {
-      // Clear first name field
-      setFieldValue(FIELDS.firstName, '');
+      log(`  ⌨️ Typing first name...`, 'i');
+      await humanType(FIELDS.firstName, first);
     }
 
     if (mid) {
-      log(`  ✏️ Setting Middle: ${mid}`, 'i');
-      setFieldValue(FIELDS.middleName, mid);
-      await wait(150);
-    } else {
-      // Clear middle name field
-      setFieldValue(FIELDS.middleName, '');
+      log(`  ⌨️ Typing middle...`, 'i');
+      await humanType(FIELDS.middleName, mid);
     }
 
-    // Click the CORRECT search button
-    log(`  🖱️ Clicking Party Name Search button...`, 'i');
-    if (!clickSearchButton()) {
+    // Small pause before clicking search (like a human would)
+    await wait(200 + Math.random() * 100);
+
+    // Click the search button
+    log(`  🖱️ Clicking search...`, 'i');
+    if (!humanClick(FIELDS.searchButton)) {
       return { success: false, error: 'Could not click search button' };
     }
 
@@ -298,7 +325,7 @@
       return { success: true, table: null };
     }
 
-    log(`  ✅ Got results table!`, 'ok');
+    log(`  ✅ Got results!`, 'ok');
     return { success: true, table: result.table };
   }
 
@@ -337,7 +364,6 @@
   }
 
   async function clickBack() {
-    // Look for Back button
     const allClickable = document.querySelectorAll('a, button, input[type="button"]');
     for (const el of allClickable) {
       const text = (el.textContent || el.value || '').trim().toLowerCase();
@@ -399,7 +425,7 @@
       await wait(1000);
     }
 
-    if (!best) return { notFound: true, reason: 'Could not evaluate any results' };
+    if (!best) return { notFound: true, reason: 'Could not evaluate results' };
     return { notFound: false, best };
   }
 
@@ -436,7 +462,7 @@
     return;
   }
 
-  // Verify we can see the Party Name form fields
+  // Verify Party Name form is visible
   const lastField = document.getElementById(FIELDS.lastName);
   if (!lastField) {
     log('❌ Party Name form not visible. Click "Search By Party Name" tab first!', 'err');
@@ -468,10 +494,11 @@
       S.e++; S.done++; upd();
       log(`  ❌ ${searchResult.error}`, 'err');
       await save(instr, { courtStatus: 'ERROR', courtStatusNote: searchResult.error });
-      // Reload to reset form state
-      log('  🔄 Reloading page...', 'i');
-      window.location.reload();
-      await wait(5000);
+      
+      if (searchResult.error.includes('CAPTCHA')) {
+        log('  ⏸️ CAPTCHA detected - stopping. Wait a few minutes and try again.', 'err');
+        break;
+      }
       continue;
     }
 
