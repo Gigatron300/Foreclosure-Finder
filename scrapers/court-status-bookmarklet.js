@@ -47,7 +47,7 @@
       #csc-btns button{border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer}
       .csc-stop{background:#f87171;color:#fff}.csc-close{background:#334155;color:#94a3b8}
     </style>
-    <h3>⚖️ Court Status Checker v5</h3>
+    <h3>⚖️ Court Status Checker v6</h3>
     <div id="csc-status">Preparing...</div>
     <div id="csc-bar"><div id="csc-fill"></div></div>
     <div id="csc-stats">🟢<b class="g" id="cs-o">0</b> 🔴<b class="r" id="cs-c">0</b> ❌<b class="y" id="cs-n">0</b> ⚠<b id="cs-e">0</b></div>
@@ -184,33 +184,27 @@
       return false;
     }
 
-    // Focus and clear
     field.focus();
     field.value = '';
     field.dispatchEvent(new Event('focus', { bubbles: true }));
 
-    // Type character by character with realistic timing
     for (const char of text) {
       field.value += char;
       field.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
       field.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
       field.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
       field.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-      
-      // Random delay between keystrokes (50-80ms) like human typing
       await wait(50 + Math.random() * 30);
     }
 
     field.dispatchEvent(new Event('change', { bubbles: true }));
     field.dispatchEvent(new Event('blur', { bubbles: true }));
-
     return true;
   }
 
   async function humanClear(fieldId) {
     const field = document.getElementById(fieldId);
     if (!field) return;
-    
     field.focus();
     field.value = '';
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -220,10 +214,7 @@
 
   function humanClick(elementId) {
     const el = document.getElementById(elementId);
-    if (!el) {
-      log(`  ⚠️ Element not found: ${elementId}`, 'err');
-      return false;
-    }
+    if (!el) return false;
 
     const rect = el.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
@@ -232,18 +223,15 @@
     el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
-
     return true;
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Search functions
+  // Wait for search results
   // ─────────────────────────────────────────────────────────────
-
   async function waitForResults(timeout = 20000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      // Check for results table
       const tables = document.querySelectorAll('table');
       for (const t of tables) {
         const text = (t.innerText || '').toUpperCase();
@@ -252,162 +240,154 @@
         }
       }
 
-      // Check for "no results"
       const bodyText = document.body.innerText.toLowerCase();
       if (bodyText.includes('no cases found') || bodyText.includes('no records found') || bodyText.includes('returned 0 cases')) {
         return { success: true, table: null, noResults: true };
       }
 
-      // Check for CAPTCHA error
       if (bodyText.includes('captcha verification has failed')) {
-        return { success: false, error: 'CAPTCHA blocked - wait a few minutes and try again' };
-      }
-
-      // Check for wrong form error
-      if (bodyText.includes('docket sequence number is required') || bodyText.includes('docket year is required')) {
-        return { success: false, error: 'Wrong form submitted' };
+        return { success: false, error: 'CAPTCHA blocked' };
       }
 
       await wait(500);
     }
-    return { success: false, error: 'Timeout waiting for results' };
+    return { success: false, error: 'Timeout' };
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Open docket in NEW TAB, extract data, close tab
+  // This keeps the main script alive on the search results page
+  // ─────────────────────────────────────────────────────────────
+  async function extractJacketFromNewTab(href) {
+    const newTab = window.open(href, '_blank');
+    if (!newTab) {
+      return { error: 'Popup blocked - please allow popups for this site' };
+    }
+
+    // Wait for page to load
+    await wait(3000);
+
+    try {
+      const text = newTab.document.body.innerText || '';
+      
+      const pick = (re) => {
+        const m = text.match(re);
+        return m ? (m[1] || '').trim() : '';
+      };
+
+      const jacket = {
+        caseStatus: pick(/Case Status:\s*([^\t\n\r]+)/i),
+        caseDisposition: pick(/Case Disposition:\s*([^\t\n\r]+)/i),
+        caseCaption: pick(/Case Caption:\s*([^\t\n\r]+)/i),
+        caseType: pick(/Case Type:\s*([^\t\n\r]+)/i),
+        caseInitiationDate: pick(/Case Initiation Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
+        dispositionDate: pick(/Disposition Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
+        docketNumber: pick(/Docket Number:\s*([^\t\n\r]+)/i),
+        venue: pick(/Venue:\s*([^\t\n\r]+)/i)
+      };
+
+      newTab.close();
+      return { success: true, jacket };
+    } catch (e) {
+      try { newTab.close(); } catch {}
+      return { error: 'Could not read from tab: ' + e.message };
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Perform search
+  // ─────────────────────────────────────────────────────────────
   async function doSearch(last, first, mid) {
     log(`  🔍 Searching: "${last}", "${first}" "${mid || ''}"`, 'i');
 
-    // Ensure Individual mode
     const indRadio = document.getElementById(FIELDS.individualRadio);
     if (indRadio && !indRadio.checked) {
       indRadio.click();
       await wait(100);
     }
 
-    // Clear all fields first
     await humanClear(FIELDS.lastName);
     await humanClear(FIELDS.firstName);
     await humanClear(FIELDS.middleName);
 
-    // Type in the names with human-like timing
-    log(`  ⌨️ Typing last name...`, 'i');
+    log(`  ⌨️ Typing...`, 'i');
     if (!await humanType(FIELDS.lastName, last)) {
       return { success: false, error: 'Could not type last name' };
     }
 
-    if (first) {
-      log(`  ⌨️ Typing first name...`, 'i');
-      await humanType(FIELDS.firstName, first);
-    }
+    if (first) await humanType(FIELDS.firstName, first);
+    if (mid) await humanType(FIELDS.middleName, mid);
 
-    if (mid) {
-      log(`  ⌨️ Typing middle...`, 'i');
-      await humanType(FIELDS.middleName, mid);
-    }
-
-    // Small pause before clicking search (like a human would)
     await wait(200 + Math.random() * 100);
 
-    // Click the search button
     log(`  🖱️ Clicking search...`, 'i');
     if (!humanClick(FIELDS.searchButton)) {
-      return { success: false, error: 'Could not click search button' };
+      return { success: false, error: 'Could not click search' };
     }
 
-    // Wait for results
     await wait(1000);
     const result = await waitForResults(20000);
 
-    if (!result.success) {
-      return { success: false, error: result.error };
-    }
-
-    if (result.noResults) {
-      return { success: true, table: null };
-    }
+    if (!result.success) return { success: false, error: result.error };
+    if (result.noResults) return { success: true, table: null };
 
     log(`  ✅ Got results!`, 'ok');
     return { success: true, table: result.table };
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // Find best match from results
+  // ─────────────────────────────────────────────────────────────
   function getRows(table) {
     return Array.from(table.querySelectorAll('tbody tr, tr')).filter(row => row.querySelectorAll('td').length > 0);
   }
 
-  function docketLinkInRow(row) {
-    const links = Array.from(row.querySelectorAll('a'));
-    const docketRe = /\b([A-Z]{1,4}[-\s]?)?F[-\s]?\d{3,7}[-\s]?\d{2}\b/i;
-    for (const a of links) {
-      if (docketRe.test((a.textContent || '').trim())) return a;
-    }
-    return links[0] || null;
+  function getLinksFromRow(row) {
+    return Array.from(row.querySelectorAll('a')).filter(a => a.href && a.href.includes('civilCaseS'));
   }
 
   function rowText(row) {
     return cleanText(row ? row.innerText : '');
   }
 
-  function extractJacket() {
-    const text = document.body.innerText || '';
-    const pick = (re) => {
-      const m = text.match(re);
-      return m ? (m[1] || '').trim() : '';
-    };
-    return {
-      caseStatus: pick(/Case Status:\s*([^\n\r]+)/i),
-      caseDisposition: pick(/Case Disposition:\s*([^\n\r]+)/i),
-      caseCaption: pick(/Case Caption:\s*([^\n\r]+)/i),
-      caseType: pick(/Case Type:\s*([^\n\r]+)/i),
-      caseInitiationDate: pick(/Case Initiation Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
-      dispositionDate: pick(/Disposition Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
-      docketNumber: pick(/Docket Number:\s*([^\n\r]+)/i)
-    };
-  }
-
-  async function clickBack() {
-    const allClickable = document.querySelectorAll('a, button, input[type="button"]');
-    for (const el of allClickable) {
-      const text = (el.textContent || el.value || '').trim().toLowerCase();
-      if (text === 'back' || text === '< back' || text.includes('back to search')) {
-        el.click();
-        await wait(2000);
-        return;
-      }
-    }
-    window.history.back();
-    await wait(2000);
-  }
-
   async function chooseBestMatch(resultsTable, caseObj) {
     const rows = getRows(resultsTable);
-    if (!rows.length) return { notFound: true, reason: 'No rows in results' };
+    if (!rows.length) return { notFound: true, reason: 'No rows' };
 
     const defName = getDefendant(caseObj);
     const plaintiff = getPlaintiff(caseObj);
     const csvDate = getFilingDate(caseObj);
 
-    log(`  📊 Found ${rows.length} results`, 'i');
+    log(`  📊 ${rows.length} results found`, 'i');
 
+    // Score rows by text matching
     const scored = rows.map((row, idx) => {
       const txt = rowText(row);
+      const links = getLinksFromRow(row);
       const defSim = dice(defName, txt);
       const plSim = dice(plaintiff, txt);
-      return { idx, row, score: (0.65 * defSim) + (0.35 * plSim) };
+      return { idx, row, links, score: (0.65 * defSim) + (0.35 * plSim) };
     }).sort((a, b) => b.score - a.score);
 
+    // Check top candidates by opening in new tab
     const top = scored.slice(0, Math.min(5, scored.length));
     let best = null;
 
     for (const cand of top) {
       if (window._cscStop) break;
+      if (!cand.links.length) continue;
 
-      const link = docketLinkInRow(cand.row);
-      if (!link) continue;
+      const href = cand.links[0].href;
+      log(`  📂 Checking #${cand.idx + 1} (${(cand.score * 100).toFixed(0)}%)...`, 'i');
 
-      log(`  📂 Opening #${cand.idx + 1} (${(cand.score * 100).toFixed(0)}%)...`, 'i');
-      link.click();
-      await wait(2500);
+      const result = await extractJacketFromNewTab(href);
+      
+      if (result.error) {
+        log(`    ⚠️ ${result.error}`, 'w');
+        continue;
+      }
 
-      const jacket = extractJacket();
+      const jacket = result.jacket;
       const initDt = parseAnyDate(jacket.caseInitiationDate);
 
       const defSim2 = Math.max(cand.score, dice(defName, jacket.caseCaption || ''));
@@ -415,14 +395,13 @@
       const dScore = dateScore(csvDate, initDt);
       const finalScore = (0.55 * defSim2) + (0.25 * plSim2) + (0.20 * dScore);
 
-      log(`    Score: ${(finalScore * 100).toFixed(0)}%`, 'i');
+      log(`    → ${jacket.caseStatus}/${jacket.caseDisposition} (${(finalScore * 100).toFixed(0)}%)`, 'i');
 
       if (!best || finalScore > best.finalScore) {
         best = { finalScore, jacket };
       }
 
-      await clickBack();
-      await wait(1000);
+      await wait(500); // Small delay between tabs
     }
 
     if (!best) return { notFound: true, reason: 'Could not evaluate results' };
@@ -462,13 +441,12 @@
     return;
   }
 
-  // Verify Party Name form is visible
   const lastField = document.getElementById(FIELDS.lastName);
   if (!lastField) {
-    log('❌ Party Name form not visible. Click "Search By Party Name" tab first!', 'err');
+    log('❌ Click "Search By Party Name" tab first!', 'err');
     return;
   }
-  log('✅ Party Name form ready', 'ok');
+  log('✅ Ready to search', 'ok');
 
   for (let i = 0; i < cases.length; i++) {
     if (window._cscStop) { log('⏹ Stopped', 'w'); break; }
@@ -478,13 +456,13 @@
     const defName = getDefendant(c);
 
     log(`\n🔎 [${i + 1}/${cases.length}] ${instr}`, 's');
-    log(`  Defendant: ${defName}`, 'i');
+    log(`  ${defName}`, 'i');
 
     const parsed = parseDef(defName);
     if (!parsed || !parsed.last) {
       S.e++; S.done++; upd();
       log('  ❌ Could not parse name', 'err');
-      await save(instr, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse defendant name' });
+      await save(instr, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse name' });
       continue;
     }
 
@@ -494,9 +472,8 @@
       S.e++; S.done++; upd();
       log(`  ❌ ${searchResult.error}`, 'err');
       await save(instr, { courtStatus: 'ERROR', courtStatusNote: searchResult.error });
-      
       if (searchResult.error.includes('CAPTCHA')) {
-        log('  ⏸️ CAPTCHA detected - stopping. Wait a few minutes and try again.', 'err');
+        log('  ⏸️ Stopping due to CAPTCHA', 'err');
         break;
       }
       continue;
@@ -505,7 +482,7 @@
     if (!searchResult.table) {
       S.n++; S.done++; upd();
       log('  ❌ No cases found', 'w');
-      await save(instr, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No cases found for defendant' });
+      await save(instr, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No cases found' });
       continue;
     }
 
@@ -527,7 +504,7 @@
 
     S.done++; upd();
 
-    log(`  ✅ ${cls.normalized}: "${j.caseStatus}" / "${j.caseDisposition}"`, 'ok');
+    log(`  ✅ ${cls.normalized}: ${j.caseStatus}/${j.caseDisposition}`, 'ok');
 
     await save(instr, {
       courtStatus: cls.normalized,
