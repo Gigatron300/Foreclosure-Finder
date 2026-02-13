@@ -15,7 +15,7 @@
   }
 
   const SEARCH_URL = window.location.href.split('?')[0];
-  const DELAY = 1200; // Slightly longer delay between cases
+  const DELAY = 1200;
 
   // ─────────────────────────────────────────────────────────────
   // UI Panel
@@ -38,7 +38,7 @@
       #csc-btns button{border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer}
       .csc-stop{background:#f87171;color:#fff}.csc-close{background:#334155;color:#94a3b8}
     </style>
-    <h3>⚖️ Court Status Checker v2</h3>
+    <h3>⚖️ Court Status Checker v3</h3>
     <div id="csc-status">Preparing...</div>
     <div id="csc-bar"><div id="csc-fill"></div></div>
     <div id="csc-stats">🟢<b class="g" id="cs-o">0</b> 🔴<b class="r" id="cs-c">0</b> ❌<b class="y" id="cs-n">0</b> ⚠<b id="cs-e">0</b></div>
@@ -149,7 +149,6 @@
 
     if (!cleaned) return null;
 
-    // Check if it's a business entity
     if (/\b(LLC|INC|CORP|CORPORATION|CO|COMPANY|BANK|TRUST|AGENCY|AUTHORITY|MORTGAGE|FINANCE|ASSOCIATION|ASSN|HOUSING|SERVICING|SERVICES)\b/.test(cleaned)) {
       return { last: cleaned, first: '', mid: '', isBusiness: true };
     }
@@ -181,256 +180,312 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // CRITICAL FIX: Search directly on the MAIN page, not in an iframe
-  // The iframe approach has cross-origin issues. Instead, we'll 
-  // manipulate the current page directly since we're already on it.
+  // JSF Form Handling - CRITICAL for NJ Courts
   // ─────────────────────────────────────────────────────────────
 
-  // Helper to set input value with proper JSF events
-  function setInputValue(input, value) {
-    if (!input) return false;
+  // Check if we're on the Party Name form (not Docket Number form)
+  function isPartyNameFormVisible() {
+    // Look for the Individual/Business radio buttons OR the Last Name field
+    // These only exist on the Party Name tab
+    const hasIndividualRadio = !!document.querySelector('input[type="radio"][id*="individual" i], label:contains("Individual")');
+    const hasLastNameField = !!document.querySelector('input[id*="partyLName" i], input[id*="lastName" i]');
+    const hasLastLabel = Array.from(document.querySelectorAll('label, span')).some(el => el.textContent.trim() === '*Last' || el.textContent.trim() === 'Last');
     
-    // Clear first
-    input.value = '';
-    input.dispatchEvent(new Event('focus', { bubbles: true }));
-    
-    // Set new value
-    input.value = value;
-    
-    // Fire all necessary events for JSF
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
-    
-    return true;
+    return hasLastNameField || hasLastLabel;
   }
 
-  // Click the Search By Party Name tab
-  async function clickPartyNameTab() {
-    // Find the tab - it might be a link or a tab element
-    const tabs = document.querySelectorAll('a, li, span, div');
-    for (const tab of tabs) {
-      const text = (tab.textContent || '').trim();
-      if (text === 'Search By Party Name' || text.includes('Party Name')) {
-        tab.click();
-        await wait(500);
-        return true;
-      }
-    }
+  // Check if we're on the Docket Number form
+  function isDocketFormVisible() {
+    const hasDocketField = !!document.querySelector('input[id*="docketNumber" i], input[id*="docketSeq" i]');
+    const hasDocketYearField = !!document.querySelector('input[id*="docketYear" i]');
+    return hasDocketField || hasDocketYearField;
+  }
+
+  // Click the Party Name tab and WAIT for the form to actually change
+  async function switchToPartyNameTab() {
+    log('  🔄 Switching to Party Name tab...', 'i');
     
-    // Try clicking by href
-    const tabLink = document.querySelector('a[href*="tabs-2"], a[href*="partyName"]');
-    if (tabLink) {
-      tabLink.click();
-      await wait(500);
+    // If already on Party Name form, we're good
+    if (isPartyNameFormVisible() && !isDocketFormVisible()) {
+      log('  ✅ Already on Party Name form', 'ok');
       return true;
     }
-    
-    return false;
-  }
 
-  // Click the Individual radio button
-  async function selectIndividualMode() {
-    // Find the Individual radio button
-    const radios = document.querySelectorAll('input[type="radio"]');
-    for (const radio of radios) {
-      const label = radio.parentElement?.textContent || '';
-      const id = radio.id || '';
-      if (label.includes('Individual') || id.includes('individual') || id.includes('Individual')) {
-        if (!radio.checked) {
-          radio.click();
-          await wait(300);
-        }
+    // Find and click the Party Name tab
+    const allClickables = document.querySelectorAll('a, li, span, div, button');
+    let tabClicked = false;
+    
+    for (const el of allClickables) {
+      const text = (el.textContent || '').trim();
+      if (text === 'Search By Party Name') {
+        log('  🖱️ Clicking "Search By Party Name" tab...', 'i');
+        el.click();
+        tabClicked = true;
+        break;
+      }
+    }
+
+    if (!tabClicked) {
+      // Try by href
+      const tabLink = document.querySelector('a[href*="tabs-2"], a[href*="party"]');
+      if (tabLink) {
+        log('  🖱️ Clicking tab link...', 'i');
+        tabLink.click();
+        tabClicked = true;
+      }
+    }
+
+    if (!tabClicked) {
+      log('  ❌ Could not find Party Name tab', 'err');
+      return false;
+    }
+
+    // CRITICAL: Wait for the form to actually change
+    // JSF may do an AJAX update or full page reload
+    log('  ⏳ Waiting for form to load...', 'i');
+    
+    for (let i = 0; i < 30; i++) {  // Wait up to 15 seconds
+      await wait(500);
+      
+      if (isPartyNameFormVisible()) {
+        log('  ✅ Party Name form loaded', 'ok');
+        await wait(300);  // Extra buffer for JS to finish
         return true;
       }
     }
-    
-    // Try by label
-    const labels = document.querySelectorAll('label');
-    for (const label of labels) {
-      if (label.textContent.includes('Individual')) {
-        label.click();
-        await wait(300);
-        return true;
-      }
-    }
-    
+
+    log('  ❌ Party Name form did not load', 'err');
     return false;
   }
 
-  // Find name input fields
-  function findNameFields() {
-    // Try various ID patterns for Last Name field
-    const lastPatterns = ['partyLName', 'lastName', 'lname', 'last'];
-    const firstPatterns = ['partyFName', 'firstName', 'fname', 'first'];
-    const midPatterns = ['partyMName', 'middleName', 'mname', 'middle', 'mi'];
-    
-    let lastField = null, firstField = null, midField = null;
-    
-    const inputs = document.querySelectorAll('input[type="text"]');
-    
-    for (const input of inputs) {
-      const id = (input.id || '').toLowerCase();
-      const name = (input.name || '').toLowerCase();
-      const placeholder = (input.placeholder || '').toLowerCase();
-      
-      // Check for Last name field
-      if (!lastField) {
-        for (const p of lastPatterns) {
-          if (id.includes(p.toLowerCase()) || name.includes(p.toLowerCase()) || placeholder.includes('last')) {
-            lastField = input;
-            break;
-          }
+  // Find the Last Name input field
+  function findLastNameField() {
+    // Try by ID patterns
+    const byId = document.querySelector(
+      'input[id*="partyLName" i], input[id*="partylname" i], ' +
+      'input[id*="lastName" i], input[id*="lastname" i], ' +
+      'input[id*="lname" i], input[id*="LName" i]'
+    );
+    if (byId) return byId;
+
+    // Try by looking near "*Last" label
+    const labels = document.querySelectorAll('label, span, td');
+    for (const lbl of labels) {
+      const txt = (lbl.textContent || '').trim();
+      if (txt === '*Last' || txt === 'Last') {
+        // Look for nearby input
+        const parent = lbl.closest('tr, div, td');
+        if (parent) {
+          const input = parent.querySelector('input[type="text"]');
+          if (input) return input;
         }
-      }
-      
-      // Check for First name field  
-      if (!firstField) {
-        for (const p of firstPatterns) {
-          if (id.includes(p.toLowerCase()) || name.includes(p.toLowerCase()) || placeholder.includes('first')) {
-            firstField = input;
-            break;
-          }
-        }
-      }
-      
-      // Check for Middle name field
-      if (!midField) {
-        for (const p of midPatterns) {
-          if (id.includes(p.toLowerCase()) || name.includes(p.toLowerCase()) || placeholder.includes('middle') || placeholder.includes('mi')) {
-            midField = input;
-            break;
-          }
+        // Try next sibling
+        let next = lbl.nextElementSibling;
+        while (next) {
+          if (next.tagName === 'INPUT') return next;
+          const inp = next.querySelector('input');
+          if (inp) return inp;
+          next = next.nextElementSibling;
         }
       }
     }
-    
-    // Fallback: look for inputs near "Last", "First", "MI" labels
-    if (!lastField || !firstField) {
-      const allLabels = document.querySelectorAll('label, span, div');
-      for (const lbl of allLabels) {
-        const txt = (lbl.textContent || '').trim();
-        if (txt === 'Last' || txt === '*Last') {
-          const nearbyInput = lbl.parentElement?.querySelector('input') || 
-                              lbl.nextElementSibling?.querySelector('input') ||
-                              document.querySelector('input[id*="Last"], input[id*="last"]');
-          if (nearbyInput && !lastField) lastField = nearbyInput;
-        }
-        if (txt === 'First' || txt === '*First') {
-          const nearbyInput = lbl.parentElement?.querySelector('input') ||
-                              lbl.nextElementSibling?.querySelector('input') ||
-                              document.querySelector('input[id*="First"], input[id*="first"]');
-          if (nearbyInput && !firstField) firstField = nearbyInput;
-        }
-      }
-    }
-    
-    return { lastField, firstField, midField };
+
+    return null;
   }
 
-  // Find and click search button
+  // Find the First Name input field
+  function findFirstNameField() {
+    const byId = document.querySelector(
+      'input[id*="partyFName" i], input[id*="partyfname" i], ' +
+      'input[id*="firstName" i], input[id*="firstname" i], ' +
+      'input[id*="fname" i], input[id*="FName" i]'
+    );
+    if (byId) return byId;
+
+    const labels = document.querySelectorAll('label, span, td');
+    for (const lbl of labels) {
+      const txt = (lbl.textContent || '').trim();
+      if (txt === '*First' || txt === 'First') {
+        const parent = lbl.closest('tr, div, td');
+        if (parent) {
+          const input = parent.querySelector('input[type="text"]');
+          if (input) return input;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // Find the Middle Name/MI input field
+  function findMiddleNameField() {
+    const byId = document.querySelector(
+      'input[id*="partyMName" i], input[id*="partymname" i], ' +
+      'input[id*="middleName" i], input[id*="middlename" i], ' +
+      'input[id*="mname" i], input[id*="MName" i]'
+    );
+    if (byId) return byId;
+
+    const labels = document.querySelectorAll('label, span, td');
+    for (const lbl of labels) {
+      const txt = (lbl.textContent || '').trim();
+      if (txt === 'MI-Optional' || txt === 'MI' || txt === 'Middle') {
+        const parent = lbl.closest('tr, div, td');
+        if (parent) {
+          const input = parent.querySelector('input[type="text"]');
+          if (input) return input;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // Set input value with proper JSF events
+  function setFieldValue(input, value) {
+    if (!input) return false;
+
+    // Focus the field
+    input.focus();
+    input.dispatchEvent(new Event('focus', { bubbles: true }));
+
+    // Clear existing value
+    input.value = '';
+
+    // Set new value character by character (more realistic)
+    input.value = value;
+
+    // Fire all the events JSF might need
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+
+    return input.value === value;
+  }
+
+  // Find the Search button
   function findSearchButton() {
-    const buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a.btn');
-    for (const btn of buttons) {
-      const text = (btn.textContent || btn.value || '').trim().toLowerCase();
-      if (text === 'search' || text === 'find' || text === 'submit') {
+    // Look for button/input with "Search" text
+    const allButtons = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
+    for (const btn of allButtons) {
+      const text = (btn.textContent || btn.value || '').trim();
+      if (text.toLowerCase() === 'search') {
         return btn;
       }
     }
-    
-    // Look for button by ID
-    const byId = document.querySelector('[id*="search" i][id*="btn" i], [id*="search" i][id*="button" i], button[id*="search" i]');
+
+    // Look by ID
+    const byId = document.querySelector(
+      'button[id*="search" i], input[id*="search" i][type="submit"], ' +
+      'input[id*="search" i][type="button"]'
+    );
     if (byId) return byId;
-    
+
     return null;
   }
 
-  // Wait for results table to appear
-  async function waitForResults(timeout = 15000) {
+  // Wait for results table or error
+  async function waitForSearchResults(timeout = 20000) {
     const start = Date.now();
+
     while (Date.now() - start < timeout) {
-      // Look for results table
+      // Check for results table
       const tables = document.querySelectorAll('table');
       for (const t of tables) {
-        const txt = (t.innerText || '').toUpperCase();
-        if (txt.includes('DOCKET NUMBER') && txt.includes('CASE CAPTION')) {
-          return t;
+        const text = (t.innerText || '').toUpperCase();
+        if (text.includes('DOCKET NUMBER') && text.includes('CASE CAPTION') && text.includes('CASE INITIATION')) {
+          return { success: true, table: t };
         }
       }
-      
+
       // Check for "no results" message
-      const bodyText = document.body.innerText;
-      if (bodyText.includes('No cases found') || bodyText.includes('0 records') || bodyText.includes('no matching')) {
-        return null;
+      const bodyText = document.body.innerText.toLowerCase();
+      if (bodyText.includes('no cases found') || bodyText.includes('no records found') || bodyText.includes('0 cases')) {
+        return { success: true, table: null, noResults: true };
       }
-      
+
+      // Check for validation errors (means form didn't submit properly)
+      const errors = document.querySelectorAll('.error, .errorMessage, [class*="error"]');
+      for (const err of errors) {
+        const errText = (err.textContent || '').toLowerCase();
+        if (errText.includes('required') || errText.includes('invalid')) {
+          return { success: false, error: err.textContent };
+        }
+      }
+
       await wait(500);
     }
-    return null;
+
+    return { success: false, error: 'Timeout waiting for results' };
   }
 
   // Perform a search
   async function doSearch(last, first, mid) {
-    log(`  🔍 Searching: ${last}, ${first} ${mid}`, 'i');
-    
+    log(`  🔍 Searching: "${last}", "${first}" "${mid || ''}"`, 'i');
+
     // Step 1: Make sure we're on Party Name tab
-    await clickPartyNameTab();
-    await wait(300);
-    
-    // Step 2: Select Individual mode (not Business)
-    await selectIndividualMode();
-    await wait(300);
-    
-    // Step 3: Find the name fields
-    const { lastField, firstField, midField } = findNameFields();
-    
+    const tabOk = await switchToPartyNameTab();
+    if (!tabOk) {
+      return { success: false, error: 'Could not switch to Party Name tab' };
+    }
+
+    // Step 2: Find the form fields
+    const lastField = findLastNameField();
+    const firstField = findFirstNameField();
+    const midField = findMiddleNameField();
+
+    log(`  📝 Fields found: Last=${!!lastField}, First=${!!firstField}, Mid=${!!midField}`, 'i');
+
     if (!lastField) {
-      log('  ❌ Could not find Last Name field', 'err');
-      return null;
+      return { success: false, error: 'Could not find Last Name field' };
     }
-    
-    log(`  📝 Found fields: Last=${!!lastField}, First=${!!firstField}, Mid=${!!midField}`, 'i');
-    
-    // Step 4: Clear and fill fields
-    setInputValue(lastField, last);
-    await wait(100);
-    
+
+    // Step 3: Fill in the fields
+    log(`  ✏️ Filling: Last="${last}"`, 'i');
+    setFieldValue(lastField, last);
+    await wait(200);
+
     if (firstField && first) {
-      setInputValue(firstField, first);
-      await wait(100);
+      log(`  ✏️ Filling: First="${first}"`, 'i');
+      setFieldValue(firstField, first);
+      await wait(200);
     }
-    
+
     if (midField && mid) {
-      setInputValue(midField, mid);
-      await wait(100);
+      log(`  ✏️ Filling: Mid="${mid}"`, 'i');
+      setFieldValue(midField, mid);
+      await wait(200);
     }
-    
-    // Step 5: Find and click search button
+
+    // Step 4: Find and click Search
     const searchBtn = findSearchButton();
     if (!searchBtn) {
-      log('  ❌ Could not find Search button', 'err');
-      return null;
+      return { success: false, error: 'Could not find Search button' };
     }
-    
-    log('  🖱️ Clicking search...', 'i');
+
+    log('  🖱️ Clicking Search button...', 'i');
     searchBtn.click();
-    
-    // Step 6: Wait for results
-    await wait(1000);
-    const resultsTable = await waitForResults(15000);
-    
-    if (!resultsTable) {
-      log('  ❌ No results table found', 'w');
-      return null;
+
+    // Step 5: Wait for results
+    const result = await waitForSearchResults(20000);
+
+    if (!result.success) {
+      log(`  ❌ Search failed: ${result.error}`, 'err');
+      return { success: false, error: result.error };
     }
-    
-    log('  ✅ Got results table', 'ok');
-    return resultsTable;
+
+    if (result.noResults) {
+      log('  ℹ️ No cases found for this name', 'w');
+      return { success: true, table: null };
+    }
+
+    log('  ✅ Got results!', 'ok');
+    return { success: true, table: result.table };
   }
 
   function getRows(table) {
     return Array.from(table.querySelectorAll('tbody tr, tr')).filter(row => {
-      // Skip header rows
       const cells = row.querySelectorAll('td');
       return cells.length > 0;
     });
@@ -468,30 +523,29 @@
   }
 
   async function clickBack() {
-    // Try to find a Back button
     const buttons = document.querySelectorAll('a, button, input[type="button"]');
     for (const btn of buttons) {
       const text = (btn.textContent || btn.value || '').trim().toLowerCase();
-      if (text === 'back' || text === '< back' || text === '« back') {
+      if (text === 'back' || text === '< back' || text === '« back' || text.includes('back to')) {
         btn.click();
-        await wait(1500);
+        await wait(2000);
         return;
       }
     }
-    // Fallback to browser back
     window.history.back();
-    await wait(1500);
+    await wait(2000);
   }
 
-  async function chooseBestByOpeningJackets(resultsTable, caseObj) {
+  async function chooseBestMatch(resultsTable, caseObj) {
     const rows = getRows(resultsTable);
-    if (!rows.length) return { notFound: true, reason: 'No rows in table' };
+    if (!rows.length) return { notFound: true, reason: 'No rows in results' };
 
     const defName = getDefendant(caseObj);
     const plaintiff = getPlaintiff(caseObj);
     const csvDate = getFilingDate(caseObj);
 
-    // Score rows without clicking first
+    log(`  📊 Found ${rows.length} results, scoring...`, 'i');
+
     const scored = rows.map((row, idx) => {
       const txt = rowText(row);
       const defSim = dice(defName, txt);
@@ -500,7 +554,6 @@
       return { idx, row, score };
     }).sort((a, b) => b.score - a.score);
 
-    // Only open top candidates
     const top = scored.slice(0, Math.min(5, scored.length));
     let best = null;
 
@@ -510,9 +563,9 @@
       const link = docketLinkInRow(cand.row);
       if (!link) continue;
 
-      log(`  📂 Opening case ${cand.idx + 1}...`, 'i');
+      log(`  📂 Opening result #${cand.idx + 1} (score ${(cand.score * 100).toFixed(0)}%)...`, 'i');
       link.click();
-      await wait(2000);
+      await wait(2500);
 
       const jacket = extractJacket();
       const initDt = parseAnyDate(jacket.caseInitiationDate);
@@ -524,22 +577,22 @@
 
       const finalScore = (0.55 * defSim2) + (0.25 * plSim2) + (0.20 * dScore);
 
-      log(`    Score: ${(finalScore * 100).toFixed(0)}% (def:${(defSim2*100).toFixed(0)} pl:${(plSim2*100).toFixed(0)} dt:${(dScore*100).toFixed(0)})`, 'i');
+      log(`    → Score: ${(finalScore * 100).toFixed(0)}%`, 'i');
 
       if (!best || finalScore > best.finalScore) {
         best = { finalScore, jacket };
       }
 
       await clickBack();
-      await wait(500);
+      await wait(1000);
     }
 
-    if (!best) return { notFound: true, reason: 'Could not open any jackets' };
+    if (!best) return { notFound: true, reason: 'Could not evaluate any results' };
     return { notFound: false, best };
   }
 
   // ─────────────────────────────────────────────────────────────
-  // Main - runs directly on the page (no iframe)
+  // Main
   // ─────────────────────────────────────────────────────────────
   log('📡 Fetching cases from server...', 's');
 
@@ -555,7 +608,6 @@
     return;
   }
 
-  // Filter to only unchecked cases
   cases = cases.filter(c => {
     const cs = c.courtStatus || '';
     return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
@@ -572,9 +624,12 @@
     return;
   }
 
-  // Make sure we start on Party Name tab
-  await clickPartyNameTab();
-  await wait(500);
+  // Initial setup - switch to Party Name tab
+  const initialTab = await switchToPartyNameTab();
+  if (!initialTab) {
+    log('❌ Could not switch to Party Name tab. Please click it manually and re-run.', 'err');
+    return;
+  }
 
   for (let i = 0; i < cases.length; i++) {
     if (window._cscStop) { log('⏹ Stopped by user', 'w'); break; }
@@ -582,8 +637,6 @@
     const c = cases[i];
     const instr = getInstrument(c);
     const defName = getDefendant(c);
-    const plaintiff = getPlaintiff(c);
-    const csvDate = getFilingDate(c);
 
     log(`\n🔎 [${i + 1}/${cases.length}] ${instr}`, 's');
     log(`  Defendant: ${defName}`, 'i');
@@ -592,44 +645,52 @@
     if (!parsed || !parsed.last) {
       S.e++; S.done++; upd();
       log('  ❌ Could not parse defendant name', 'err');
-      await save(instr, { 
-        courtStatus: 'ERROR', 
+      await save(instr, {
+        courtStatus: 'ERROR',
         courtStatusNote: 'Could not parse defendant name'
       });
       continue;
     }
 
-    // For businesses, search differently
-    if (parsed.isBusiness) {
-      log(`  ℹ️ Business entity - searching by name only`, 'i');
-    }
+    const searchResult = await doSearch(parsed.last, parsed.first, parsed.mid);
 
-    const table = await doSearch(parsed.last, parsed.first, parsed.mid);
-    if (!table) {
+    if (!searchResult.success) {
       S.e++; S.done++; upd();
-      log('  ❌ Search returned no results', 'err');
-      await save(instr, { 
-        courtStatus: 'ERROR', 
-        courtStatusNote: 'Search returned no results'
+      log(`  ❌ Search error: ${searchResult.error}`, 'err');
+      await save(instr, {
+        courtStatus: 'ERROR',
+        courtStatusNote: searchResult.error
       });
-      // Reload page to reset form state
+      // Reload page to reset
+      log('  🔄 Reloading page to reset...', 'i');
       window.location.reload();
-      await wait(3000);
+      await wait(5000);
       continue;
     }
 
-    const choice = await chooseBestByOpeningJackets(table, c);
-    if (choice.notFound) {
+    if (!searchResult.table) {
       S.n++; S.done++; upd();
-      log(`  ❌ No matching case found (${choice.reason})`, 'w');
-      await save(instr, { 
-        courtStatus: 'NOT_FOUND', 
-        courtStatusNote: choice.reason
+      log('  ❌ No matching cases found', 'w');
+      await save(instr, {
+        courtStatus: 'NOT_FOUND',
+        courtStatusNote: 'No cases found for this defendant name'
       });
       continue;
     }
 
-    const j = choice.best.jacket;
+    const match = await chooseBestMatch(searchResult.table, c);
+
+    if (match.notFound) {
+      S.n++; S.done++; upd();
+      log(`  ❌ No good match: ${match.reason}`, 'w');
+      await save(instr, {
+        courtStatus: 'NOT_FOUND',
+        courtStatusNote: match.reason
+      });
+      continue;
+    }
+
+    const j = match.best.jacket;
     const cls = classify(j.caseStatus, j.caseDisposition);
 
     if (cls.normalized === 'OPEN') S.o++;
@@ -649,8 +710,8 @@
       courtFiledDate: j.caseInitiationDate || '',
       courtDispositionDate: j.dispositionDate || '',
       courtDocketNumber: j.docketNumber || '',
-      courtMatchScore: choice.best.finalScore || null,
-      courtStatusNote: `Matched with score ${(choice.best.finalScore * 100).toFixed(0)}%`
+      courtMatchScore: match.best.finalScore || null,
+      courtStatusNote: `Matched with score ${(match.best.finalScore * 100).toFixed(0)}%`
     });
 
     await wait(DELAY);
