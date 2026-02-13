@@ -1,12 +1,8 @@
 /* court-status-bookmarklet.js
  *
- * This runs in YOUR browser on the NJ Courts search page.
- * It pulls Camden cases from your server and searches them one-by-one.
- *
- * IMPORTANT: CAPTCHA cannot be bypassed. This script:
- *  - avoids hidden iframes (common cause of captcha failure)
- *  - pauses when captcha/session invalidation is detected
- *  - lets user solve captcha manually then resume
+ * Goal: reliably run case lookups on NJ Courts WITHOUT triggering CAPTCHA as often.
+ * Key change: Safe Mode (default) fills fields but you manually click Search.
+ * Also: configurable selectors via overlay UI + better waiting for results.
  */
 
 /* global __SERVER_URL__, __AUTH_TOKEN__, __TEST_MODE__ */
@@ -16,12 +12,38 @@
   const AUTH_TOKEN = "__AUTH_TOKEN__";
   const TEST_MODE = "__TEST_MODE__" === "true";
 
-  // ---- Tunables (slower = less CAPTCHA risk) ----
-  const DELAY_BETWEEN_CASES_MS = 2500;   // base delay
-  const JITTER_MS = 1500;               // random extra delay
-  const MAX_CONSECUTIVE_CAPTCHA_HITS = 2;
+  // ---- Tunables ----
+  const DELAY_BETWEEN_CASES_MS = 3500;  // slower
+  const JITTER_MS = 2500;
+  const MAX_WAIT_FOR_RESULTS_MS = 12000;
 
-  // ---- UI overlay helpers ----
+  // ---- Persisted UI config ----
+  const CFG_KEY = "njcs_cfg_v2";
+  const STATE_KEY = "njcs_runner_state_v2";
+
+  const defaultCfg = {
+    safeMode: true,               // IMPORTANT: default ON
+    useLastNameOnly: true,        // helps matching
+    docketInputSelector: "",      // optional override
+    partyInputSelector: "",       // optional override
+    searchButtonSelector: "",     // optional override
+    resultsSelector: "",          // optional override (highly recommended)
+    noResultsRegex: "no results|no records|not found",
+    captchaRegex: "captcha verification has failed|system is available.*captcha|captcha.*failed for this session",
+  };
+
+  function loadCfg() {
+    try {
+      return { ...defaultCfg, ...(JSON.parse(localStorage.getItem(CFG_KEY) || "null") || {}) };
+    } catch {
+      return { ...defaultCfg };
+    }
+  }
+  function saveCfg(cfg) {
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  }
+
+  // ---- Overlay UI ----
   function ensureOverlay() {
     let el = document.getElementById("njcs-overlay");
     if (el) return el;
@@ -31,27 +53,112 @@
     el.style.cssText = `
       position: fixed; z-index: 999999;
       top: 16px; right: 16px;
-      width: 360px;
+      width: 420px;
       background: rgba(20,20,20,0.95);
       color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
       border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 14px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     `;
+
     el.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="font-weight:700;">NJ Court Status Runner</div>
+        <div style="font-weight:800;">NJ Court Status Runner</div>
         <button id="njcs-close" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:10px;padding:6px 10px;cursor:pointer;">Close</button>
       </div>
+
       <div id="njcs-status" style="margin-top:10px;line-height:1.35;font-size:13px;"></div>
+
       <div id="njcs-actions" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;"></div>
+
+      <details style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.12);padding-top:10px;">
+        <summary style="cursor:pointer;opacity:0.9;">Advanced settings (recommended once)</summary>
+        <div style="margin-top:10px;font-size:12px;opacity:0.95;">
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+            <input type="checkbox" id="njcs-safeMode" />
+            <span><b>Safe Mode</b> (fills fields, YOU click Search)</span>
+          </label>
+
+          <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+            <input type="checkbox" id="njcs-lastNameOnly" />
+            <span>Use last-name-only for defendant</span>
+          </label>
+
+          <div style="display:grid;grid-template-columns: 1fr; gap:8px;">
+            <input id="njcs-partySel" placeholder="Party input CSS selector (optional)" style="width:100%;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;" />
+            <input id="njcs-docketSel" placeholder="Docket input CSS selector (optional)" style="width:100%;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;" />
+            <input id="njcs-searchSel" placeholder="Search button CSS selector (optional)" style="width:100%;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;" />
+            <input id="njcs-resultsSel" placeholder="RESULTS container selector (strongly recommended)" style="width:100%;padding:8px;border-radius:10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:#fff;" />
+          </div>
+
+          <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button id="njcs-saveCfg" style="cursor:pointer;border-radius:10px;padding:8px 10px;border:1px solid rgba(255,255,255,0.2);background:rgba(80,160,255,0.9);color:#fff;">Save settings</button>
+            <button id="njcs-testFind" style="cursor:pointer;border-radius:10px;padding:8px 10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;">Test find fields</button>
+            <button id="njcs-resetCfg" style="cursor:pointer;border-radius:10px;padding:8px 10px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;">Reset settings</button>
+          </div>
+
+          <div style="margin-top:10px;opacity:0.8;line-height:1.35;">
+            Tip: To get a selector, right-click the input/button → Inspect → right-click the highlighted HTML → Copy → Copy selector.
+          </div>
+        </div>
+      </details>
+
       <div id="njcs-log" style="margin-top:12px;max-height:220px;overflow:auto;font-size:12px;opacity:0.9;"></div>
     `;
-    document.body.appendChild(el);
 
+    document.body.appendChild(el);
     document.getElementById("njcs-close").onclick = () => el.remove();
+
+    // bind settings UI
+    const cfg = loadCfg();
+    setCfgUI(cfg);
+
+    document.getElementById("njcs-saveCfg").onclick = () => {
+      const next = getCfgFromUI();
+      saveCfg(next);
+      log("✅ Saved settings.");
+    };
+
+    document.getElementById("njcs-resetCfg").onclick = () => {
+      saveCfg({ ...defaultCfg });
+      setCfgUI(loadCfg());
+      log("✅ Reset settings to default.");
+    };
+
+    document.getElementById("njcs-testFind").onclick = () => {
+      const testCfg = getCfgFromUI();
+      const found = locateFields(testCfg);
+      log(`Test find:
+- partyInput: ${found.partyInput ? "✅" : "❌"}
+- docketInput: ${found.docketInput ? "✅" : "❌"}
+- searchBtn: ${found.searchBtn ? "✅" : "❌"}
+- resultsEl: ${found.resultsEl ? "✅" : "❌ (set results selector)"}`);
+      // highlight found items briefly
+      [found.partyInput, found.docketInput, found.searchBtn, found.resultsEl].filter(Boolean).forEach(flashOutline);
+    };
+
     return el;
+  }
+
+  function setCfgUI(cfg) {
+    document.getElementById("njcs-safeMode").checked = !!cfg.safeMode;
+    document.getElementById("njcs-lastNameOnly").checked = !!cfg.useLastNameOnly;
+    document.getElementById("njcs-partySel").value = cfg.partyInputSelector || "";
+    document.getElementById("njcs-docketSel").value = cfg.docketInputSelector || "";
+    document.getElementById("njcs-searchSel").value = cfg.searchButtonSelector || "";
+    document.getElementById("njcs-resultsSel").value = cfg.resultsSelector || "";
+  }
+
+  function getCfgFromUI() {
+    const cfg = loadCfg();
+    cfg.safeMode = document.getElementById("njcs-safeMode").checked;
+    cfg.useLastNameOnly = document.getElementById("njcs-lastNameOnly").checked;
+    cfg.partyInputSelector = document.getElementById("njcs-partySel").value.trim();
+    cfg.docketInputSelector = document.getElementById("njcs-docketSel").value.trim();
+    cfg.searchButtonSelector = document.getElementById("njcs-searchSel").value.trim();
+    cfg.resultsSelector = document.getElementById("njcs-resultsSel").value.trim();
+    return cfg;
   }
 
   function setStatus(html) {
@@ -91,17 +198,20 @@
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
   }
-
   function jitterDelay() {
     return DELAY_BETWEEN_CASES_MS + Math.floor(Math.random() * JITTER_MS);
+  }
+
+  function flashOutline(el) {
+    const prev = el.style.outline;
+    el.style.outline = "3px solid rgba(80,160,255,0.9)";
+    setTimeout(() => (el.style.outline = prev), 900);
   }
 
   // ---- Server calls ----
   async function apiGetCases() {
     const url = `${SERVER_URL}/api/camden?sortBy=daysSinceFiling&sortOrder=desc${TEST_MODE ? "&test=true" : ""}`;
-    const res = await fetch(url, {
-      headers: { "x-auth-token": AUTH_TOKEN }
-    });
+    const res = await fetch(url, { headers: { "x-auth-token": AUTH_TOKEN } });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
       throw new Error(`Server /api/camden failed (${res.status}): ${t.slice(0, 200)}`);
@@ -126,16 +236,10 @@
     return res.json();
   }
 
-  // ---- NJ Courts page interaction (generic, DOM-based) ----
-  // Because NJ Courts pages vary, we use a best-effort strategy:
-  // 1) find likely inputs for case/docket/party
-  // 2) fill defendant (or docket if present)
-  // 3) click a Search button
-  // 4) detect either "captcha/session invalid" or read a results table/text
+  // ---- DOM locating helpers ----
   function findInputByHints(hints) {
     const inputs = Array.from(document.querySelectorAll("input, textarea"));
     const lower = (s) => (s || "").toLowerCase();
-
     return inputs.find(inp => {
       const id = lower(inp.id);
       const name = lower(inp.name);
@@ -155,79 +259,155 @@
     });
   }
 
-  function pageHasCaptchaFailure() {
-    const bodyText = (document.body?.innerText || "").toLowerCase();
-    return (
-      bodyText.includes("captcha verification has failed") ||
-      bodyText.includes("captcha") && bodyText.includes("failed for this session") ||
-      bodyText.includes("system is available") && bodyText.includes("captcha")
-    );
+  function locateFields(cfg) {
+    const partyInput = cfg.partyInputSelector
+      ? document.querySelector(cfg.partyInputSelector)
+      : findInputByHints(["defendant", "party", "last name", "name"]);
+
+    const docketInput = cfg.docketInputSelector
+      ? document.querySelector(cfg.docketInputSelector)
+      : findInputByHints(["docket", "case", "case number", "casenumber"]);
+
+    const searchBtn = cfg.searchButtonSelector
+      ? document.querySelector(cfg.searchButtonSelector)
+      : findButtonByText(["search", "submit", "find", "go"]);
+
+    const resultsEl = cfg.resultsSelector ? document.querySelector(cfg.resultsSelector) : null;
+
+    return { partyInput, docketInput, searchBtn, resultsEl };
   }
 
-  function readBestEffortResultSummary() {
-    // Try to find anything that looks like a results table
+  function pageHasCaptchaFailure(cfg) {
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+    const re = new RegExp(cfg.captchaRegex, "i");
+    // also catch common captcha widgets
+    const hasWidget =
+      !!document.querySelector("iframe[src*='recaptcha']") ||
+      !!document.querySelector("[id*='captcha'], [class*='captcha']");
+    return re.test(bodyText) || hasWidget;
+  }
+
+  function escapeHtml(s) {
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function normalizeDefendantName(name, useLastNameOnly) {
+    const n = String(name || "").trim();
+    if (!n) return "";
+    if (!useLastNameOnly) return n;
+
+    // common formats: "LAST FIRST", "LAST, FIRST", "LAST FIRST M"
+    // pick the first token before comma/space.
+    const beforeComma = n.split(",")[0].trim();
+    const firstToken = beforeComma.split(/\s+/)[0].trim();
+    return firstToken || beforeComma || n;
+  }
+
+  function getResultsSnapshot(cfg, found) {
+    // Prefer the configured results container if provided
+    if (found.resultsEl) {
+      const txt = found.resultsEl.innerText.replace(/\s+/g, " ").trim();
+      return txt.slice(0, 800);
+    }
+
+    // fallback: any table, but this is unreliable
     const table = document.querySelector("table");
     if (table) {
       const txt = table.innerText.replace(/\s+/g, " ").trim();
-      if (txt.length) return txt.slice(0, 500);
+      if (txt) return txt.slice(0, 600);
     }
-    // Fallback: look for common “no results” text
+
     const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-    if (/no results|no records|not found/i.test(bodyText)) return "No results found";
     return bodyText.slice(0, 400);
   }
 
-  async function runSearchOnPage({ docketNumber, defendantName }) {
-    // Try docket/case input first; else try party/defendant field
-    const docketInput = findInputByHints(["docket", "case", "case number", "casenumber"]);
-    const partyInput = findInputByHints(["defendant", "party", "name", "last name", "business"]);
+  async function waitForResultsOrCaptcha(cfg, found) {
+    const start = Date.now();
 
-    const searchBtn = findButtonByText(["search", "submit", "find", "go"]);
+    // quick checks
+    if (pageHasCaptchaFailure(cfg)) return { kind: "captcha" };
+    if (found.resultsEl && found.resultsEl.innerText.trim()) return { kind: "results" };
 
-    if (!searchBtn || (!docketInput && !partyInput)) {
+    return await new Promise((resolve) => {
+      const done = (kind) => {
+        try { obs.disconnect(); } catch {}
+        resolve({ kind });
+      };
+
+      const obs = new MutationObserver(() => {
+        if (pageHasCaptchaFailure(cfg)) return done("captcha");
+        if (found.resultsEl && found.resultsEl.innerText.trim().length > 0) return done("results");
+        if (Date.now() - start > MAX_WAIT_FOR_RESULTS_MS) return done("timeout");
+      });
+
+      obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
+      // safety timeout
+      setTimeout(() => done("timeout"), MAX_WAIT_FOR_RESULTS_MS + 200);
+    });
+  }
+
+  async function runSearchOnPage(cfg, { docketNumber, defendantName }, found) {
+    if (!found.searchBtn || (!found.docketInput && !found.partyInput)) {
       return {
         courtStatus: "ERROR",
-        courtDisposition: "Could not find search fields/buttons on this page. Open the NJ Courts search screen first."
+        courtDisposition:
+          "Could not locate search fields/buttons on this page. Use Advanced settings → Test find fields, then set CSS selectors."
       };
     }
 
-    // Clear + fill
-    if (docketInput && docketNumber) {
-      docketInput.focus();
-      docketInput.value = "";
-      docketInput.dispatchEvent(new Event("input", { bubbles: true }));
-      docketInput.value = docketNumber;
-      docketInput.dispatchEvent(new Event("input", { bubbles: true }));
-    } else if (partyInput && defendantName) {
-      partyInput.focus();
-      partyInput.value = "";
-      partyInput.dispatchEvent(new Event("input", { bubbles: true }));
-      partyInput.value = defendantName;
-      partyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    // fill
+    const cleanDef = normalizeDefendantName(defendantName, cfg.useLastNameOnly);
+
+    if (found.docketInput && docketNumber) {
+      found.docketInput.focus();
+      found.docketInput.value = "";
+      found.docketInput.dispatchEvent(new Event("input", { bubbles: true }));
+      found.docketInput.value = docketNumber;
+      found.docketInput.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (found.partyInput && cleanDef) {
+      found.partyInput.focus();
+      found.partyInput.value = "";
+      found.partyInput.dispatchEvent(new Event("input", { bubbles: true }));
+      found.partyInput.value = cleanDef;
+      found.partyInput.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
-    // Click search
-    searchBtn.click();
+    flashOutline(found.searchBtn);
 
-    // Wait a bit for results to load
-    await sleep(1200);
-
-    if (pageHasCaptchaFailure()) {
-      return { courtStatus: "CAPTCHA", courtDisposition: "Captcha verification has failed for this session" };
+    if (cfg.safeMode) {
+      // Human click
+      return {
+        courtStatus: "NEEDS_USER_SEARCH",
+        courtDisposition: `Filled fields for defendant: "${cleanDef}". Click Search on the page, then press "Capture Results".`
+      };
     }
 
-    const summary = readBestEffortResultSummary();
-    // Minimal mapping (customize later once you confirm what the page shows)
-    const isFound = summary && !/no results|no records|not found/i.test(summary);
+    // Auto click (more CAPTCHA risk)
+    found.searchBtn.click();
 
-    return {
-      courtStatus: isFound ? "FOUND" : "NOT_FOUND",
-      courtDisposition: summary
-    };
+    const wait = await waitForResultsOrCaptcha(cfg, found);
+    if (wait.kind === "captcha") {
+      return { courtStatus: "CAPTCHA", courtDisposition: "Captcha/session invalid detected. Solve captcha and resume." };
+    }
+    if (wait.kind === "timeout") {
+      const snap = getResultsSnapshot(cfg, found);
+      return { courtStatus: "TIMEOUT", courtDisposition: `Timed out waiting for results. Snapshot: ${snap}` };
+    }
+
+    const summary = getResultsSnapshot(cfg, found);
+    const noRe = new RegExp(cfg.noResultsRegex, "i");
+    const isFound = summary && !noRe.test(summary);
+
+    return { courtStatus: isFound ? "FOUND" : "NOT_FOUND", courtDisposition: summary };
   }
 
-  // ---- Runner state (resume support) ----
-  const STATE_KEY = "njcs_runner_state_v1";
+  // ---- Runner state ----
   function saveState(state) {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   }
@@ -239,11 +419,12 @@
     localStorage.removeItem(STATE_KEY);
   }
 
-  let paused = false;
   let shouldStop = false;
 
   async function main() {
     ensureOverlay();
+    const cfg = loadCfg();
+
     setStatus("Starting… fetching cases from your server.");
     setActions([{ label: "Stop", kind: "secondary", onClick: () => (shouldStop = true) }]);
 
@@ -251,7 +432,7 @@
     try {
       payload = await apiGetCases();
     } catch (e) {
-      setStatus(`❌ Failed to fetch cases.<br><code>${escapeHtml(e.message)}</code><br><br>Double-check your token/password.`);
+      setStatus(`❌ Failed to fetch cases.<br><code>${escapeHtml(e.message)}</code><br><br>Check: Render env SITE_PASSWORD = "${escapeHtml(AUTH_TOKEN)}"`);
       log("Fetch cases failed: " + e.message);
       return;
     }
@@ -260,16 +441,15 @@
     if (TEST_MODE) cases = cases.slice(0, 10);
 
     if (!cases.length) {
-      setStatus("No cases returned from server. (Check upload + auth token.)");
+      setStatus("No cases returned from server.");
       return;
     }
 
     const saved = loadState();
     let startIndex = saved?.index || 0;
 
-    setStatus(`✅ Loaded ${cases.length} cases.<br>Starting at #${startIndex + 1}.`);
-
-    let captchaHits = 0;
+    setStatus(`✅ Loaded ${cases.length} cases.<br>Starting at #${startIndex + 1}.<br><small>Safe Mode: ${cfg.safeMode ? "ON" : "OFF"}</small>`);
+    log(`Safe Mode is ${cfg.safeMode ? "ON (recommended)" : "OFF (higher CAPTCHA risk)"}`);
 
     for (let i = startIndex; i < cases.length; i++) {
       if (shouldStop) {
@@ -281,48 +461,81 @@
       const c = cases[i];
       const instrumentNumber = c.instrumentNumber || c.caseNumber || `idx-${i}`;
       const defendantName = c.primaryDefendant || c.defendant || "";
-      const docketNumber = c.courtDocketNumber || c.docketNumber || ""; // if you ever have it
+      const docketNumber = c.courtDocketNumber || c.docketNumber || "";
 
       saveState({ index: i });
 
-      setStatus(`🔎 [${i + 1}/${cases.length}] ${instrumentNumber}<br><small>${escapeHtml(defendantName || "")}</small>`);
-      log(`Searching ${instrumentNumber}…`);
+      const cfgNow = loadCfg(); // reload in case user changed settings mid-run
+      const found = locateFields(cfgNow);
 
-      const result = await runSearchOnPage({ docketNumber, defendantName });
+      setStatus(`🔎 [${i + 1}/${cases.length}] ${escapeHtml(instrumentNumber)}<br><small>${escapeHtml(defendantName)}</small>`);
+      log(`Preparing search for ${instrumentNumber}…`);
 
-      if (result.courtStatus === "CAPTCHA") {
-        captchaHits++;
-        log("CAPTCHA/session invalid detected.");
+      const result = await runSearchOnPage(cfgNow, { docketNumber, defendantName }, found);
 
-        if (captchaHits >= MAX_CONSECUTIVE_CAPTCHA_HITS) {
-          paused = true;
-          setStatus(`⚠️ CAPTCHA failed for this session.<br><br>
-            1) Solve the CAPTCHA on this page (or refresh and solve it).<br>
-            2) Click Resume.<br><br>
-            <small>We paused to avoid burning the session.</small>`);
+      // If Safe Mode, you click Search, then we capture results on demand
+      if (result.courtStatus === "NEEDS_USER_SEARCH") {
+        setStatus(`🧍 Manual step required (Safe Mode).<br>${escapeHtml(result.courtDisposition)}`);
 
-          await new Promise((resolve) => {
-            setActions([
-              { label: "Resume", kind: "primary", onClick: () => { paused = false; captchaHits = 0; resolve(); } },
-              { label: "Stop", kind: "secondary", onClick: () => { shouldStop = true; resolve(); } }
-            ]);
-          });
+        await new Promise((resolve) => {
+          setActions([
+            {
+              label: "Capture Results",
+              kind: "primary",
+              onClick: async () => {
+                const freshCfg = loadCfg();
+                const freshFound = locateFields(freshCfg);
+                const wait = await waitForResultsOrCaptcha(freshCfg, freshFound);
+                if (wait.kind === "captcha") {
+                  setStatus("⚠️ CAPTCHA detected. Solve it on the page, then click Capture Results again.");
+                  log("CAPTCHA detected during capture.");
+                  return;
+                }
+                const summary = getResultsSnapshot(freshCfg, freshFound);
+                const noRe = new RegExp(freshCfg.noResultsRegex, "i");
+                const isFound = summary && !noRe.test(summary);
+                const finalRes = { courtStatus: isFound ? "FOUND" : "NOT_FOUND", courtDisposition: summary };
 
-          if (shouldStop) {
-            setStatus("Stopped.");
-            return;
-          }
-        } else {
-          // Short wait then continue (maybe it was a transient message)
-          await sleep(3000);
+                try {
+                  await apiPostUpdate(instrumentNumber, finalRes);
+                  log(`✅ ${instrumentNumber} → ${finalRes.courtStatus}`);
+                } catch (e) {
+                  log(`❌ Update failed for ${instrumentNumber}: ${e.message}`);
+                }
+
+                resolve();
+              }
+            },
+            { label: "Skip", kind: "secondary", onClick: () => resolve() },
+            { label: "Stop", kind: "secondary", onClick: () => { shouldStop = true; resolve(); } }
+          ]);
+        });
+
+        if (shouldStop) {
+          setStatus("Stopped.");
+          return;
         }
 
-        // Retry this same case after resume/short wait
-        i--;
+        await sleep(jitterDelay());
         continue;
       }
 
-      // Post update back to your server
+      // If CAPTCHA detected in auto mode
+      if (result.courtStatus === "CAPTCHA") {
+        setStatus(`⚠️ CAPTCHA/session invalid.<br>1) Solve CAPTCHA or refresh page and solve it.<br>2) Click Resume.`);
+        log("CAPTCHA/session invalid detected.");
+        await new Promise((resolve) => {
+          setActions([
+            { label: "Resume", kind: "primary", onClick: () => resolve() },
+            { label: "Stop", kind: "secondary", onClick: () => { shouldStop = true; resolve(); } }
+          ]);
+        });
+        if (shouldStop) return;
+        i--; // retry same case
+        continue;
+      }
+
+      // Normal auto-mode posting
       try {
         await apiPostUpdate(instrumentNumber, result);
         log(`✅ ${instrumentNumber} → ${result.courtStatus}`);
@@ -338,21 +551,10 @@
     setActions([{ label: "Close", kind: "secondary", onClick: () => document.getElementById("njcs-overlay")?.remove() }]);
   }
 
-  // Small HTML escape for overlay rendering
-  function escapeHtml(s) {
-    return String(s || "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  // Start
   main().catch(err => {
     ensureOverlay();
     setStatus(`❌ Unexpected error: <code>${escapeHtml(err.message)}</code>`);
-    log("Unexpected error: " + err.stack);
+    log("Unexpected error: " + (err.stack || err.message));
   });
 
 })();
