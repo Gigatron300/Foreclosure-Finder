@@ -605,7 +605,11 @@ app.options('/api/camden/court-status-update', cors());
 app.post('/api/camden/court-status-update', cors({
   origin: '*',
   allowedHeaders: ['Content-Type', 'X-Auth-Token']
-}), checkAuth, async (req, res) => {
+}), (req, res, next) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token === SITE_PASSWORD) next();
+  else res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
   try {
     const { instrumentNumber, courtData } = req.body;
     if (!instrumentNumber || !courtData) {
