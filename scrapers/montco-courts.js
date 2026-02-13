@@ -1,3 +1,4 @@
+// montco-courts.js  (V3 SINGLE-FILE DROP-IN)
 // Montgomery County Courts scraper - WAIT FOR FULL PAGE LOAD
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
@@ -23,17 +24,19 @@ const MONTCO_TOWNS = [
 ];
 
 const CONFIG = {
-  requestDelay: 1200,        // Slightly slower to be safe with more cases
-  pageLoadWait: 3000,        // Wait for dynamic content
-  batchSize: 15,             // Restart browser every 15 cases
-  batchPause: 4000,          // Pause between batches
-  maxCasesToProcess: 0,      // 0 = no limit, process ALL cases
-  testModeLimit: 10,         // When test mode enabled, only process this many
+  requestDelay: 1200,
+  pageLoadWait: 3000,
+  batchSize: 15,
+  batchPause: 4000,
+  maxCasesToProcess: 0,
+  testModeLimit: 10,
+
   // Date ranges in MONTHS (calculated dynamically from today)
-  minMonthsOld: 6,           // Only cases at least 6 months old
-  maxMonthsOld: 24,          // Only cases up to 24 months old
-  sweetSpotMinMonths: 9,     // Sweet spot starts at 9 months
-  sweetSpotMaxMonths: 18,    // Sweet spot ends at 18 months
+  minMonthsOld: 6,
+  maxMonthsOld: 24,
+  sweetSpotMinMonths: 9,
+  sweetSpotMaxMonths: 18,
+
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
   csvPath: './data/montco-cases.csv'
 };
@@ -53,7 +56,7 @@ async function parseCSV(csvPath) {
   const content = await fs.readFile(csvPath, 'utf8');
   const lines = content.split(/\r?\n/).filter(line => line.trim());
   if (lines.length < 2) throw new Error('CSV empty');
-  
+
   const header = parseCSVLine(lines[0]);
   const col = {
     caseNumber: header.findIndex(h => h.toLowerCase().includes('casenumber')),
@@ -63,7 +66,7 @@ async function parseCSV(csvPath) {
     judgement: header.findIndex(h => h.toLowerCase().includes('judgement')),
     status: header.findIndex(h => h.toLowerCase().includes('status'))
   };
-  
+
   const cases = [];
   for (let i = 1; i < lines.length; i++) {
     const v = parseCSVLine(lines[i]);
@@ -101,114 +104,195 @@ function parseDate(dateStr) {
   return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
 }
 
+/* ===========================================================
+   ✅ V3 SCORING (4 Pillars)
+   - Pressure Stage (0–30)
+   - Resistance (-20..+10)
+   - Momentum (0–25)
+   - Fatigue (0–25)
+   Returns: { score, grade, pillars, factors }
+   =========================================================== */
 function calculateScore(c) {
   return calculateV3Score(c);
 }
 
 function calculateV3Score(c) {
   const docket = c.docket || {};
-  const text = (docket.allText || '').toUpperCase();
-  const types = (docket.allTypes || '').toUpperCase();
-  const days = c.daysOpen || 0;
-  const months = Math.round(days / 30);
   const entries = docket.entries || 0;
+  const textAll = (docket.allText || '').toUpperCase();
+  const typesAll = (docket.allTypes || '').toUpperCase();
+  const lastText = (docket.lastEventText || '').toUpperCase();
+  const lastType = (docket.lastEventType || '').toUpperCase();
+  const daysOpen = c.daysOpen || 0;
+  const monthsOpen = c.monthsOpen || Math.round(daysOpen / 30);
   const daysSinceLast = docket.daysSinceLastFiling || 0;
+  const continuances = docket.continuanceCount || 0;
 
-  let pressure = 0;
-  let resistance = 0;
-  let momentum = 0;
-  let fatigue = 0;
-
+  // Helpers
+  const has = (s) => textAll.includes(s);
+  const lastHas = (s) => lastText.includes(s);
   const factors = [];
 
-  // ----------------------------
-  // 🧱 PILLAR 1 — PRESSURE (0–30)
-  // ----------------------------
+  // --- Identify defense vs admin/progress in last event
+  const lastLooksDefensive =
+    lastHas('ANSWER') ||
+    lastHas('NEW MATTER') ||
+    lastHas('COUNTERCLAIM') ||
+    lastHas('PRELIMINARY OBJECTION') ||
+    lastHas('OBJECTION') ||
+    lastHas('OPPOSITION') ||
+    lastHas('DEFENDANT') && lastHas('MOTION');
 
-  if (days < 120) pressure += 0;
-  else if (days < 180) pressure += 5;
-  else if (days < 270) pressure += 12;
-  else if (days <= 540) pressure += 20;
-  else if (days <= 720) pressure += 15;
-  else pressure += 8;
+  const lastLooksAdminOrProgress =
+    lastHas('STAY IS LIFTED') || lastHas('STAY LIFTED') ||
+    (lastHas('DISCHARGE') && lastHas('BANKRUPTCY')) ||
+    lastHas('PRAECIPE') || lastHas('REINSTATE') || lastHas('REACTIVATE') ||
+    lastHas('CIVIL CASE MANAGEMENT') || lastHas('DISCOVERY') ||
+    lastHas('ALTERNATE SERVICE') || lastHas('POSTED PREMISES') ||
+    lastHas('NOT FOUND') || lastHas('FAILURE OF SERVICE') ||
+    lastHas('SERVED') || lastHas('SERVICE');
 
-  if (text.includes("STAY IS LIFTED")) pressure += 5;
-  if (text.includes("DISCHARGE") && text.includes("BANKRUPTCY")) pressure += 5;
-  if (text.includes("MOTION FOR SUMMARY JUDGMENT") && text.includes("PLAINTIFF"))
-    pressure += 5;
+  /* ---------------------------
+     🧱 PILLAR 1: PRESSURE (0–30)
+     --------------------------- */
+  let pressure = 0;
 
-  pressure = Math.min(30, pressure);
+  // Age band (max 20)
+  if (daysOpen < 120) { pressure += 0; }
+  else if (daysOpen < 180) { pressure += 5; }
+  else if (daysOpen < 270) { pressure += 12; }
+  else if (daysOpen <= 540) { pressure += 20; }
+  else if (daysOpen <= 720) { pressure += 15; }
+  else { pressure += 8; }
 
-  // ----------------------------
-  // 🛡 PILLAR 2 — RESISTANCE (-20 to +10)
-  // ----------------------------
+  // Acceleration events (max +10; overall cap at 30)
+  let accel = 0;
+  if (has('STAY IS LIFTED') || has('STAY LIFTED')) accel += 5;
+  if (has('DISCHARGE') && has('BANKRUPTCY')) accel += 5;
+  if (has('MOTION FOR SUMMARY JUDGMENT') && (has('PLAINTIFF') || has('PLTF'))) accel += 5;
+  if (has('MOTION FOR SUMMARY JUDGMENT') && (has('GRANTED') && (has('PLAINTIFF') || has('PLTF')))) accel += 10;
 
-  if (types.includes("ANSWER") && text.includes("NEW MATTER"))
-    resistance -= 5;
+  accel = Math.min(10, accel);
+  pressure = Math.min(30, pressure + accel);
 
-  if (text.includes("COUNTERCLAIM"))
-    resistance -= 10;
+  if (daysOpen >= 270 && daysOpen <= 540) {
+    factors.push({ text: '🧱 Pressure: SWEET SPOT (9–18 months)', impact: '+20' });
+  } else {
+    factors.push({ text: `🧱 Pressure: ${monthsOpen} mo open`, impact: `+${Math.min(20, pressure)}` });
+  }
+  if (accel > 0) factors.push({ text: '🧱 Pressure: acceleration events present', impact: `+${accel}` });
 
-  if (text.includes("PRELIMINARY OBJECTION"))
-    resistance -= 5;
+  /* -------------------------------
+     🛡 PILLAR 2: RESISTANCE (-20..+10)
+     ------------------------------- */
+  let resistance = 0;
 
-  if (text.includes("MOTION FOR SUMMARY JUDGMENT") && text.includes("DEFENDANT"))
-    resistance -= 10;
+  const defenseSignals =
+    (typesAll.includes('ANSWER') && has('NEW MATTER')) ||
+    has('COUNTERCLAIM') ||
+    has('PRELIMINARY OBJECTION') ||
+    (has('MOTION FOR SUMMARY JUDGMENT') && has('DEFENDANT')) ||
+    (has('OBJECTION') && has('OPPOSITION'));
+
+  // Active resistance penalties
+  if (typesAll.includes('ANSWER') && has('NEW MATTER')) resistance -= 5;
+  if (has('COUNTERCLAIM')) resistance -= 10;
+  if (has('PRELIMINARY OBJECTION')) resistance -= 5;
+  if (has('MOTION FOR SUMMARY JUDGMENT') && has('DEFENDANT')) resistance -= 10;
+  if (has('OBJECTION') && has('OPPOSITION')) resistance -= 5;
 
   // Passive bonus
-  const hasDefense =
-    text.includes("ANSWER") ||
-    text.includes("COUNTERCLAIM") ||
-    text.includes("PRELIMINARY");
-
-  if (!hasDefense && months > 12)
-    resistance += 5;
+  if (!defenseSignals && monthsOpen > 12) resistance += 5;
+  if (!defenseSignals && !has('DEFENDANT') /* crude proxy: no defendant-coded events */) resistance += 5;
 
   resistance = Math.max(-20, Math.min(10, resistance));
 
-  // ----------------------------
-  // ⚙️ PILLAR 3 — MOMENTUM (0–25)
-  // ----------------------------
+  if (resistance < 0) factors.push({ text: '🛡 Resistance: active defense signals', impact: `${resistance}` });
+  else if (resistance > 0) factors.push({ text: '🛡 Resistance: passive defendant bonus', impact: `+${resistance}` });
+  else factors.push({ text: '🛡 Resistance: neutral', impact: '0' });
 
-  if (text.includes("ALTERNATE SERVICE")) momentum += 5;
-  if (text.includes("POSTED PREMISES")) momentum += 5;
-  if (text.includes("SERVICE") && text.includes("SERVED")) momentum += 3;
-  if (text.includes("CIVIL CASE MANAGEMENT")) momentum += 6;
-  if (text.includes("MOTION GRANTED") && text.includes("PLAINTIFF"))
-    momentum += 5;
+  /* --------------------------------
+     ⚙️ PILLAR 3: MOMENTUM (0–25)
+     -------------------------------- */
+  let momentum = 0;
 
-  momentum = Math.min(25, momentum);
+  if (has('ALTERNATE SERVICE')) momentum += 5;
+  if (has('POSTED PREMISES')) momentum += 5;
+  if (has('SERVICE') && (has('SERVED') || has('COMPLETED'))) momentum += 3;
+  if (has('CIVIL CASE MANAGEMENT') || has('DISCOVERY TO BE COMPLETED')) {
+    momentum += (daysOpen >= 270 && daysOpen <= 540) ? 8 : 6;
+  }
 
-  // ----------------------------
-  // 😓 PILLAR 4 — FATIGUE (0–25)
-  // ----------------------------
+  // Plaintiff MSJ outcomes (best-effort heuristics)
+  const plaintiffMSJ = has('MOTION FOR SUMMARY JUDGMENT') && (has('PLAINTIFF') || has('PLTF'));
+  if (plaintiffMSJ) momentum += 5;
+  if (plaintiffMSJ && has('GRANTED')) momentum += 10;
+  if (plaintiffMSJ && has('DENIED')) momentum -= 6; // defendant win slows momentum
 
-  const continuances = docket.continuanceCount || 0;
+  // Other plaintiff-progress: motion granted + plaintiff
+  if (has('MOTION GRANTED') && (has('PLAINTIFF') || has('PLTF'))) momentum += 5;
 
+  momentum = Math.max(0, Math.min(25, momentum));
+
+  factors.push({ text: '⚙️ Momentum: procedural progress', impact: `+${momentum}` });
+
+  /* ------------------------------
+     😓 PILLAR 4: FATIGUE (0–25)
+     ------------------------------ */
+  let fatigue = 0;
+
+  // Continuances
   if (continuances === 1) fatigue += 5;
-  if (continuances === 2) fatigue += 8;
-  if (continuances >= 3) fatigue += 12;
+  else if (continuances === 2) fatigue += 8;
+  else if (continuances >= 3) fatigue += 12;
 
-  if (text.includes("BANKRUPTCY") && text.includes("DISCHARGE"))
-    fatigue += 8;
+  // Failed bankruptcy attempt (pressure + fatigue)
+  if (has('DISCHARGE') && has('BANKRUPTCY')) fatigue += 8;
 
-  if (daysSinceLast > 120 && entries > 10)
-    fatigue += 6;
+  // Silence context-aware
+  if (entries >= 10 && daysSinceLast >= 120) {
+    fatigue += lastLooksDefensive ? 10 : 6;
+  } else if (entries >= 8 && daysSinceLast >= 90) {
+    fatigue += lastLooksDefensive ? 8 : 5;
+  }
 
   fatigue = Math.min(25, fatigue);
 
-  // ----------------------------
-  // FINAL SCORE
-  // ----------------------------
+  factors.push({ text: '😓 Fatigue: delays / stalls / burnout patterns', impact: `+${fatigue}` });
 
-  let score = pressure + resistance + momentum + fatigue;
+  /* ------------------------------
+     ⚠️ Small recency penalty (v3)
+     Only if last event looks defensive (not admin/progress)
+     ------------------------------ */
+  let recencyPenalty = 0;
+  if (!lastLooksAdminOrProgress && lastLooksDefensive && daysSinceLast > 0 && daysSinceLast < 14) recencyPenalty = -6;
+  else if (!lastLooksAdminOrProgress && lastLooksDefensive && daysSinceLast >= 14 && daysSinceLast < 30) recencyPenalty = -4;
+
+  if (recencyPenalty !== 0) factors.push({ text: '⚠️ Recency: very recent DEFENSIVE activity', impact: `${recencyPenalty}` });
+  else if (daysSinceLast > 0 && daysSinceLast < 14 && lastLooksAdminOrProgress)
+    factors.push({ text: '✅ Recency: recent admin/progress event (no penalty)', impact: '0' });
+
+  /* ------------------------------
+     FINAL SCORE
+     ------------------------------ */
+  let score = pressure + resistance + momentum + fatigue + recencyPenalty;
+
+  // Small “admin noise guardrail”:
+  // If huge entries but no defense, don’t let "entries" inflate anything implicitly.
+  // (v3 doesn't reward entries directly, but this avoids edge cases where momentum+fatigue
+  // are high from admin-only patterns.)
+  if (entries >= 15 && !defenseSignals && momentum < 10) {
+    score -= 3;
+    factors.push({ text: '🧽 Noise control: high docket volume mostly procedural', impact: '-3' });
+  }
+
   score = Math.max(0, Math.min(100, score));
 
-  let grade = "F";
-  if (score >= 80) grade = "A";
-  else if (score >= 65) grade = "B";
-  else if (score >= 50) grade = "C";
-  else if (score >= 35) grade = "D";
+  let grade = 'F';
+  if (score >= 80) grade = 'A';
+  else if (score >= 65) grade = 'B';
+  else if (score >= 50) grade = 'C';
+  else if (score >= 35) grade = 'D';
 
   return {
     score,
@@ -218,387 +302,14 @@ function calculateV3Score(c) {
   };
 }
 
-
-function calculateScore(c) {
-  // V3 is now the default scoring model
-  return calculateV3Score(c);
-}
-
-
-function calculateEnhancedScore(c) {
-  let score = 0;
-  const factors = [];
-  const docket = c.docket || {};
-  const entries = docket.entries || 0;
-  const docketText = (docket.allText || '').toUpperCase();
-  const docketTypes = (docket.allTypes || '').toUpperCase();
-  const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
-
-  // Prefer the last docket event text/type for recency-sensitive logic.
-  // (Aggregated text is useful for global pattern matching but can misclassify
-  // "very recent activity" when the most recent filing is administrative or
-  // pressure-resuming, e.g., STAY LIFTED.)
-  const lastEventText = (docket.lastEventText || '').toUpperCase();
-  const lastEventType = (docket.lastEventType || '').toUpperCase();
-
-  // Convenience: attempt to identify the plaintiff in docket text for "who filed it?" heuristics.
-  const plaintiffName = (c.plaintiff || '').toUpperCase();
-  const plaintiffToken = (plaintiffName.split(/\s+/).find(t => t && t.length >= 4) || '');
-  
-  // ============================================
-  // 1️⃣ CASE AGE SCORE (MAX 25 points)
-  // ============================================
-  const months = c.monthsOpen || Math.round((c.daysOpen || 0) / 30);
-  const days = c.daysOpen || 0;
-  
-  if (days < 120) {
-    factors.push({ text: '⏱️ Too early (<4 months) - owner likely in denial', impact: 0 });
-  } else if (days >= 120 && days < 180) {
-    score += 5;
-    factors.push({ text: '⏱️ Early stage (4-6 months)', impact: +5 });
-  } else if (days >= 180 && days < 270) {
-    score += 12;
-    factors.push({ text: '⏱️ Building pressure (6-9 months)', impact: +12 });
-  } else if (days >= 270 && days <= 540) {
-    score += 25;
-    factors.push({ text: '🎯 SWEET SPOT (9-18 months) - maximum pressure', impact: +25 });
-  } else if (days > 540 && days <= 720) {
-    score += 18;
-    factors.push({ text: '⏱️ Late stage (18-24 months)', impact: +18 });
-  } else if (days > 720) {
-    score += 10;
-    factors.push({ text: '⏱️ Very old case (>24 months) - may be zombie', impact: +10 });
-  }
-  
-  // ============================================
-  // 2️⃣ DOCKET ACTIVITY INTENSITY (MAX 20 points)
-  // ============================================
-  if (entries <= 4) {
-    score += 2;
-    factors.push({ text: `📋 Low activity (${entries} entries)`, impact: +2 });
-  } else if (entries >= 5 && entries <= 8) {
-    score += 8;
-    factors.push({ text: `📋 Moderate activity (${entries} entries)`, impact: +8 });
-  } else if (entries >= 9 && entries <= 14) {
-    score += 14;
-    factors.push({ text: `📋 High activity (${entries} entries) - decision fatigue`, impact: +14 });
-  } else if (entries >= 15) {
-    score += 20;
-    factors.push({ text: `📋 Very high activity (${entries} entries) - exhaustion likely`, impact: +20 });
-  }
-  
-  // ============================================
-  // 3️⃣ DELAY & CONTINUANCE SIGNALS (with diminishing returns)
-  // ============================================
-  const continuances = docket.continuanceCount || 0;
-  if (continuances > 0) {
-    // Diminishing returns: 1-3: +5 each, 4-6: +3 each, >6: +1 each
-    let delayPoints = 0;
-    for (let i = 1; i <= continuances; i++) {
-      if (i <= 3) delayPoints += 5;
-      else if (i <= 6) delayPoints += 3;
-      else delayPoints += 1;
-    }
-    delayPoints = Math.min(25, delayPoints); // Cap at 25
-    score += delayPoints;
-    factors.push({ text: `🔄 ${continuances} continuance(s) - mounting costs & fatigue`, impact: +delayPoints });
-  }
-  
-  // ============================================
-  // 4️⃣ RESISTANCE vs CAPITULATION (-25 to +20)
-  // ============================================
-  
-  // Track if defendant is actively fighting (for "false hope" check)
-  let activeFighting = false;
-  
-  // NEGATIVE: Still fighting
-  if (docketTypes.includes('ANSWER') && docketText.includes('NEW MATTER')) {
-    score -= 5;
-    activeFighting = true;
-    factors.push({ text: '⚔️ Answer & New Matter filed - defendant fighting', impact: -5 });
-  }
-  if (docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS')) {
-    score -= 5;
-    activeFighting = true;
-    factors.push({ text: '⚔️ Preliminary Objections - active resistance', impact: -5 });
-  }
-  if (docketText.includes('OBJECTION') && docketText.includes('OPPOSITION')) {
-    score -= 5;
-    activeFighting = true;
-    factors.push({ text: '⚔️ Objection/Opposition filed', impact: -5 });
-  }
-  // Summary Judgment: differentiate who filed + outcome.
-  const hasMSJ = docketText.includes('MOTION FOR SUMMARY JUDGMENT');
-  const defendantFiledMSJ = hasMSJ && (
-    docketText.includes('BY DEFENDANT') ||
-    docketText.includes("DEFENDANT'S MOTION FOR SUMMARY JUDGMENT") ||
-    docketText.includes('DEFENDANT MOTION FOR SUMMARY JUDGMENT')
-  );
-  const likelyPlaintiffFiledMSJ = hasMSJ && !defendantFiledMSJ && (
-    docketText.includes('BY PLAINTIFF') ||
-    docketText.includes("PLAINTIFF'S MOTION FOR SUMMARY JUDGMENT") ||
-    docketText.includes('PLAINTIFF MOTION FOR SUMMARY JUDGMENT') ||
-    (plaintiffToken && docketText.includes(plaintiffToken))
-  );
-
-  if (defendantFiledMSJ) {
-    score -= 10;
-    activeFighting = true;
-    factors.push({ text: '⚔️ Defendant filed Motion for Summary Judgment - believes they can win', impact: -10 });
-  } else if (likelyPlaintiffFiledMSJ) {
-    score += 10;
-    factors.push({ text: '📈 Plaintiff Motion for Summary Judgment filed - case accelerating', impact: +10 });
-  }
-
-  // MSJ outcomes (strong momentum signals)
-  const msjGrantedForPlaintiff = hasMSJ && docketText.includes('GRANTED') && (
-    docketText.includes('PLAINTIFF') || likelyPlaintiffFiledMSJ
-  );
-  const msjDeniedForPlaintiff = hasMSJ && docketText.includes('DENIED') && (
-    docketText.includes('PLAINTIFF') || likelyPlaintiffFiledMSJ
-  );
-
-  if (msjGrantedForPlaintiff) {
-    score += 18;
-    factors.push({ text: '✅ Plaintiff Summary Judgment GRANTED - major acceleration', impact: +18 });
-  } else if (msjDeniedForPlaintiff) {
-    score -= 12;
-    activeFighting = true;
-    factors.push({ text: '🛑 Plaintiff Summary Judgment DENIED - defendant win / false hope', impact: -12 });
-  }
-
-  if (docketText.includes('COUNTERCLAIM')) {
-    score -= 12;
-    activeFighting = true;
-    factors.push({ text: '⚔️ Counterclaim filed - strong resistance / lawyered up', impact: -12 });
-  }
-  if (docketTypes.includes('REPLY TO NEW MATTER') || docketText.includes('REPLY TO NEW MATTER')) {
-    score -= 3;
-    factors.push({ text: '⚔️ Reply to New Matter - litigation ongoing', impact: -3 });
-  }
-
-  // Resistance cluster penalty: Counterclaim + Preliminary Objections together usually means entrenched defense.
-  if ((docketText.includes('COUNTERCLAIM')) && (docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS'))) {
-    score -= 3;
-    activeFighting = true;
-    factors.push({ text: '⚠️ Counterclaim + Preliminary Objections cluster - entrenched litigation', impact: -3 });
-  }
-  
-  // POSITIVE: Signs of capitulation
-  if (docketTypes.includes('PRAECIPE TO REINSTATE') || docketText.includes('PRAEC TO REINSTATE') || docketText.includes('PRAECIPE TO REINSTATE')) {
-    score += 5;
-    factors.push({ text: '📄 Praecipe to Reinstate - case reactivated after pause', impact: +5 });
-  }
-  if (docketText.includes('ALTERNATE SERVICE') || docketText.includes('MOTION FOR ALTERNATE SERVICE')) {
-    score += 5;
-    factors.push({ text: '📬 Motion for Alternate Service - hard to locate defendant', impact: +5 });
-  }
-  // When alternate service is actually granted/ordered, that's additional real progress.
-  if (docketText.includes('ALTERNATE SERVICE') && docketText.includes('GRANTED')) {
-    score += 4;
-    factors.push({ text: '✅ Alternate Service GRANTED - service path secured', impact: +4 });
-  }
-  if (docketText.includes('NOT FOUND') || docketText.includes('FAILURE OF SERVICE')) {
-    score += 5;
-    factors.push({ text: '❓ Service issues - defendant may be avoiding', impact: +5 });
-  }
-  if (docketText.includes('POSTED') && docketText.includes('PREMISES')) {
-    score += 6;
-    factors.push({ text: '📌 Posted Premises - strong avoidance / distress signal', impact: +6 });
-  }
-  if (docketText.includes('WITHDRAW') && docketText.includes('COUNSEL')) {
-    score += 12;
-    factors.push({ text: '💰 Withdrawal of Counsel - financial distress signal!', impact: +12 });
-  }
-  if (docketText.includes('SUBSTITUTION OF COUNSEL')) {
-    score += 3;
-    factors.push({ text: '🔄 Substitution of Counsel - possible financial strain', impact: +3 });
-  }
-  
-  // ============================================
-  // 5️⃣ SETTLEMENT / DE-ESCALATION (MAX 15 points)
-  // ============================================
-  let hasSettlementSignal = false;
-  
-  if (docketText.includes('MATTER SETTLED') || docketText.includes('SETTLED')) {
-    score += 15;
-    hasSettlementSignal = true;
-    factors.push({ text: '🤝 Matter Settled notation - actively negotiating!', impact: +15 });
-  }
-  if (docketText.includes('STIPULATION') && !docketText.includes('DISMISSAL')) {
-    score += 10;
-    hasSettlementSignal = true;
-    factors.push({ text: '📝 Stipulation filed - parties negotiating', impact: +10 });
-  }
-  if (docketText.includes('STIPULATION') && docketText.includes('DISMISSAL')) {
-    score += 8;
-    hasSettlementSignal = true;
-    factors.push({ text: '📝 Stipulation of Dismissal - case may be resolving', impact: +8 });
-  }
-  
-  // ============================================
-  // 6️⃣ TRANSITION BONUSES (state changes matter!)
-  // ============================================
-  
-  // Stay lifted after being stayed = case resuming, pressure back on
-  if ((docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) && docket.isStayed) {
-    score += 12;
-    factors.push({ text: '▶️ Stay LIFTED after pause - pressure resuming!', impact: +12 });
-  } else if (docketText.includes('STAY IS LIFTED') || docketText.includes('STAY LIFTED')) {
-    score += 8;
-    factors.push({ text: '▶️ Stay Lifted - case resuming', impact: +8 });
-  }
-  
-  // Silence after heavy activity = exhaustion (context-aware silence)
-  if (entries >= 8 && daysSinceLastFiling >= 90) {
-    score += 10;
-    factors.push({ text: '💤 Silence after heavy activity - likely exhausted', impact: +10 });
-  } else if (entries >= 5 && daysSinceLastFiling >= 60) {
-    score += 5;
-    factors.push({ text: '💤 Slowing down after activity', impact: +5 });
-  }
-
-  // Case management / discovery deadlines often indicate the court is actively pushing the case forward.
-  if (docketText.includes('CIVIL CASE MANAGEMENT') || docketText.includes('CASE MANAGEMENT') || docketText.includes('DISCOVERY TO BE COMPLETED')) {
-    const cmPoints = (days >= 270 && days <= 540) ? 8 : 6; // slightly stronger in sweet spot
-    score += cmPoints;
-    factors.push({ text: '🗂️ Case management / discovery track set - forward progress signal', impact: +cmPoints });
-  }
-  
-  // ============================================
-  // 7️⃣ RECENT ACTIVITY PENALTY (decay function)
-  // ============================================
-  // Not all "recent filings" are equal.
-  // If the most recent docket event is a *pressure-resuming* or administrative milestone
-  // (e.g., STAY LIFTED, BK DISCHARGE, PRAECIPE TO REINSTATE/REACTIVATE), we should NOT
-  // penalize recency as "actively litigating".
-  const lastEvent = (lastEventText || docketText);
-  const isPressureResumingLastEvent =
-    lastEvent.includes('STAY IS LIFTED') ||
-    lastEvent.includes('STAY LIFTED') ||
-    (lastEvent.includes('DISCHARGE') && lastEvent.includes('BANKRUPTCY')) ||
-    lastEvent.includes('PRAECIPE TO REINSTATE') ||
-    lastEvent.includes('PRAEC TO REINSTATE') ||
-    lastEvent.includes('REACTIVATE') ||
-    // Administrative / forward-progress milestones (shouldn't be treated as "active defendant litigation")
-    lastEvent.includes('CIVIL CASE MANAGEMENT') ||
-    lastEvent.includes('CASE MANAGEMENT') ||
-    lastEvent.includes('DISCOVERY TO BE COMPLETED') ||
-    lastEvent.includes('ALTERNATE SERVICE') ||
-    (lastEvent.includes('POSTED') && lastEvent.includes('PREMISES')) ||
-    lastEvent.includes('NOT FOUND') ||
-    lastEvent.includes('FAILURE OF SERVICE');
-
-  if (!isPressureResumingLastEvent) {
-    if (daysSinceLastFiling > 0 && daysSinceLastFiling < 14) {
-      score -= 12;
-      factors.push({ text: '🔥 Very recent filing (<14 days) - actively litigating', impact: -12 });
-    } else if (daysSinceLastFiling >= 14 && daysSinceLastFiling < 30) {
-      score -= 8;
-      factors.push({ text: '🔥 Recent filing (14-30 days)', impact: -8 });
-    } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 60) {
-      score -= 4;
-      factors.push({ text: '⏳ Activity 30-60 days ago', impact: -4 });
-    } else if (daysSinceLastFiling >= 60 && daysSinceLastFiling < 90) {
-      // Neutral - no penalty
-      factors.push({ text: '⏳ Activity 60-90 days ago', impact: 0 });
-    }
-  } else {
-    // Keep a transparent factor so users understand why there was no penalty.
-    factors.push({ text: '▶️ Recent filing is pressure-resuming/admin (no recency penalty)', impact: 0 });
-  }
-  // >90 days already handled in transition bonuses if high activity
-  
-  // ============================================
-  // 8️⃣ "FALSE HOPE" DAMPENER
-  // Early case + high activity + no adverse rulings = still believes they can win
-  // ============================================
-  // "False hope" should only be reduced when the defendant takes a meaningful loss.
-  // Many dockets contain "MOTION DENIED" entries that are actually *plaintiff* motions denied (a defendant win).
-  const defendantLossSignals =
-    // Plaintiff wins / defense losses
-    (docketText.includes('MOTION GRANTED') && docketText.includes('PLAINTIFF')) ||
-    (docketText.includes('DEFENDANT') && docketText.includes('DENIED')) ||
-    (docketText.includes('DEFENDANT') && docketText.includes('OVERRULED'));
-
-  const defendantWinSignals =
-    // Plaintiff motion denied / plaintiff setback (can embolden defendant)
-    (docketText.includes('PLAINTIFF') && docketText.includes('DENIED'));
-
-  const hasAdverseRulingAgainstDefendant = defendantLossSignals && !defendantWinSignals;
-  
-  if (days < 360 && entries >= 6 && activeFighting && !hasAdverseRulingAgainstDefendant) {
-    score -= 8;
-    factors.push({ text: '⚠️ "False hope" - early fighter with no adverse rulings yet', impact: -8 });
-  }
-  
-  // ============================================
-  // 9️⃣ BANKRUPTCY CHECK (with decay)
-  // ============================================
-  if (docket.hasBankruptcy || docketText.includes('BANKRUPTCY')) {
-    // Check if it's a DISCHARGE of bankruptcy (positive) vs active bankruptcy (negative)
-    if (docketText.includes('DISCHARGE') && docketText.includes('BANKRUPTCY')) {
-      score += 8;
-      factors.push({ text: '✅ Bankruptcy DISCHARGED - case can proceed!', impact: +8 });
-    } else {
-      // Apply decay based on case age (rough proxy for BK timing)
-      if (daysSinceLastFiling < 90) {
-        score -= 25;
-        factors.push({ text: '🚫 Recent bankruptcy activity - case likely stayed', impact: -25 });
-      } else if (daysSinceLastFiling < 180) {
-        score -= 18;
-        factors.push({ text: '🚫 Bankruptcy (moderating) - still impacting case', impact: -18 });
-      } else {
-        score -= 10;
-        factors.push({ text: '⚠️ Bankruptcy noted - may be old/resolved', impact: -10 });
-      }
-    }
-  }
-  
-  // ============================================
-  // 🔟 PROPERTY & DEFENDANT FACTORS
-  // ============================================
-  if (c.propertyAddress) {
-    score += 3;
-    factors.push({ text: '📍 Has property address', impact: +3 });
-  } else {
-    score -= 5;
-    factors.push({ text: '❓ No address found', impact: -5 });
-  }
-  
-  // Defendant type detection
-  const defendant = (c.defendant || '').toUpperCase();
-  if (defendant.includes('LLC') || defendant.includes('INC') || defendant.includes('CORP') || 
-      defendant.includes('TRUST') || defendant.includes('ESTATE OF') || defendant.includes('BANK')) {
-    score -= 8;
-    factors.push({ text: '🏢 Entity defendant - less motivated', impact: -8 });
-  }
-  
-  // ============================================
-  // FINAL SCORE & GRADE
-  // ============================================
-  score = Math.max(0, Math.min(100, score));
-  
-  let grade;
-  if (score >= 80) grade = 'A';      // Highly willing seller - call immediately
-  else if (score >= 65) grade = 'B'; // Strong candidate - direct mail + call
-  else if (score >= 50) grade = 'C'; // On the fence - nurture
-  else if (score >= 35) grade = 'D'; // Low probability - watchlist
-  else grade = 'F';                   // Not ready - ignore
-  
-  return { score, grade, factors };
-}
-
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
   const testMode = options.testMode || false;
-  
-  console.log('\n🏛️ Montgomery County Scraper');
-  if (testMode) {
-    console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
-  }
+
+  console.log('\n🏛️ Montgomery County Scraper (V3)');
+  if (testMode) console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
   console.log('='.repeat(50));
-  
+
   let allCases;
   try {
     console.log(`📄 Loading CSV...`);
@@ -608,43 +319,37 @@ async function scrapeMontgomeryCourts(options = {}) {
     console.error(`   Error: ${err.message}`);
     return [];
   }
-  
+
   const now = new Date();
-  
-  // Calculate date range in days from month config
-  const minDaysOld = CONFIG.minMonthsOld * 30;  // ~6 months = 180 days
-  const maxDaysOld = CONFIG.maxMonthsOld * 30;  // ~24 months = 720 days
-  const sweetSpotMinDays = CONFIG.sweetSpotMinMonths * 30;  // ~9 months = 270 days
-  const sweetSpotMaxDays = CONFIG.sweetSpotMaxMonths * 30;  // ~18 months = 540 days
-  
+
+  const minDaysOld = CONFIG.minMonthsOld * 30;
+  const maxDaysOld = CONFIG.maxMonthsOld * 30;
+  const sweetSpotMinDays = CONFIG.sweetSpotMinMonths * 30;
+  const sweetSpotMaxDays = CONFIG.sweetSpotMaxMonths * 30;
+
   console.log(`   Date range: ${CONFIG.minMonthsOld}-${CONFIG.maxMonthsOld} months old`);
   console.log(`   Sweet spot: ${CONFIG.sweetSpotMinMonths}-${CONFIG.sweetSpotMaxMonths} months old`);
-  
+
   let targets = allCases
     .filter(c => c.status.toUpperCase().includes('OPEN') && !c.hasJudgement)
     .map(c => {
       const m = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       c.daysOpen = m ? Math.ceil((now - new Date(m[3], m[1] - 1, m[2])) / 86400000) : 0;
       c.monthsOpen = Math.round(c.daysOpen / 30);
-      // Mark if in sweet spot (9-18 months)
       c.inSweetSpot = c.daysOpen >= sweetSpotMinDays && c.daysOpen <= sweetSpotMaxDays;
       return c;
     })
     .filter(c => c.daysOpen >= minDaysOld && c.daysOpen <= maxDaysOld);
-  
+
   const sweetSpotCount = targets.filter(c => c.inSweetSpot).length;
   console.log(`   ${targets.length} OPEN cases in range (${sweetSpotCount} in sweet spot 🎯)`);
-  
-  // Sort: sweet spot cases first, then by age within each group
+
   targets.sort((a, b) => {
-    // Sweet spot cases come first
     if (a.inSweetSpot && !b.inSweetSpot) return -1;
     if (!a.inSweetSpot && b.inSweetSpot) return 1;
-    // Within same group, sort by days (older first within sweet spot is better)
     return b.daysOpen - a.daysOpen;
   });
-  
-  // Apply limits: test mode takes priority, then maxCasesToProcess
+
   if (testMode) {
     targets = targets.slice(0, CONFIG.testModeLimit);
     console.log(`   ⚡ TEST MODE: Limited to ${CONFIG.testModeLimit} cases`);
@@ -654,13 +359,13 @@ async function scrapeMontgomeryCourts(options = {}) {
   } else {
     console.log(`   Processing ALL ${targets.length} cases`);
   }
-  
+
   const results = [];
   let browser = null;
   let page = null;
-  
+
   console.log(`\n🌐 Scraping ${targets.length} cases...`);
-  
+
   for (let i = 0; i < targets.length; i++) {
     if (i % CONFIG.batchSize === 0) {
       if (browser) {
@@ -670,27 +375,22 @@ async function scrapeMontgomeryCourts(options = {}) {
       console.log(`   🔄 Browser restart (batch ${Math.floor(i / CONFIG.batchSize) + 1})...`);
       browser = await launchBrowser();
       page = await browser.newPage();
-      
-      // DON'T block resources - we need JS to run!
-      // Remove request interception that was blocking things
-      
+
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     }
-    
+
     const c = targets[i];
-    
+
     try {
       await delay(CONFIG.requestDelay);
-      
-      // Navigate to search page and wait for full load
+
       await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       await delay(1000);
-      
-      // Type case number
+
       await page.evaluate((caseNum) => {
         const inputs = document.querySelectorAll('input[type="text"]');
         for (const input of inputs) {
-          const label = input.closest('div')?.querySelector('label') || 
+          const label = input.closest('div')?.querySelector('label') ||
                         input.previousElementSibling ||
                         document.querySelector('label[for="' + input.id + '"]');
           if (label?.textContent?.includes('Case #')) {
@@ -700,42 +400,34 @@ async function scrapeMontgomeryCourts(options = {}) {
           }
         }
       }, c.caseNumber);
-      
-      // Click search
+
       await page.evaluate(() => {
         const btns = document.querySelectorAll('button, input[type="submit"]');
         for (const btn of btns) {
-          if (btn.textContent?.toLowerCase().includes('search') || 
+          if (btn.textContent?.toLowerCase().includes('search') ||
               btn.value?.toLowerCase().includes('search')) {
             btn.click();
             return;
           }
         }
       });
-      
-      // Wait for navigation to detail page with FULL load
+
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
-      
-      // Extra wait for dynamic content (Defendants table)
       await delay(CONFIG.pageLoadWait);
-      
+
       const currentUrl = page.url();
       if (!currentUrl.includes('/detail/Case/')) {
         console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
         continue;
       }
-      
-      // Wait for Defendants section to appear
+
       try {
         await page.waitForFunction(() => {
-          const text = document.body.innerText;
-          return text.includes('Defendants') && text.includes('Address');
+          const t = document.body.innerText;
+          return t.includes('Defendants') && t.includes('Address');
         }, { timeout: 5000 });
-      } catch (e) {
-        // Continue anyway, maybe it loaded
-      }
-      
-      // Extract addresses AND docket entries
+      } catch (e) {}
+
       const data = await page.evaluate((montcoTowns) => {
         const result = {
           addresses: [],
@@ -746,78 +438,69 @@ async function scrapeMontgomeryCourts(options = {}) {
             hasConciliation: false,
             isStayed: false,
             lastFilingDate: null,
+            daysSinceLastFiling: null,
             hasServiceCompleted: false,
-            docketEvents: []
+            docketEvents: [],
+            allText: '',
+            allTypes: '',
+            lastEventText: '',
+            lastEventType: ''
           }
         };
-        
+
         const tables = document.querySelectorAll('table');
-        
+
         for (let ti = 0; ti < tables.length; ti++) {
           const table = tables[ti];
           const headerRow = table.querySelector('tr');
           if (!headerRow) continue;
-          
+
           const headerCells = headerRow.querySelectorAll('th, td');
           const headers = [];
           for (let hi = 0; hi < headerCells.length; hi++) {
             headers.push((headerCells[hi].textContent || '').trim().toLowerCase());
           }
-          
-          // Check if this is the Docket Entries table
+
+          // Docket table
           if (headers.includes('docket type') || headers.includes('docket text')) {
             const dateIdx = headers.findIndex(h => h.includes('filing date'));
             const typeIdx = headers.findIndex(h => h.includes('docket type'));
             const textIdx = headers.findIndex(h => h.includes('docket text'));
-            
+
             const rows = table.querySelectorAll('tr');
-            result.docket.entries = rows.length - 1; // Exclude header
-            
-            // Collect ALL docket text and types for comprehensive analysis
+            result.docket.entries = rows.length - 1;
+
             let allDocketText = [];
             let allDocketTypes = [];
-            let firstFilingDate = null;
             let lastFilingDate = null;
-            let lastEventText = null;
-            let lastEventType = null;
-            
+
             for (let ri = 1; ri < rows.length; ri++) {
               const cells = rows[ri].querySelectorAll('td');
               const filingDate = dateIdx >= 0 && cells[dateIdx] ? cells[dateIdx].textContent.trim() : '';
               const docketType = typeIdx >= 0 && cells[typeIdx] ? cells[typeIdx].textContent.trim() : '';
-              const docketText = textIdx >= 0 && cells[textIdx] ? cells[textIdx].textContent.trim().toUpperCase() : '';
-              
-              // Track first and last filing dates
-              if (filingDate) {
-                if (!firstFilingDate) firstFilingDate = filingDate;
-                lastFilingDate = filingDate;
-                // Keep the most recent row's text/type so scoring can treat recency correctly.
-                lastEventText = docketText;
-                lastEventType = docketType;
-              }
-              
-              // Collect all text for comprehensive pattern matching
+              const docketText = textIdx >= 0 && cells[textIdx] ? (cells[textIdx].textContent || '').trim().toUpperCase() : '';
+
+              if (filingDate) lastFilingDate = filingDate;
+
               if (docketType) allDocketTypes.push(docketType.toUpperCase());
               if (docketText) allDocketText.push(docketText);
-              
-              // Detect signals in docket text
-              if (docketText.includes('BANKRUPTCY')) {
-                result.docket.hasBankruptcy = true;
-              }
-              if (docketText.includes('CONTINUED TO') || docketText.includes('CONTINUANCE')) {
-                result.docket.continuanceCount++;
-              }
-              if (docketText.includes('CONCILIATION') || docketText.includes('MEDIATION') || docketText.includes('CONFERENCE')) {
+
+              if (docketText.includes('BANKRUPTCY')) result.docket.hasBankruptcy = true;
+              if (docketText.includes('CONTINUED TO') || docketText.includes('CONTINUANCE')) result.docket.continuanceCount++;
+              if (docketText.includes('CONCILIATION') || docketText.includes('MEDIATION') || docketText.includes('CONFERENCE'))
                 result.docket.hasConciliation = true;
-              }
-              if (docketText.includes('STAYED') || docketText.includes('STAY ')) {
+              if (docketText.includes('STAYED') || docketText.includes('STAY '))
                 result.docket.isStayed = true;
-              }
-              if (docketText.includes('SERVICE') && (docketText.includes('COMPLETED') || docketText.includes('SERVED'))) {
+              if (docketText.includes('SERVICE') && (docketText.includes('COMPLETED') || docketText.includes('SERVED')))
                 result.docket.hasServiceCompleted = true;
+
+              // Save last row as last event
+              if (ri === rows.length - 1) {
+                result.docket.lastEventText = docketText.substring(0, 500);
+                result.docket.lastEventType = (docketType || '').toUpperCase();
               }
-              
-              // Store recent docket events (last 5)
+
+              // Keep last 5 events
               if (ri >= rows.length - 5) {
                 result.docket.docketEvents.push({
                   date: filingDate,
@@ -826,69 +509,53 @@ async function scrapeMontgomeryCourts(options = {}) {
                 });
               }
             }
-            
-            // Store concatenated text for pattern matching in scoring
+
             result.docket.allText = allDocketText.join(' | ');
             result.docket.allTypes = allDocketTypes.join(' | ');
-            result.docket.firstFilingDate = firstFilingDate;
             result.docket.lastFilingDate = lastFilingDate;
-            result.docket.lastEventText = lastEventText;
-            result.docket.lastEventType = lastEventType;
-            
-            // Calculate days since last filing
+
             if (lastFilingDate) {
               const parts = lastFilingDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
               if (parts) {
-                const lastDate = new Date(parts[3], parts[1] - 1, parts[2]);
-                result.docket.daysSinceLastFiling = Math.floor((new Date() - lastDate) / 86400000);
+                const d = new Date(parts[3], parts[1] - 1, parts[2]);
+                result.docket.daysSinceLastFiling = Math.floor((new Date() - d) / 86400000);
               }
             }
-            
+
             continue;
           }
-          
-          // Check if this is the address table
+
+          // Address table
           let addrIdx = -1;
           for (let hi = 0; hi < headers.length; hi++) {
-            if (headers[hi] === 'address') {
-              addrIdx = hi;
-              break;
-            }
+            if (headers[hi] === 'address') { addrIdx = hi; break; }
           }
-          
           if (addrIdx === -1) continue;
-          
+
           const rows = table.querySelectorAll('tr');
           for (let ri = 1; ri < rows.length; ri++) {
             const cells = rows[ri].querySelectorAll('td');
             if (cells.length <= addrIdx) continue;
-            
+
             const addrCell = cells[addrIdx];
             const text = (addrCell.textContent || '').trim();
             const html = addrCell.innerHTML || '';
-            
-            // Check for "PA " in text
+
             const paIdx = text.indexOf('PA ');
             if (paIdx === -1) continue;
-            
-            // Get zip (5 digits after "PA ")
+
             const afterPA = text.substring(paIdx + 3);
             let zip = '';
             for (let di = 0; di < 5 && di < afterPA.length; di++) {
               const ch = afterPA.charAt(di);
-              if (ch >= '0' && ch <= '9') {
-                zip += ch;
-              } else {
-                break;
-              }
+              if (ch >= '0' && ch <= '9') zip += ch;
+              else break;
             }
-            
             if (zip.length !== 5) continue;
-            
-            // Get street and city from HTML (split by <br>)
+
             let street = '';
             let city = '';
-            
+
             const brIdx = html.toLowerCase().indexOf('<br');
             if (brIdx > 0) {
               street = html.substring(0, brIdx).replace(/<[^>]*>/g, '').trim();
@@ -902,41 +569,35 @@ async function scrapeMontgomeryCourts(options = {}) {
                 }
               }
             }
-            
-            // Check Montgomery County
+
             const upperCity = city.toUpperCase();
             let inMontCo = false;
             for (let mi = 0; mi < montcoTowns.length; mi++) {
-              if (upperCity.indexOf(montcoTowns[mi]) !== -1) {
-                inMontCo = true;
-                break;
-              }
+              if (upperCity.indexOf(montcoTowns[mi]) !== -1) { inMontCo = true; break; }
             }
-            
+
             result.addresses.push({ street, city, state: 'PA', zip, inMontCo });
           }
         }
-        
+
         return result;
       }, MONTCO_TOWNS);
-      
-      // Pick best address (from new data structure)
+
       const addresses = data.addresses || [];
-      let bestAddr = addresses.find(a => a.inMontCo) || addresses[0] || null;
-      
+      const bestAddr = addresses.find(a => a.inMontCo) || addresses[0] || null;
+
       c.propertyAddress = bestAddr?.street || '';
       c.propertyCity = bestAddr?.city || '';
       c.propertyState = bestAddr?.state || 'PA';
       c.propertyZip = bestAddr?.zip || '';
       c.inMontgomeryCounty = bestAddr?.inMontCo || false;
       c.detailUrl = currentUrl;
-      
-      // Store docket info
+
       c.docket = data.docket || {};
-      
-      // Calculate enhanced score with docket signals
-      const ls = calculateEnhancedScore(c);
-      
+
+      // ✅ V3 SCORING HERE
+      const ls = calculateScore(c);
+
       results.push({
         caseNumber: c.caseNumber,
         commencedDate: parseDate(c.commencedDate),
@@ -952,9 +613,13 @@ async function scrapeMontgomeryCourts(options = {}) {
         inMontgomeryCounty: c.inMontgomeryCounty,
         hasJudgement: c.hasJudgement,
         status: c.status,
+
+        // Score output
         leadScore: ls.score,
         leadGrade: ls.grade,
         scoreFactors: ls.factors,
+        pillars: ls.pillars,
+
         docket: {
           entries: c.docket.entries || 0,
           hasBankruptcy: c.docket.hasBankruptcy || false,
@@ -962,43 +627,41 @@ async function scrapeMontgomeryCourts(options = {}) {
           hasConciliation: c.docket.hasConciliation || false,
           isStayed: c.docket.isStayed || false,
           lastFilingDate: c.docket.lastFilingDate || null,
-          lastEventType: c.docket.lastEventType || null,
-          lastEventText: c.docket.lastEventText || null,
           daysSinceLastFiling: c.docket.daysSinceLastFiling || null,
           hasServiceCompleted: c.docket.hasServiceCompleted || false,
-          recentEvents: c.docket.docketEvents || []
+          recentEvents: c.docket.docketEvents || [],
+          lastEventText: c.docket.lastEventText || '',
+          lastEventType: c.docket.lastEventType || ''
         },
+
         detailUrl: c.detailUrl,
         county: 'Montgomery',
         state: 'PA'
       });
-      
+
       const gradeEmoji = ls.grade === 'A' ? '🔥' : ls.grade === 'B' ? '⭐' : ls.grade === 'C' ? '📋' : '⚠️';
-      const docketInfo = c.docket.entries ? ` [${c.docket.entries}dok]` : '';
-      const addrStr = c.propertyAddress ? 
-        `${c.propertyAddress}, ${c.propertyCity}` : 
-        'No addr';
-      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}]${docketInfo} - ${addrStr}`);
-      
+      const addrStr = c.propertyAddress ? `${c.propertyAddress}, ${c.propertyCity}` : 'No addr';
+      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}] [P:${ls.pillars.pressure} R:${ls.pillars.resistance} M:${ls.pillars.momentum} F:${ls.pillars.fatigue}] - ${addrStr}`);
+
     } catch (err) {
-      console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${err.message.slice(0, 40)})`);
+      console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${(err.message || '').slice(0, 60)})`);
     }
   }
-  
+
   if (browser) await browser.close();
-  
+
   results.sort((a, b) => b.leadScore - a.leadScore);
-  
+
   const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
   results.forEach(c => grades[c.leadGrade]++);
-  
+
   const withAddr = results.filter(r => r.propertyAddress).length;
   const inMontCo = results.filter(r => r.inMontgomeryCounty).length;
-  
+
   console.log(`\n✅ Done: ${results.length} cases`);
   console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
-  
+
   return results;
 }
 
