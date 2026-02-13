@@ -980,79 +980,39 @@
         }
         
         function getMissingPositives(c) {
-            const missing = [];
-            const docket = c.docket || {};
-            const factors = (c.scoreFactors || []).map(f => f.text || '');
-            const days = c.daysOpen || 0;
-            
-            // Check for missing sweet spot timing
-            if (days < 270) {
-                missing.push({ 
-                    text: 'Case has not yet reached the 9-18 month sweet spot.', 
-                    explanation: 'Cases in this window show the highest seller motivation.' 
-                });
-            } else if (days > 540) {
-                missing.push({ 
-                    text: 'Case has passed the 9-18 month sweet spot.', 
-                    explanation: 'Older cases often indicate less motivated sellers.' 
-                });
-            }
-            
-            // Check for missing high activity
-            if ((docket.entries || 0) < 9) {
-                missing.push({ 
-                    text: 'Limited docket activity observed so far.', 
-                    explanation: 'More filings typically indicate mounting pressure and decision fatigue.' 
-                });
-            }
-            
-            // Check for missing continuances
-            if ((docket.continuanceCount || 0) < 3) {
-                missing.push({ 
-                    text: 'Few delays or continuances recorded yet.', 
-                    explanation: 'Multiple continuances signal mounting costs and fatigue.' 
-                });
-            }
-            
-            // Check for missing settlement signals
-            const hasSettlement = factors.some(f => f.includes('Settled') || f.includes('Stipulation'));
-            if (!hasSettlement) {
-                missing.push({ 
-                    text: 'No settlement or negotiation activity observed yet.', 
-                    explanation: 'Settlement discussions indicate openness to resolution.' 
-                });
-            }
-            
-            // Check for missing counsel withdrawal
-            const hasCounselWithdrawal = factors.some(f => f.includes('Withdrawal of Counsel'));
-            if (!hasCounselWithdrawal) {
-                missing.push({ 
-                    text: 'Defendant legal counsel has not withdrawn.', 
-                    explanation: 'Counsel withdrawal is a strong financial distress signal.' 
-                });
-            }
-            
-            // Check for missing silence after activity
-            const hasSilence = factors.some(f => f.includes('Silence') || f.includes('Slowing down'));
-            if (!hasSilence && (docket.entries || 0) >= 5) {
-                missing.push({ 
-                    text: 'No extended quiet period observed after docket activity.', 
-                    explanation: 'Silence after heavy activity often signals exhaustion.' 
-                });
-            }
-            
-            // Check for missing stay lifted
-            const hasStayLifted = factors.some(f => f.includes('Stay') && f.includes('Lifted'));
-            const hasStay = factors.some(f => f.includes('stayed') || f.includes('Stayed'));
-            if (!hasStayLifted && hasStay) {
-                missing.push({ 
-                    text: 'Case was stayed but the stay has not yet been lifted.', 
-                    explanation: 'When a stay lifts, pressure on the defendant resumes.' 
-                });
-            }
-            
-            return missing;
-        }
+  const missing = [];
+  const p = c.pillars || {};
+
+  if ((p.pressure || 0) < 18) {
+    missing.push({
+      text: "Pressure not fully developed yet.",
+      explanation: "Cases closer to escalation milestones convert better."
+    });
+  }
+
+  if ((p.resistance || 0) < 0) {
+    missing.push({
+      text: "Active resistance detected.",
+      explanation: "Defensive filings usually reduce near-term motivation."
+    });
+  }
+
+  if ((p.momentum || 0) < 10) {
+    missing.push({
+      text: "Procedural momentum is limited.",
+      explanation: "Look for service escalation, MSJ, or case management movement."
+    });
+  }
+
+  if ((p.fatigue || 0) < 10) {
+    missing.push({
+      text: "Fatigue signals are weak.",
+      explanation: "More delays or failed resolution attempts improve likelihood."
+    });
+  }
+
+  return missing;
+}
         
         function getGradeMeaning(grade) {
             const meanings = {
