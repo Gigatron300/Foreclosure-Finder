@@ -591,6 +591,17 @@
                                 <div class="detail-value">${c.instrumentNumber || 'N/A'}</div>
                             </div>
                             ${c.buildingDesc ? `<div class="detail-item"><div class="detail-label">Building</div><div class="detail-value">${c.buildingDesc}</div></div>` : ''}
+                            ${c.courtStatus ? `<div class="detail-item" style="grid-column: 1 / -1;">
+                                <div class="detail-label">Court Status</div>
+                                <div class="detail-value">
+                                    <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;
+                                        background:${c.courtStatus === 'OPEN' ? 'rgba(74,222,128,0.15);color:#4ade80' : c.courtStatus === 'CLOSED' ? 'rgba(248,113,113,0.15);color:#f87171' : 'rgba(148,163,184,0.15);color:#94a3b8'};">
+                                        ${c.courtStatus === 'OPEN' ? '🟢' : c.courtStatus === 'CLOSED' ? '🔴' : '⚪'} ${c.courtStatus}
+                                    </span>
+                                    ${c.courtDisposition ? `<span style="color:#94a3b8;font-size:0.75rem;margin-left:6px">${c.courtDisposition}</span>` : ''}
+                                    ${c.courtDocketNumber ? `<div style="color:#64748b;font-size:0.7rem;margin-top:2px">${c.courtDocketNumber}</div>` : ''}
+                                </div>
+                            </div>` : ''}
                             ${c.yearConstructed ? `<div class="detail-item"><div class="detail-label">Year Built</div><div class="detail-value">${c.yearConstructed}</div></div>` : ''}
                         </div>
 
