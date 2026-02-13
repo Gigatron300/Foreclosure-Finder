@@ -161,14 +161,16 @@ function calculateV3Score(c) {
   if (daysOpen < 120) { pressure += 0; }
   else if (daysOpen < 180) { pressure += 5; }
   else if (daysOpen < 270) { pressure += 12; }
-  else if (daysOpen <= 540) { pressure += 20; }
+  else if (daysOpen <= 540) { pressure += 25; }
   else if (daysOpen <= 720) { pressure += 15; }
   else { pressure += 8; }
 
   // Acceleration events (max +10; overall cap at 30)
   let accel = 0;
   if (has('STAY IS LIFTED') || has('STAY LIFTED')) accel += 5;
-  if (has('DISCHARGE') && has('BANKRUPTCY')) accel += 5;
+  if (has('DISCHARGE') && has('BANKRUPTCY')) {
+  accel += 8;      // pressure bump
+}
   if (has('MOTION FOR SUMMARY JUDGMENT') && (has('PLAINTIFF') || has('PLTF'))) accel += 5;
   if (has('MOTION FOR SUMMARY JUDGMENT') && (has('GRANTED') && (has('PLAINTIFF') || has('PLTF')))) accel += 10;
 
@@ -247,15 +249,19 @@ function calculateV3Score(c) {
   else if (continuances >= 3) fatigue += 12;
 
   // Failed bankruptcy attempt (pressure + fatigue)
-  if (has('DISCHARGE') && has('BANKRUPTCY')) fatigue += 8;
+  if (has('DISCHARGE') && has('BANKRUPTCY')) fatigue += 10;
 
   // Silence context-aware
   if (entries >= 10 && daysSinceLast >= 120) {
-    fatigue += lastLooksDefensive ? 10 : 6;
-  } else if (entries >= 8 && daysSinceLast >= 90) {
-    fatigue += lastLooksDefensive ? 8 : 5;
-  }
+  fatigue += lastLooksDefensive ? 12 : 10;
+} else if (entries >= 8 && daysSinceLast >= 90) {
+  fatigue += lastLooksDefensive ? 10 : 8;
+}
 
+  // Long-term passive defendant fatigue bump
+if (!defenseSignals && monthsOpen > 12) {
+  fatigue += 5;
+}
   fatigue = Math.min(25, fatigue);
 
   factors.push({ text: '😓 Fatigue: delays / stalls / burnout patterns', impact: `+${fatigue}` });
