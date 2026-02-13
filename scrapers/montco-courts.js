@@ -114,6 +114,17 @@ function calculateEnhancedScore(c) {
   const docketText = (docket.allText || '').toUpperCase();
   const docketTypes = (docket.allTypes || '').toUpperCase();
   const daysSinceLastFiling = docket.daysSinceLastFiling || 0;
+
+  // Prefer the last docket event text/type for recency-sensitive logic.
+  // (Aggregated text is useful for global pattern matching but can misclassify
+  // "very recent activity" when the most recent filing is administrative or
+  // pressure-resuming, e.g., STAY LIFTED.)
+  const lastEventText = (docket.lastEventText || '').toUpperCase();
+  const lastEventType = (docket.lastEventType || '').toUpperCase();
+
+  // Convenience: attempt to identify the plaintiff in docket text for "who filed it?" heuristics.
+  const plaintiffName = (c.plaintiff || '').toUpperCase();
+  const plaintiffToken = (plaintiffName.split(/\s+/).find(t => t && t.length >= 4) || '');
   
   // ============================================
   // 1️⃣ CASE AGE SCORE (MAX 25 points)
@@ -197,20 +208,61 @@ function calculateEnhancedScore(c) {
     activeFighting = true;
     factors.push({ text: '⚔️ Objection/Opposition filed', impact: -5 });
   }
-  if (docketText.includes('MOTION FOR SUMMARY JUDGMENT') && 
-      (docketText.includes('DEFENDANT') || (docketText.includes('BY ') && !docketText.includes('BY PLAINTIFF')))) {
+  // Summary Judgment: differentiate who filed + outcome.
+  const hasMSJ = docketText.includes('MOTION FOR SUMMARY JUDGMENT');
+  const defendantFiledMSJ = hasMSJ && (
+    docketText.includes('BY DEFENDANT') ||
+    docketText.includes("DEFENDANT'S MOTION FOR SUMMARY JUDGMENT") ||
+    docketText.includes('DEFENDANT MOTION FOR SUMMARY JUDGMENT')
+  );
+  const likelyPlaintiffFiledMSJ = hasMSJ && !defendantFiledMSJ && (
+    docketText.includes('BY PLAINTIFF') ||
+    docketText.includes("PLAINTIFF'S MOTION FOR SUMMARY JUDGMENT") ||
+    docketText.includes('PLAINTIFF MOTION FOR SUMMARY JUDGMENT') ||
+    (plaintiffToken && docketText.includes(plaintiffToken))
+  );
+
+  if (defendantFiledMSJ) {
     score -= 10;
     activeFighting = true;
     factors.push({ text: '⚔️ Defendant filed Motion for Summary Judgment - believes they can win', impact: -10 });
+  } else if (likelyPlaintiffFiledMSJ) {
+    score += 10;
+    factors.push({ text: '📈 Plaintiff Motion for Summary Judgment filed - case accelerating', impact: +10 });
   }
-  if (docketText.includes('COUNTERCLAIM')) {
-    score -= 8;
+
+  // MSJ outcomes (strong momentum signals)
+  const msjGrantedForPlaintiff = hasMSJ && docketText.includes('GRANTED') && (
+    docketText.includes('PLAINTIFF') || likelyPlaintiffFiledMSJ
+  );
+  const msjDeniedForPlaintiff = hasMSJ && docketText.includes('DENIED') && (
+    docketText.includes('PLAINTIFF') || likelyPlaintiffFiledMSJ
+  );
+
+  if (msjGrantedForPlaintiff) {
+    score += 18;
+    factors.push({ text: '✅ Plaintiff Summary Judgment GRANTED - major acceleration', impact: +18 });
+  } else if (msjDeniedForPlaintiff) {
+    score -= 12;
     activeFighting = true;
-    factors.push({ text: '⚔️ Counterclaim filed - aggressive defense', impact: -8 });
+    factors.push({ text: '🛑 Plaintiff Summary Judgment DENIED - defendant win / false hope', impact: -12 });
+  }
+
+  if (docketText.includes('COUNTERCLAIM')) {
+    score -= 12;
+    activeFighting = true;
+    factors.push({ text: '⚔️ Counterclaim filed - strong resistance / lawyered up', impact: -12 });
   }
   if (docketTypes.includes('REPLY TO NEW MATTER') || docketText.includes('REPLY TO NEW MATTER')) {
     score -= 3;
     factors.push({ text: '⚔️ Reply to New Matter - litigation ongoing', impact: -3 });
+  }
+
+  // Resistance cluster penalty: Counterclaim + Preliminary Objections together usually means entrenched defense.
+  if ((docketText.includes('COUNTERCLAIM')) && (docketTypes.includes('PRELIMINARY OBJECTIONS') || docketText.includes('PRELIMINARY OBJECTIONS'))) {
+    score -= 3;
+    activeFighting = true;
+    factors.push({ text: '⚠️ Counterclaim + Preliminary Objections cluster - entrenched litigation', impact: -3 });
   }
   
   // POSITIVE: Signs of capitulation
@@ -222,9 +274,18 @@ function calculateEnhancedScore(c) {
     score += 5;
     factors.push({ text: '📬 Motion for Alternate Service - hard to locate defendant', impact: +5 });
   }
+  // When alternate service is actually granted/ordered, that's additional real progress.
+  if (docketText.includes('ALTERNATE SERVICE') && docketText.includes('GRANTED')) {
+    score += 4;
+    factors.push({ text: '✅ Alternate Service GRANTED - service path secured', impact: +4 });
+  }
   if (docketText.includes('NOT FOUND') || docketText.includes('FAILURE OF SERVICE')) {
     score += 5;
     factors.push({ text: '❓ Service issues - defendant may be avoiding', impact: +5 });
+  }
+  if (docketText.includes('POSTED') && docketText.includes('PREMISES')) {
+    score += 6;
+    factors.push({ text: '📌 Posted Premises - strong avoidance / distress signal', impact: +6 });
   }
   if (docketText.includes('WITHDRAW') && docketText.includes('COUNSEL')) {
     score += 12;
@@ -277,22 +338,55 @@ function calculateEnhancedScore(c) {
     score += 5;
     factors.push({ text: '💤 Slowing down after activity', impact: +5 });
   }
+
+  // Case management / discovery deadlines often indicate the court is actively pushing the case forward.
+  if (docketText.includes('CIVIL CASE MANAGEMENT') || docketText.includes('CASE MANAGEMENT') || docketText.includes('DISCOVERY TO BE COMPLETED')) {
+    const cmPoints = (days >= 270 && days <= 540) ? 8 : 6; // slightly stronger in sweet spot
+    score += cmPoints;
+    factors.push({ text: '🗂️ Case management / discovery track set - forward progress signal', impact: +cmPoints });
+  }
   
   // ============================================
   // 7️⃣ RECENT ACTIVITY PENALTY (decay function)
   // ============================================
-  if (daysSinceLastFiling > 0 && daysSinceLastFiling < 14) {
-    score -= 12;
-    factors.push({ text: '🔥 Very recent filing (<14 days) - actively litigating', impact: -12 });
-  } else if (daysSinceLastFiling >= 14 && daysSinceLastFiling < 30) {
-    score -= 8;
-    factors.push({ text: '🔥 Recent filing (14-30 days)', impact: -8 });
-  } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 60) {
-    score -= 4;
-    factors.push({ text: '⏳ Activity 30-60 days ago', impact: -4 });
-  } else if (daysSinceLastFiling >= 60 && daysSinceLastFiling < 90) {
-    // Neutral - no penalty
-    factors.push({ text: '⏳ Activity 60-90 days ago', impact: 0 });
+  // Not all "recent filings" are equal.
+  // If the most recent docket event is a *pressure-resuming* or administrative milestone
+  // (e.g., STAY LIFTED, BK DISCHARGE, PRAECIPE TO REINSTATE/REACTIVATE), we should NOT
+  // penalize recency as "actively litigating".
+  const lastEvent = (lastEventText || docketText);
+  const isPressureResumingLastEvent =
+    lastEvent.includes('STAY IS LIFTED') ||
+    lastEvent.includes('STAY LIFTED') ||
+    (lastEvent.includes('DISCHARGE') && lastEvent.includes('BANKRUPTCY')) ||
+    lastEvent.includes('PRAECIPE TO REINSTATE') ||
+    lastEvent.includes('PRAEC TO REINSTATE') ||
+    lastEvent.includes('REACTIVATE') ||
+    // Administrative / forward-progress milestones (shouldn't be treated as "active defendant litigation")
+    lastEvent.includes('CIVIL CASE MANAGEMENT') ||
+    lastEvent.includes('CASE MANAGEMENT') ||
+    lastEvent.includes('DISCOVERY TO BE COMPLETED') ||
+    lastEvent.includes('ALTERNATE SERVICE') ||
+    (lastEvent.includes('POSTED') && lastEvent.includes('PREMISES')) ||
+    lastEvent.includes('NOT FOUND') ||
+    lastEvent.includes('FAILURE OF SERVICE');
+
+  if (!isPressureResumingLastEvent) {
+    if (daysSinceLastFiling > 0 && daysSinceLastFiling < 14) {
+      score -= 12;
+      factors.push({ text: '🔥 Very recent filing (<14 days) - actively litigating', impact: -12 });
+    } else if (daysSinceLastFiling >= 14 && daysSinceLastFiling < 30) {
+      score -= 8;
+      factors.push({ text: '🔥 Recent filing (14-30 days)', impact: -8 });
+    } else if (daysSinceLastFiling >= 30 && daysSinceLastFiling < 60) {
+      score -= 4;
+      factors.push({ text: '⏳ Activity 30-60 days ago', impact: -4 });
+    } else if (daysSinceLastFiling >= 60 && daysSinceLastFiling < 90) {
+      // Neutral - no penalty
+      factors.push({ text: '⏳ Activity 60-90 days ago', impact: 0 });
+    }
+  } else {
+    // Keep a transparent factor so users understand why there was no penalty.
+    factors.push({ text: '▶️ Recent filing is pressure-resuming/admin (no recency penalty)', impact: 0 });
   }
   // >90 days already handled in transition bonuses if high activity
   
@@ -300,10 +394,21 @@ function calculateEnhancedScore(c) {
   // 8️⃣ "FALSE HOPE" DAMPENER
   // Early case + high activity + no adverse rulings = still believes they can win
   // ============================================
-  const hasAdverseRuling = docketText.includes('DENIED') || docketText.includes('OVERRULED') || 
-                           docketText.includes('MOTION GRANTED') && docketText.includes('PLAINTIFF');
+  // "False hope" should only be reduced when the defendant takes a meaningful loss.
+  // Many dockets contain "MOTION DENIED" entries that are actually *plaintiff* motions denied (a defendant win).
+  const defendantLossSignals =
+    // Plaintiff wins / defense losses
+    (docketText.includes('MOTION GRANTED') && docketText.includes('PLAINTIFF')) ||
+    (docketText.includes('DEFENDANT') && docketText.includes('DENIED')) ||
+    (docketText.includes('DEFENDANT') && docketText.includes('OVERRULED'));
+
+  const defendantWinSignals =
+    // Plaintiff motion denied / plaintiff setback (can embolden defendant)
+    (docketText.includes('PLAINTIFF') && docketText.includes('DENIED'));
+
+  const hasAdverseRulingAgainstDefendant = defendantLossSignals && !defendantWinSignals;
   
-  if (days < 360 && entries >= 6 && activeFighting && !hasAdverseRuling) {
+  if (days < 360 && entries >= 6 && activeFighting && !hasAdverseRulingAgainstDefendant) {
     score -= 8;
     factors.push({ text: '⚠️ "False hope" - early fighter with no adverse rulings yet', impact: -8 });
   }
@@ -554,6 +659,8 @@ async function scrapeMontgomeryCourts(options = {}) {
             let allDocketTypes = [];
             let firstFilingDate = null;
             let lastFilingDate = null;
+            let lastEventText = null;
+            let lastEventType = null;
             
             for (let ri = 1; ri < rows.length; ri++) {
               const cells = rows[ri].querySelectorAll('td');
@@ -565,6 +672,9 @@ async function scrapeMontgomeryCourts(options = {}) {
               if (filingDate) {
                 if (!firstFilingDate) firstFilingDate = filingDate;
                 lastFilingDate = filingDate;
+                // Keep the most recent row's text/type so scoring can treat recency correctly.
+                lastEventText = docketText;
+                lastEventType = docketType;
               }
               
               // Collect all text for comprehensive pattern matching
@@ -603,6 +713,8 @@ async function scrapeMontgomeryCourts(options = {}) {
             result.docket.allTypes = allDocketTypes.join(' | ');
             result.docket.firstFilingDate = firstFilingDate;
             result.docket.lastFilingDate = lastFilingDate;
+            result.docket.lastEventText = lastEventText;
+            result.docket.lastEventType = lastEventType;
             
             // Calculate days since last filing
             if (lastFilingDate) {
@@ -731,6 +843,8 @@ async function scrapeMontgomeryCourts(options = {}) {
           hasConciliation: c.docket.hasConciliation || false,
           isStayed: c.docket.isStayed || false,
           lastFilingDate: c.docket.lastFilingDate || null,
+          lastEventType: c.docket.lastEventType || null,
+          lastEventText: c.docket.lastEventText || null,
           daysSinceLastFiling: c.docket.daysSinceLastFiling || null,
           hasServiceCompleted: c.docket.hasServiceCompleted || false,
           recentEvents: c.docket.docketEvents || []
