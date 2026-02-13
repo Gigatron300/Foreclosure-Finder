@@ -14,8 +14,19 @@
     return;
   }
 
-  const SEARCH_URL = window.location.href.split('?')[0];
   const DELAY = 1200;
+
+  // ─────────────────────────────────────────────────────────────
+  // EXACT FIELD IDS FROM NJ COURTS (discovered via diagnostic)
+  // ─────────────────────────────────────────────────────────────
+  const FIELDS = {
+    lastName: 'searchByPartyNameForm:partyLName',
+    firstName: 'searchByPartyNameForm:partyFName',
+    middleName: 'searchByPartyNameForm:partyMName',
+    searchButton: 'searchByPartyNameForm:btnPartyNameSearch',
+    individualRadio: 'searchByPartyNameForm:partyTypeRadio:0',
+    businessRadio: 'searchByPartyNameForm:partyTypeRadio:1'
+  };
 
   // ─────────────────────────────────────────────────────────────
   // UI Panel
@@ -38,7 +49,7 @@
       #csc-btns button{border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer}
       .csc-stop{background:#f87171;color:#fff}.csc-close{background:#334155;color:#94a3b8}
     </style>
-    <h3>⚖️ Court Status Checker v3</h3>
+    <h3>⚖️ Court Status Checker v4</h3>
     <div id="csc-status">Preparing...</div>
     <div id="csc-bar"><div id="csc-fill"></div></div>
     <div id="csc-stats">🟢<b class="g" id="cs-o">0</b> 🔴<b class="r" id="cs-c">0</b> ❌<b class="y" id="cs-n">0</b> ⚠<b id="cs-e">0</b></div>
@@ -68,14 +79,10 @@
     const status = document.getElementById('csc-status');
     if (fill) fill.style.width = `${p}%`;
     if (status) status.textContent = `${S.done} / ${S.total} (${p}%)`;
-    const eo = document.getElementById('cs-o');
-    const ec = document.getElementById('cs-c');
-    const en = document.getElementById('cs-n');
-    const ee = document.getElementById('cs-e');
-    if (eo) eo.textContent = S.o;
-    if (ec) ec.textContent = S.c;
-    if (en) en.textContent = S.n;
-    if (ee) ee.textContent = S.e;
+    document.getElementById('cs-o').textContent = S.o;
+    document.getElementById('cs-c').textContent = S.c;
+    document.getElementById('cs-n').textContent = S.n;
+    document.getElementById('cs-e').textContent = S.e;
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -109,16 +116,13 @@
 
   function daysBetween(a, b) {
     if (!a || !b) return null;
-    const ms = Math.abs(a.getTime() - b.getTime());
-    return Math.round(ms / (1000 * 60 * 60 * 24));
+    return Math.round(Math.abs(a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
   }
 
   function dateScore(csvDate, siteDate) {
     const d = daysBetween(csvDate, siteDate);
     if (d === null) return 0.10;
-    const cap = 180;
-    const x = Math.min(d, cap);
-    return 1 - x / cap;
+    return 1 - Math.min(d, 180) / 180;
   }
 
   function classify(caseStatusRaw, caseDispositionRaw) {
@@ -129,11 +133,9 @@
     if (/(DISMISSED|DISPOSED|SETTLED|TERMINATED|CLOSED|WITH PREJUDICE|WITHOUT PREJUDICE|FINAL JUDGMENT|JUDGMENT|VACATED)/.test(combined)) {
       return { normalized: 'CLOSED', useful: false };
     }
-
     if (/(OPEN|ACTIVE|PENDING|DEFAULTED|IN PROGRESS|UNRESOLVED)/.test(combined)) {
       return { normalized: 'OPEN', useful: true };
     }
-
     return { normalized: 'UNKNOWN', useful: false };
   }
 
@@ -141,12 +143,7 @@
     const s = cleanText(name);
     if (!s) return null;
 
-    const cleaned = s
-      .replace(/\bET AL\b/g, '')
-      .replace(/\bHIS WIFE\b|\bHER HUSBAND\b/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
+    const cleaned = s.replace(/\bET AL\b/g, '').replace(/\bHIS WIFE\b|\bHER HUSBAND\b/g, '').replace(/\s+/g, ' ').trim();
     if (!cleaned) return null;
 
     if (/\b(LLC|INC|CORP|CORPORATION|CO|COMPANY|BANK|TRUST|AGENCY|AUTHORITY|MORTGAGE|FINANCE|ASSOCIATION|ASSN|HOUSING|SERVICING|SERVICES)\b/.test(cleaned)) {
@@ -180,215 +177,50 @@
   }
 
   // ─────────────────────────────────────────────────────────────
-  // JSF Form Handling - CRITICAL for NJ Courts
+  // Form interaction using EXACT field IDs
   // ─────────────────────────────────────────────────────────────
 
-  // Check if we're on the Party Name form (not Docket Number form)
-  function isPartyNameFormVisible() {
-    // Look for the Individual/Business radio buttons OR the Last Name field
-    // These only exist on the Party Name tab
-    const hasIndividualRadio = !!document.querySelector('input[type="radio"][id*="individual" i], label:contains("Individual")');
-    const hasLastNameField = !!document.querySelector('input[id*="partyLName" i], input[id*="lastName" i]');
-    const hasLastLabel = Array.from(document.querySelectorAll('label, span')).some(el => el.textContent.trim() === '*Last' || el.textContent.trim() === 'Last');
-    
-    return hasLastNameField || hasLastLabel;
-  }
-
-  // Check if we're on the Docket Number form
-  function isDocketFormVisible() {
-    const hasDocketField = !!document.querySelector('input[id*="docketNumber" i], input[id*="docketSeq" i]');
-    const hasDocketYearField = !!document.querySelector('input[id*="docketYear" i]');
-    return hasDocketField || hasDocketYearField;
-  }
-
-  // Click the Party Name tab and WAIT for the form to actually change
-  async function switchToPartyNameTab() {
-    log('  🔄 Switching to Party Name tab...', 'i');
-    
-    // If already on Party Name form, we're good
-    if (isPartyNameFormVisible() && !isDocketFormVisible()) {
-      log('  ✅ Already on Party Name form', 'ok');
-      return true;
-    }
-
-    // Find and click the Party Name tab
-    const allClickables = document.querySelectorAll('a, li, span, div, button');
-    let tabClicked = false;
-    
-    for (const el of allClickables) {
-      const text = (el.textContent || '').trim();
-      if (text === 'Search By Party Name') {
-        log('  🖱️ Clicking "Search By Party Name" tab...', 'i');
-        el.click();
-        tabClicked = true;
-        break;
-      }
-    }
-
-    if (!tabClicked) {
-      // Try by href
-      const tabLink = document.querySelector('a[href*="tabs-2"], a[href*="party"]');
-      if (tabLink) {
-        log('  🖱️ Clicking tab link...', 'i');
-        tabLink.click();
-        tabClicked = true;
-      }
-    }
-
-    if (!tabClicked) {
-      log('  ❌ Could not find Party Name tab', 'err');
+  function setFieldValue(fieldId, value) {
+    const field = document.getElementById(fieldId);
+    if (!field) {
+      log(`  ⚠️ Field not found: ${fieldId}`, 'err');
       return false;
     }
 
-    // CRITICAL: Wait for the form to actually change
-    // JSF may do an AJAX update or full page reload
-    log('  ⏳ Waiting for form to load...', 'i');
-    
-    for (let i = 0; i < 30; i++) {  // Wait up to 15 seconds
-      await wait(500);
-      
-      if (isPartyNameFormVisible()) {
-        log('  ✅ Party Name form loaded', 'ok');
-        await wait(300);  // Extra buffer for JS to finish
-        return true;
-      }
+    // Clear and set value
+    field.value = '';
+    field.focus();
+    field.value = value;
+
+    // Fire events for JSF
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    field.dispatchEvent(new Event('blur', { bubbles: true }));
+
+    return true;
+  }
+
+  function clickSearchButton() {
+    const btn = document.getElementById(FIELDS.searchButton);
+    if (!btn) {
+      log(`  ⚠️ Search button not found: ${FIELDS.searchButton}`, 'err');
+      return false;
     }
-
-    log('  ❌ Party Name form did not load', 'err');
-    return false;
+    btn.click();
+    return true;
   }
 
-  // Find the Last Name input field
-  function findLastNameField() {
-    // Try by ID patterns
-    const byId = document.querySelector(
-      'input[id*="partyLName" i], input[id*="partylname" i], ' +
-      'input[id*="lastName" i], input[id*="lastname" i], ' +
-      'input[id*="lname" i], input[id*="LName" i]'
-    );
-    if (byId) return byId;
-
-    // Try by looking near "*Last" label
-    const labels = document.querySelectorAll('label, span, td');
-    for (const lbl of labels) {
-      const txt = (lbl.textContent || '').trim();
-      if (txt === '*Last' || txt === 'Last') {
-        // Look for nearby input
-        const parent = lbl.closest('tr, div, td');
-        if (parent) {
-          const input = parent.querySelector('input[type="text"]');
-          if (input) return input;
-        }
-        // Try next sibling
-        let next = lbl.nextElementSibling;
-        while (next) {
-          if (next.tagName === 'INPUT') return next;
-          const inp = next.querySelector('input');
-          if (inp) return inp;
-          next = next.nextElementSibling;
-        }
-      }
+  function ensureIndividualMode() {
+    const radio = document.getElementById(FIELDS.individualRadio);
+    if (radio && !radio.checked) {
+      radio.click();
+      return true;
     }
-
-    return null;
+    return true;
   }
 
-  // Find the First Name input field
-  function findFirstNameField() {
-    const byId = document.querySelector(
-      'input[id*="partyFName" i], input[id*="partyfname" i], ' +
-      'input[id*="firstName" i], input[id*="firstname" i], ' +
-      'input[id*="fname" i], input[id*="FName" i]'
-    );
-    if (byId) return byId;
-
-    const labels = document.querySelectorAll('label, span, td');
-    for (const lbl of labels) {
-      const txt = (lbl.textContent || '').trim();
-      if (txt === '*First' || txt === 'First') {
-        const parent = lbl.closest('tr, div, td');
-        if (parent) {
-          const input = parent.querySelector('input[type="text"]');
-          if (input) return input;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  // Find the Middle Name/MI input field
-  function findMiddleNameField() {
-    const byId = document.querySelector(
-      'input[id*="partyMName" i], input[id*="partymname" i], ' +
-      'input[id*="middleName" i], input[id*="middlename" i], ' +
-      'input[id*="mname" i], input[id*="MName" i]'
-    );
-    if (byId) return byId;
-
-    const labels = document.querySelectorAll('label, span, td');
-    for (const lbl of labels) {
-      const txt = (lbl.textContent || '').trim();
-      if (txt === 'MI-Optional' || txt === 'MI' || txt === 'Middle') {
-        const parent = lbl.closest('tr, div, td');
-        if (parent) {
-          const input = parent.querySelector('input[type="text"]');
-          if (input) return input;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  // Set input value with proper JSF events
-  function setFieldValue(input, value) {
-    if (!input) return false;
-
-    // Focus the field
-    input.focus();
-    input.dispatchEvent(new Event('focus', { bubbles: true }));
-
-    // Clear existing value
-    input.value = '';
-
-    // Set new value character by character (more realistic)
-    input.value = value;
-
-    // Fire all the events JSF might need
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-    input.dispatchEvent(new Event('blur', { bubbles: true }));
-
-    return input.value === value;
-  }
-
-  // Find the Search button
-  function findSearchButton() {
-    // Look for button/input with "Search" text
-    const allButtons = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
-    for (const btn of allButtons) {
-      const text = (btn.textContent || btn.value || '').trim();
-      if (text.toLowerCase() === 'search') {
-        return btn;
-      }
-    }
-
-    // Look by ID
-    const byId = document.querySelector(
-      'button[id*="search" i], input[id*="search" i][type="submit"], ' +
-      'input[id*="search" i][type="button"]'
-    );
-    if (byId) return byId;
-
-    return null;
-  }
-
-  // Wait for results table or error
-  async function waitForSearchResults(timeout = 20000) {
+  async function waitForResults(timeout = 20000) {
     const start = Date.now();
-
     while (Date.now() - start < timeout) {
       // Check for results table
       const tables = document.querySelectorAll('table');
@@ -399,104 +231,86 @@
         }
       }
 
-      // Check for "no results" message
+      // Check for "no results"
       const bodyText = document.body.innerText.toLowerCase();
-      if (bodyText.includes('no cases found') || bodyText.includes('no records found') || bodyText.includes('0 cases')) {
+      if (bodyText.includes('no cases found') || bodyText.includes('no records found')) {
         return { success: true, table: null, noResults: true };
       }
 
-      // Check for validation errors (means form didn't submit properly)
-      const errors = document.querySelectorAll('.error, .errorMessage, [class*="error"]');
-      for (const err of errors) {
-        const errText = (err.textContent || '').toLowerCase();
-        if (errText.includes('required') || errText.includes('invalid')) {
-          return { success: false, error: err.textContent };
-        }
+      // Check for error messages (wrong form submitted)
+      const pageText = document.body.innerText;
+      if (pageText.includes('Docket Sequence Number is required') || pageText.includes('Docket Year is required')) {
+        return { success: false, error: 'Wrong form submitted (Docket form instead of Party Name)' };
       }
 
       await wait(500);
     }
-
     return { success: false, error: 'Timeout waiting for results' };
   }
 
-  // Perform a search
   async function doSearch(last, first, mid) {
     log(`  🔍 Searching: "${last}", "${first}" "${mid || ''}"`, 'i');
 
-    // Step 1: Make sure we're on Party Name tab
-    const tabOk = await switchToPartyNameTab();
-    if (!tabOk) {
-      return { success: false, error: 'Could not switch to Party Name tab' };
+    // Ensure Individual mode is selected
+    ensureIndividualMode();
+    await wait(100);
+
+    // Clear and fill the EXACT fields
+    log(`  ✏️ Setting Last Name: ${last}`, 'i');
+    if (!setFieldValue(FIELDS.lastName, last)) {
+      return { success: false, error: 'Could not set Last Name field' };
+    }
+    await wait(150);
+
+    if (first) {
+      log(`  ✏️ Setting First Name: ${first}`, 'i');
+      setFieldValue(FIELDS.firstName, first);
+      await wait(150);
+    } else {
+      // Clear first name field
+      setFieldValue(FIELDS.firstName, '');
     }
 
-    // Step 2: Find the form fields
-    const lastField = findLastNameField();
-    const firstField = findFirstNameField();
-    const midField = findMiddleNameField();
-
-    log(`  📝 Fields found: Last=${!!lastField}, First=${!!firstField}, Mid=${!!midField}`, 'i');
-
-    if (!lastField) {
-      return { success: false, error: 'Could not find Last Name field' };
+    if (mid) {
+      log(`  ✏️ Setting Middle: ${mid}`, 'i');
+      setFieldValue(FIELDS.middleName, mid);
+      await wait(150);
+    } else {
+      // Clear middle name field
+      setFieldValue(FIELDS.middleName, '');
     }
 
-    // Step 3: Fill in the fields
-    log(`  ✏️ Filling: Last="${last}"`, 'i');
-    setFieldValue(lastField, last);
-    await wait(200);
-
-    if (firstField && first) {
-      log(`  ✏️ Filling: First="${first}"`, 'i');
-      setFieldValue(firstField, first);
-      await wait(200);
+    // Click the CORRECT search button
+    log(`  🖱️ Clicking Party Name Search button...`, 'i');
+    if (!clickSearchButton()) {
+      return { success: false, error: 'Could not click search button' };
     }
 
-    if (midField && mid) {
-      log(`  ✏️ Filling: Mid="${mid}"`, 'i');
-      setFieldValue(midField, mid);
-      await wait(200);
-    }
-
-    // Step 4: Find and click Search
-    const searchBtn = findSearchButton();
-    if (!searchBtn) {
-      return { success: false, error: 'Could not find Search button' };
-    }
-
-    log('  🖱️ Clicking Search button...', 'i');
-    searchBtn.click();
-
-    // Step 5: Wait for results
-    const result = await waitForSearchResults(20000);
+    // Wait for results
+    await wait(1000);
+    const result = await waitForResults(20000);
 
     if (!result.success) {
-      log(`  ❌ Search failed: ${result.error}`, 'err');
       return { success: false, error: result.error };
     }
 
     if (result.noResults) {
-      log('  ℹ️ No cases found for this name', 'w');
       return { success: true, table: null };
     }
 
-    log('  ✅ Got results!', 'ok');
+    log(`  ✅ Got results table!`, 'ok');
     return { success: true, table: result.table };
   }
 
   function getRows(table) {
-    return Array.from(table.querySelectorAll('tbody tr, tr')).filter(row => {
-      const cells = row.querySelectorAll('td');
-      return cells.length > 0;
-    });
+    return Array.from(table.querySelectorAll('tbody tr, tr')).filter(row => row.querySelectorAll('td').length > 0);
   }
 
   function docketLinkInRow(row) {
     const links = Array.from(row.querySelectorAll('a'));
     const docketRe = /\b([A-Z]{1,4}[-\s]?)?F[-\s]?\d{3,7}[-\s]?\d{2}\b/i;
     for (const a of links) {
-      const t = (a.textContent || '').trim();
-      if (docketRe.test(t)) return a;
+      if (docketRe.test((a.textContent || '').trim())) return a;
     }
     return links[0] || null;
   }
@@ -523,11 +337,12 @@
   }
 
   async function clickBack() {
-    const buttons = document.querySelectorAll('a, button, input[type="button"]');
-    for (const btn of buttons) {
-      const text = (btn.textContent || btn.value || '').trim().toLowerCase();
-      if (text === 'back' || text === '< back' || text === '« back' || text.includes('back to')) {
-        btn.click();
+    // Look for Back button
+    const allClickable = document.querySelectorAll('a, button, input[type="button"]');
+    for (const el of allClickable) {
+      const text = (el.textContent || el.value || '').trim().toLowerCase();
+      if (text === 'back' || text === '< back' || text.includes('back to search')) {
+        el.click();
         await wait(2000);
         return;
       }
@@ -544,14 +359,13 @@
     const plaintiff = getPlaintiff(caseObj);
     const csvDate = getFilingDate(caseObj);
 
-    log(`  📊 Found ${rows.length} results, scoring...`, 'i');
+    log(`  📊 Found ${rows.length} results`, 'i');
 
     const scored = rows.map((row, idx) => {
       const txt = rowText(row);
       const defSim = dice(defName, txt);
       const plSim = dice(plaintiff, txt);
-      const score = (0.65 * defSim) + (0.35 * plSim);
-      return { idx, row, score };
+      return { idx, row, score: (0.65 * defSim) + (0.35 * plSim) };
     }).sort((a, b) => b.score - a.score);
 
     const top = scored.slice(0, Math.min(5, scored.length));
@@ -563,21 +377,19 @@
       const link = docketLinkInRow(cand.row);
       if (!link) continue;
 
-      log(`  📂 Opening result #${cand.idx + 1} (score ${(cand.score * 100).toFixed(0)}%)...`, 'i');
+      log(`  📂 Opening #${cand.idx + 1} (${(cand.score * 100).toFixed(0)}%)...`, 'i');
       link.click();
       await wait(2500);
 
       const jacket = extractJacket();
       const initDt = parseAnyDate(jacket.caseInitiationDate);
-      const cap = jacket.caseCaption || '';
 
-      const defSim2 = Math.max(cand.score, dice(defName, cap));
-      const plSim2 = dice(plaintiff, cap);
+      const defSim2 = Math.max(cand.score, dice(defName, jacket.caseCaption || ''));
+      const plSim2 = dice(plaintiff, jacket.caseCaption || '');
       const dScore = dateScore(csvDate, initDt);
-
       const finalScore = (0.55 * defSim2) + (0.25 * plSim2) + (0.20 * dScore);
 
-      log(`    → Score: ${(finalScore * 100).toFixed(0)}%`, 'i');
+      log(`    Score: ${(finalScore * 100).toFixed(0)}%`, 'i');
 
       if (!best || finalScore > best.finalScore) {
         best = { finalScore, jacket };
@@ -617,22 +429,23 @@
 
   S.total = cases.length;
   upd();
-  log(`✅ Loaded ${cases.length} cases to check`, 'ok');
+  log(`✅ Loaded ${cases.length} cases`, 'ok');
 
-  if (cases.length === 0) {
+  if (!cases.length) {
     log('ℹ️ No cases need checking', 'i');
     return;
   }
 
-  // Initial setup - switch to Party Name tab
-  const initialTab = await switchToPartyNameTab();
-  if (!initialTab) {
-    log('❌ Could not switch to Party Name tab. Please click it manually and re-run.', 'err');
+  // Verify we can see the Party Name form fields
+  const lastField = document.getElementById(FIELDS.lastName);
+  if (!lastField) {
+    log('❌ Party Name form not visible. Click "Search By Party Name" tab first!', 'err');
     return;
   }
+  log('✅ Party Name form ready', 'ok');
 
   for (let i = 0; i < cases.length; i++) {
-    if (window._cscStop) { log('⏹ Stopped by user', 'w'); break; }
+    if (window._cscStop) { log('⏹ Stopped', 'w'); break; }
 
     const c = cases[i];
     const instr = getInstrument(c);
@@ -644,11 +457,8 @@
     const parsed = parseDef(defName);
     if (!parsed || !parsed.last) {
       S.e++; S.done++; upd();
-      log('  ❌ Could not parse defendant name', 'err');
-      await save(instr, {
-        courtStatus: 'ERROR',
-        courtStatusNote: 'Could not parse defendant name'
-      });
+      log('  ❌ Could not parse name', 'err');
+      await save(instr, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse defendant name' });
       continue;
     }
 
@@ -656,13 +466,10 @@
 
     if (!searchResult.success) {
       S.e++; S.done++; upd();
-      log(`  ❌ Search error: ${searchResult.error}`, 'err');
-      await save(instr, {
-        courtStatus: 'ERROR',
-        courtStatusNote: searchResult.error
-      });
-      // Reload page to reset
-      log('  🔄 Reloading page to reset...', 'i');
+      log(`  ❌ ${searchResult.error}`, 'err');
+      await save(instr, { courtStatus: 'ERROR', courtStatusNote: searchResult.error });
+      // Reload to reset form state
+      log('  🔄 Reloading page...', 'i');
       window.location.reload();
       await wait(5000);
       continue;
@@ -670,11 +477,8 @@
 
     if (!searchResult.table) {
       S.n++; S.done++; upd();
-      log('  ❌ No matching cases found', 'w');
-      await save(instr, {
-        courtStatus: 'NOT_FOUND',
-        courtStatusNote: 'No cases found for this defendant name'
-      });
+      log('  ❌ No cases found', 'w');
+      await save(instr, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No cases found for defendant' });
       continue;
     }
 
@@ -682,11 +486,8 @@
 
     if (match.notFound) {
       S.n++; S.done++; upd();
-      log(`  ❌ No good match: ${match.reason}`, 'w');
-      await save(instr, {
-        courtStatus: 'NOT_FOUND',
-        courtStatusNote: match.reason
-      });
+      log(`  ❌ ${match.reason}`, 'w');
+      await save(instr, { courtStatus: 'NOT_FOUND', courtStatusNote: match.reason });
       continue;
     }
 
@@ -711,7 +512,7 @@
       courtDispositionDate: j.dispositionDate || '',
       courtDocketNumber: j.docketNumber || '',
       courtMatchScore: match.best.finalScore || null,
-      courtStatusNote: `Matched with score ${(match.best.finalScore * 100).toFixed(0)}%`
+      courtStatusNote: `Matched ${(match.best.finalScore * 100).toFixed(0)}%`
     });
 
     await wait(DELAY);
