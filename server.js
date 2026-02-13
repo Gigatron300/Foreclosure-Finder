@@ -525,6 +525,58 @@ app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
 // The bookmarklet fetches cases from this server, searches NJ Courts, and
 // POSTs results back one at a time.
 
+// ============================================================
+// ADD THIS TO server.js - right before the existing
+// app.get('/api/camden/court-status-script' ...) endpoint
+// ============================================================
+
+// Serve cases that need court status lookup
+app.get('/api/camden/court-status-cases', async (req, res) => {
+  // Allow CORS for bookmarklet running on NJ Courts domain
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
+  const token = req.query.token || req.headers['x-auth-token'];
+  if (token !== SITE_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const testMode = req.query.test === 'true';
+
+    // Filter to cases that need court status
+    let cases = (data.cases || []).filter(c => {
+      // Skip if already has a final court status
+      if (c.courtStatus === 'CLOSED' || c.courtStatus === 'OPEN') return false;
+      // Skip if defendant can't be parsed
+      if (!c.primaryDefendant) return false;
+      return true;
+    });
+
+    // Map to just the fields the bookmarklet needs
+    cases = cases.map(c => ({
+      instrumentNumber: c.instrumentNumber,
+      defendant: c.primaryDefendant,
+      plaintiff: c.primaryPlaintiff || '',
+      filingDate: c.filingDateISO || c.filingDate || ''
+    }));
+
+    if (testMode) {
+      cases = cases.slice(0, 10);
+    }
+
+    console.log(`📋 Serving ${cases.length} cases for court status lookup${testMode ? ' (TEST MODE)' : ''}`);
+    res.json(cases);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      res.json([]);
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
 // Serve the bookmarklet script with config injected
 app.get('/api/camden/court-status-script', (req, res) => {
   const token = req.query.token || '';
