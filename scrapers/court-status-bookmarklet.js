@@ -1,540 +1,358 @@
-(async function () {
-  'use strict';
+/* court-status-bookmarklet.js
+ *
+ * This runs in YOUR browser on the NJ Courts search page.
+ * It pulls Camden cases from your server and searches them one-by-one.
+ *
+ * IMPORTANT: CAPTCHA cannot be bypassed. This script:
+ *  - avoids hidden iframes (common cause of captcha failure)
+ *  - pauses when captcha/session invalidation is detected
+ *  - lets user solve captcha manually then resume
+ */
 
-  const SERVER = '__SERVER_URL__';
-  const TOKEN = '__AUTH_TOKEN__';
-  const TEST_MODE = __TEST_MODE__;
+/* global __SERVER_URL__, __AUTH_TOKEN__, __TEST_MODE__ */
 
-  const STORAGE_KEY = 'csc_state_v7';
+(function () {
+  const SERVER_URL = "__SERVER_URL__";
+  const AUTH_TOKEN = "__AUTH_TOKEN__";
+  const TEST_MODE = "__TEST_MODE__" === "true";
 
-  // ─────────────────────────────────────────────────────────────
-  // State Management - survives page reloads
-  // ─────────────────────────────────────────────────────────────
-  function getState() {
-    try {
-      const s = localStorage.getItem(STORAGE_KEY);
-      return s ? JSON.parse(s) : null;
-    } catch { return null; }
-  }
+  // ---- Tunables (slower = less CAPTCHA risk) ----
+  const DELAY_BETWEEN_CASES_MS = 2500;   // base delay
+  const JITTER_MS = 1500;               // random extra delay
+  const MAX_CONSECUTIVE_CAPTCHA_HITS = 2;
 
-  function setState(state) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
+  // ---- UI overlay helpers ----
+  function ensureOverlay() {
+    let el = document.getElementById("njcs-overlay");
+    if (el) return el;
 
-  function clearState() {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const cleanText = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
-
-  function dice(a, b) {
-    const sa = cleanText(a), sb = cleanText(b);
-    if (!sa || !sb) return 0;
-    const bigrams = (s) => { const r = []; for (let i = 0; i < s.length - 1; i++) r.push(s.slice(i, i + 2)); return r; };
-    const ba = bigrams(sa), bb = bigrams(sb);
-    const setA = new Set(ba), setB = new Set(bb);
-    let inter = 0;
-    setA.forEach((x) => { if (setB.has(x)) inter++; });
-    return (2 * inter) / (ba.length + bb.length);
-  }
-
-  function parseAnyDate(val) {
-    if (!val) return null;
-    if (val instanceof Date) return isNaN(val) ? null : val;
-    const s = String(val).trim();
-    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (mdy) return new Date(+mdy[3], +mdy[1] - 1, +mdy[2]);
-    return new Date(s);
-  }
-
-  function dateScore(csvDate, siteDate) {
-    if (!csvDate || !siteDate) return 0.10;
-    const d = Math.round(Math.abs(csvDate.getTime() - siteDate.getTime()) / (1000 * 60 * 60 * 24));
-    return 1 - Math.min(d, 180) / 180;
-  }
-
-  function classify(caseStatusRaw, caseDispositionRaw) {
-    const combined = `${caseStatusRaw || ''} ${caseDispositionRaw || ''}`.toUpperCase();
-    if (/(DISMISSED|DISPOSED|SETTLED|TERMINATED|CLOSED|WITH PREJUDICE|WITHOUT PREJUDICE|FINAL JUDGMENT|JUDGMENT|VACATED)/.test(combined)) {
-      return 'CLOSED';
-    }
-    if (/(OPEN|ACTIVE|PENDING|DEFAULTED|IN PROGRESS|UNRESOLVED)/.test(combined)) {
-      return 'OPEN';
-    }
-    return 'UNKNOWN';
-  }
-
-  function parseDef(name) {
-    const s = cleanText(name);
-    if (!s) return null;
-    const cleaned = s.replace(/\bET AL\b/g, '').replace(/\bHIS WIFE\b|\bHER HUSBAND\b/g, '').replace(/\s+/g, ' ').trim();
-    if (!cleaned) return null;
-
-    if (/\b(LLC|INC|CORP|CORPORATION|CO|COMPANY|BANK|TRUST|AGENCY|AUTHORITY|MORTGAGE|FINANCE|ASSOCIATION|ASSN|HOUSING|SERVICING|SERVICES)\b/.test(cleaned)) {
-      return { last: cleaned, first: '', mid: '' };
-    }
-    if (cleaned.includes(',')) {
-      const [lastPart, rest] = cleaned.split(',', 2);
-      const restParts = (rest || '').trim().split(' ').filter(Boolean);
-      return { last: lastPart.trim(), first: restParts[0] || '', mid: restParts[1] || '' };
-    }
-    const parts = cleaned.split(' ').filter(Boolean);
-    if (parts.length === 1) return { last: parts[0], first: '', mid: '' };
-    return { last: parts[0], first: parts[1] || '', mid: parts[2] || '' };
-  }
-
-  async function saveToServer(instrumentNumber, courtData) {
-    try {
-      await fetch(`${SERVER}/api/camden/court-status-update`, {
-        method: 'POST',
-        headers: { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instrumentNumber, courtData })
-      });
-    } catch {}
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Human-like typing
-  // ─────────────────────────────────────────────────────────────
-  async function humanType(fieldId, text) {
-    const field = document.getElementById(fieldId);
-    if (!field) return false;
-
-    field.focus();
-    field.value = '';
-
-    for (const char of text) {
-      field.value += char;
-      field.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-      field.dispatchEvent(new KeyboardEvent('keypress', { key: char, bubbles: true }));
-      field.dispatchEvent(new InputEvent('input', { bubbles: true, data: char, inputType: 'insertText' }));
-      field.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-      await wait(50 + Math.random() * 30);
-    }
-
-    field.dispatchEvent(new Event('change', { bubbles: true }));
-    field.dispatchEvent(new Event('blur', { bubbles: true }));
-    return true;
-  }
-
-  function humanClick(el) {
-    if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
-    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
-    return true;
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Page Detection
-  // ─────────────────────────────────────────────────────────────
-  function getCurrentPage() {
-    const url = window.location.href.toLowerCase();
-    const bodyText = document.body.innerText || '';
-
-    // Check for search form (Party Name tab visible)
-    if (document.getElementById('searchByPartyNameForm:partyLName')) {
-      // Check if we have results table
-      const tables = document.querySelectorAll('table');
-      for (const t of tables) {
-        const txt = (t.innerText || '').toUpperCase();
-        if (txt.includes('DOCKET NUMBER') && txt.includes('CASE CAPTION')) {
-          return 'RESULTS';
-        }
-      }
-      return 'SEARCH';
-    }
-
-    // Check for case jacket page
-    if (bodyText.includes('Case Status:') && bodyText.includes('Case Disposition:') && bodyText.includes('Docket Number:')) {
-      return 'JACKET';
-    }
-
-    return 'UNKNOWN';
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // Extract jacket data from current page
-  // ─────────────────────────────────────────────────────────────
-  function extractJacket() {
-    const text = document.body.innerText || '';
-    const pick = (re) => {
-      const m = text.match(re);
-      return m ? (m[1] || '').trim() : '';
-    };
-    return {
-      caseStatus: pick(/Case Status:\s*([^\t\n\r]+)/i),
-      caseDisposition: pick(/Case Disposition:\s*([^\t\n\r]+)/i),
-      caseCaption: pick(/Case Caption:\s*([^\t\n\r]+)/i),
-      caseType: pick(/Case Type:\s*([^\t\n\r]+)/i),
-      caseInitiationDate: pick(/Case Initiation Date:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i),
-      docketNumber: pick(/Docket Number:\s*([^\t\n\r]+)/i)
-    };
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // UI Panel
-  // ─────────────────────────────────────────────────────────────
-  function showPanel(state) {
-    if (document.getElementById('csc-panel')) document.getElementById('csc-panel').remove();
-
-    const panel = document.createElement('div');
-    panel.id = 'csc-panel';
-    panel.innerHTML = `
-      <style>
-        #csc-panel { position:fixed;top:8px;right:8px;width:360px;z-index:99999;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;font-family:system-ui,sans-serif;font-size:12px;box-shadow:0 4px 24px rgba(0,0,0,.6);border:1px solid #334155; }
-        #csc-panel h3{margin:0 0 6px;color:#38bdf8;font-size:14px}
-        #csc-bar{height:5px;background:#1e293b;border-radius:3px;margin:6px 0;overflow:hidden}
-        #csc-fill{height:100%;background:linear-gradient(90deg,#38bdf8,#818cf8);border-radius:3px;transition:width .3s}
-        #csc-stats{display:flex;gap:10px;color:#94a3b8;margin:4px 0}
-        #csc-stats b.g{color:#4ade80} #csc-stats b.r{color:#f87171} #csc-stats b.y{color:#fbbf24}
-        #csc-info{background:#0a0f1a;border-radius:6px;padding:8px;margin-top:6px;font-family:monospace;font-size:11px;max-height:150px;overflow-y:auto}
-        #csc-btns{margin-top:8px;display:flex;gap:6px}
-        #csc-btns button{border:none;padding:6px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer}
-        .csc-stop{background:#f87171;color:#fff}.csc-done{background:#334155;color:#94a3b8}
-      </style>
-      <h3>⚖️ Court Status Checker</h3>
-      <div id="csc-status">Processing...</div>
-      <div id="csc-bar"><div id="csc-fill" style="width:${Math.round((state.done / state.total) * 100)}%"></div></div>
-      <div id="csc-stats">
-        🟢<b class="g">${state.open}</b> 
-        🔴<b class="r">${state.closed}</b> 
-        ❌<b class="y">${state.notFound}</b>
-        ⚠<b>${state.errors}</b>
-        | ${state.done}/${state.total}
-      </div>
-      <div id="csc-info">
-        <div>Current: ${state.currentCase?.instrumentNumber || 'N/A'}</div>
-        <div>Step: ${state.step}</div>
-        <div>Defendant: ${state.currentCase?.defendant || 'N/A'}</div>
-      </div>
-      <div id="csc-btns">
-        <button class="csc-stop" onclick="localStorage.removeItem('${STORAGE_KEY}');location.reload();">⏹ Stop & Clear</button>
-      </div>
+    el = document.createElement("div");
+    el.id = "njcs-overlay";
+    el.style.cssText = `
+      position: fixed; z-index: 999999;
+      top: 16px; right: 16px;
+      width: 360px;
+      background: rgba(20,20,20,0.95);
+      color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
     `;
-    document.body.appendChild(panel);
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="font-weight:700;">NJ Court Status Runner</div>
+        <button id="njcs-close" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:10px;padding:6px 10px;cursor:pointer;">Close</button>
+      </div>
+      <div id="njcs-status" style="margin-top:10px;line-height:1.35;font-size:13px;"></div>
+      <div id="njcs-actions" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;"></div>
+      <div id="njcs-log" style="margin-top:12px;max-height:220px;overflow:auto;font-size:12px;opacity:0.9;"></div>
+    `;
+    document.body.appendChild(el);
+
+    document.getElementById("njcs-close").onclick = () => el.remove();
+    return el;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Main State Machine
-  // ─────────────────────────────────────────────────────────────
-  let state = getState();
-  const page = getCurrentPage();
+  function setStatus(html) {
+    ensureOverlay();
+    document.getElementById("njcs-status").innerHTML = html;
+  }
 
-  console.log('[CSC] Page:', page, 'State:', state?.step);
+  function setActions(buttons) {
+    ensureOverlay();
+    const wrap = document.getElementById("njcs-actions");
+    wrap.innerHTML = "";
+    buttons.forEach(({ label, onClick, kind }) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.cssText = `
+        cursor:pointer;
+        border-radius:10px;
+        padding:8px 10px;
+        border: 1px solid rgba(255,255,255,0.2);
+        background: ${kind === "primary" ? "rgba(80,160,255,0.9)" : "rgba(255,255,255,0.08)"};
+        color:#fff;
+      `;
+      b.onclick = onClick;
+      wrap.appendChild(b);
+    });
+  }
 
-  // FRESH START - no state, user just ran the bookmarklet
-  if (!state) {
-    console.log('[CSC] Fresh start - fetching cases...');
+  function log(line) {
+    ensureOverlay();
+    const box = document.getElementById("njcs-log");
+    const p = document.createElement("div");
+    p.textContent = line;
+    p.style.cssText = "margin-bottom:6px;";
+    box.prepend(p);
+  }
 
-    // Fetch cases from server
-    let cases = [];
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  function jitterDelay() {
+    return DELAY_BETWEEN_CASES_MS + Math.floor(Math.random() * JITTER_MS);
+  }
+
+  // ---- Server calls ----
+  async function apiGetCases() {
+    const url = `${SERVER_URL}/api/camden?sortBy=daysSinceFiling&sortOrder=desc${TEST_MODE ? "&test=true" : ""}`;
+    const res = await fetch(url, {
+      headers: { "x-auth-token": AUTH_TOKEN }
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      throw new Error(`Server /api/camden failed (${res.status}): ${t.slice(0, 200)}`);
+    }
+    return res.json();
+  }
+
+  async function apiPostUpdate(instrumentNumber, courtData) {
+    const url = `${SERVER_URL}/api/camden/court-status-update`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-auth-token": AUTH_TOKEN
+      },
+      body: JSON.stringify({ instrumentNumber, courtData })
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      throw new Error(`Server update failed (${res.status}): ${t.slice(0, 200)}`);
+    }
+    return res.json();
+  }
+
+  // ---- NJ Courts page interaction (generic, DOM-based) ----
+  // Because NJ Courts pages vary, we use a best-effort strategy:
+  // 1) find likely inputs for case/docket/party
+  // 2) fill defendant (or docket if present)
+  // 3) click a Search button
+  // 4) detect either "captcha/session invalid" or read a results table/text
+  function findInputByHints(hints) {
+    const inputs = Array.from(document.querySelectorAll("input, textarea"));
+    const lower = (s) => (s || "").toLowerCase();
+
+    return inputs.find(inp => {
+      const id = lower(inp.id);
+      const name = lower(inp.name);
+      const aria = lower(inp.getAttribute("aria-label"));
+      const ph = lower(inp.getAttribute("placeholder"));
+      const hay = `${id} ${name} ${aria} ${ph}`;
+      return hints.some(h => hay.includes(h));
+    });
+  }
+
+  function findButtonByText(textHints) {
+    const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], a"));
+    const lower = (s) => (s || "").toLowerCase();
+    return buttons.find(b => {
+      const t = lower(b.textContent || b.value || "");
+      return textHints.some(h => t.includes(h));
+    });
+  }
+
+  function pageHasCaptchaFailure() {
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+    return (
+      bodyText.includes("captcha verification has failed") ||
+      bodyText.includes("captcha") && bodyText.includes("failed for this session") ||
+      bodyText.includes("system is available") && bodyText.includes("captcha")
+    );
+  }
+
+  function readBestEffortResultSummary() {
+    // Try to find anything that looks like a results table
+    const table = document.querySelector("table");
+    if (table) {
+      const txt = table.innerText.replace(/\s+/g, " ").trim();
+      if (txt.length) return txt.slice(0, 500);
+    }
+    // Fallback: look for common “no results” text
+    const bodyText = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    if (/no results|no records|not found/i.test(bodyText)) return "No results found";
+    return bodyText.slice(0, 400);
+  }
+
+  async function runSearchOnPage({ docketNumber, defendantName }) {
+    // Try docket/case input first; else try party/defendant field
+    const docketInput = findInputByHints(["docket", "case", "case number", "casenumber"]);
+    const partyInput = findInputByHints(["defendant", "party", "name", "last name", "business"]);
+
+    const searchBtn = findButtonByText(["search", "submit", "find", "go"]);
+
+    if (!searchBtn || (!docketInput && !partyInput)) {
+      return {
+        courtStatus: "ERROR",
+        courtDisposition: "Could not find search fields/buttons on this page. Open the NJ Courts search screen first."
+      };
+    }
+
+    // Clear + fill
+    if (docketInput && docketNumber) {
+      docketInput.focus();
+      docketInput.value = "";
+      docketInput.dispatchEvent(new Event("input", { bubbles: true }));
+      docketInput.value = docketNumber;
+      docketInput.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (partyInput && defendantName) {
+      partyInput.focus();
+      partyInput.value = "";
+      partyInput.dispatchEvent(new Event("input", { bubbles: true }));
+      partyInput.value = defendantName;
+      partyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    // Click search
+    searchBtn.click();
+
+    // Wait a bit for results to load
+    await sleep(1200);
+
+    if (pageHasCaptchaFailure()) {
+      return { courtStatus: "CAPTCHA", courtDisposition: "Captcha verification has failed for this session" };
+    }
+
+    const summary = readBestEffortResultSummary();
+    // Minimal mapping (customize later once you confirm what the page shows)
+    const isFound = summary && !/no results|no records|not found/i.test(summary);
+
+    return {
+      courtStatus: isFound ? "FOUND" : "NOT_FOUND",
+      courtDisposition: summary
+    };
+  }
+
+  // ---- Runner state (resume support) ----
+  const STATE_KEY = "njcs_runner_state_v1";
+  function saveState(state) {
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+  }
+  function loadState() {
+    try { return JSON.parse(localStorage.getItem(STATE_KEY) || "null"); }
+    catch { return null; }
+  }
+  function clearState() {
+    localStorage.removeItem(STATE_KEY);
+  }
+
+  let paused = false;
+  let shouldStop = false;
+
+  async function main() {
+    ensureOverlay();
+    setStatus("Starting… fetching cases from your server.");
+    setActions([{ label: "Stop", kind: "secondary", onClick: () => (shouldStop = true) }]);
+
+    let payload;
     try {
-      const r = await fetch(`${SERVER}/api/camden?sortBy=daysSinceFiling&sortOrder=desc`, {
-        headers: { 'X-Auth-Token': TOKEN }
-      });
-      const data = await r.json();
-      cases = (data.cases || []).filter(c => {
-        const cs = c.courtStatus || '';
-        return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
-      });
+      payload = await apiGetCases();
     } catch (e) {
-      alert('Could not fetch cases: ' + e.message);
+      setStatus(`❌ Failed to fetch cases.<br><code>${escapeHtml(e.message)}</code><br><br>Double-check your token/password.`);
+      log("Fetch cases failed: " + e.message);
       return;
     }
 
+    let cases = payload.cases || [];
     if (TEST_MODE) cases = cases.slice(0, 10);
 
     if (!cases.length) {
-      alert('No cases need checking!');
+      setStatus("No cases returned from server. (Check upload + auth token.)");
       return;
     }
 
-    // Initialize state
-    state = {
-      cases: cases.map(c => ({
-        instrumentNumber: c.instrumentNumber,
-        defendant: c.primaryDefendant,
-        plaintiff: c.primaryPlaintiff,
-        filingDate: c.filingDateISO || c.filingDate
-      })),
-      currentIndex: 0,
-      currentCase: null,
-      step: 'START',
-      total: cases.length,
-      done: 0,
-      open: 0,
-      closed: 0,
-      notFound: 0,
-      errors: 0,
-      resultsRows: [],
-      currentRowIndex: 0,
-      bestMatch: null
-    };
+    const saved = loadState();
+    let startIndex = saved?.index || 0;
 
-    state.currentCase = state.cases[0];
-    state.step = 'NEED_SEARCH';
-    setState(state);
-  }
+    setStatus(`✅ Loaded ${cases.length} cases.<br>Starting at #${startIndex + 1}.`);
 
-  showPanel(state);
+    let captchaHits = 0;
 
-  // ─────────────────────────────────────────────────────────────
-  // State Machine Logic
-  // ─────────────────────────────────────────────────────────────
-
-  // STEP: Need to perform a search
-  if (state.step === 'NEED_SEARCH') {
-    if (page !== 'SEARCH' && page !== 'RESULTS') {
-      document.getElementById('csc-status').textContent = '❌ Navigate to Search page first!';
-      return;
-    }
-
-    const c = state.currentCase;
-    const parsed = parseDef(c.defendant);
-
-    if (!parsed || !parsed.last) {
-      // Can't parse - mark as error and move on
-      await saveToServer(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse name' });
-      state.errors++;
-      state.done++;
-      state.currentIndex++;
-      if (state.currentIndex < state.cases.length) {
-        state.currentCase = state.cases[state.currentIndex];
-        state.step = 'NEED_SEARCH';
-      } else {
-        state.step = 'DONE';
+    for (let i = startIndex; i < cases.length; i++) {
+      if (shouldStop) {
+        setStatus("Stopped.");
+        saveState({ index: i });
+        return;
       }
-      setState(state);
-      location.reload();
-      return;
-    }
 
-    document.getElementById('csc-status').textContent = `Searching: ${parsed.last}, ${parsed.first}...`;
+      const c = cases[i];
+      const instrumentNumber = c.instrumentNumber || c.caseNumber || `idx-${i}`;
+      const defendantName = c.primaryDefendant || c.defendant || "";
+      const docketNumber = c.courtDocketNumber || c.docketNumber || ""; // if you ever have it
 
-    // Clear and type
-    const lastField = document.getElementById('searchByPartyNameForm:partyLName');
-    const firstField = document.getElementById('searchByPartyNameForm:partyFName');
-    const midField = document.getElementById('searchByPartyNameForm:partyMName');
+      saveState({ index: i });
 
-    if (lastField) { lastField.value = ''; }
-    if (firstField) { firstField.value = ''; }
-    if (midField) { midField.value = ''; }
+      setStatus(`🔎 [${i + 1}/${cases.length}] ${instrumentNumber}<br><small>${escapeHtml(defendantName || "")}</small>`);
+      log(`Searching ${instrumentNumber}…`);
 
-    await humanType('searchByPartyNameForm:partyLName', parsed.last);
-    if (parsed.first) await humanType('searchByPartyNameForm:partyFName', parsed.first);
-    if (parsed.mid) await humanType('searchByPartyNameForm:partyMName', parsed.mid);
+      const result = await runSearchOnPage({ docketNumber, defendantName });
 
-    await wait(300);
+      if (result.courtStatus === "CAPTCHA") {
+        captchaHits++;
+        log("CAPTCHA/session invalid detected.");
 
-    // Update state BEFORE clicking (page will reload)
-    state.step = 'WAITING_RESULTS';
-    setState(state);
+        if (captchaHits >= MAX_CONSECUTIVE_CAPTCHA_HITS) {
+          paused = true;
+          setStatus(`⚠️ CAPTCHA failed for this session.<br><br>
+            1) Solve the CAPTCHA on this page (or refresh and solve it).<br>
+            2) Click Resume.<br><br>
+            <small>We paused to avoid burning the session.</small>`);
 
-    // Click search
-    const searchBtn = document.getElementById('searchByPartyNameForm:btnPartyNameSearch');
-    humanClick(searchBtn);
-    return; // Page will reload
-  }
+          await new Promise((resolve) => {
+            setActions([
+              { label: "Resume", kind: "primary", onClick: () => { paused = false; captchaHits = 0; resolve(); } },
+              { label: "Stop", kind: "secondary", onClick: () => { shouldStop = true; resolve(); } }
+            ]);
+          });
 
-  // STEP: Waiting for results (page just reloaded after search)
-  if (state.step === 'WAITING_RESULTS') {
-    if (page === 'RESULTS') {
-      // Got results! Find rows and score them
-      const table = Array.from(document.querySelectorAll('table')).find(t => 
-        t.innerText.toUpperCase().includes('DOCKET NUMBER') && t.innerText.toUpperCase().includes('CASE CAPTION')
-      );
-
-      if (table) {
-        const rows = Array.from(table.querySelectorAll('tbody tr, tr')).filter(r => r.querySelectorAll('td').length > 0);
-        
-        if (rows.length > 0) {
-          // Score rows
-          const c = state.currentCase;
-          const scored = rows.map((row, idx) => {
-            const txt = cleanText(row.innerText);
-            const links = Array.from(row.querySelectorAll('a')).filter(a => a.href);
-            const defSim = dice(c.defendant, txt);
-            const plSim = dice(c.plaintiff, txt);
-            return { idx, href: links[0]?.href, score: (0.65 * defSim) + (0.35 * plSim), text: txt.substring(0, 100) };
-          }).filter(r => r.href).sort((a, b) => b.score - a.score);
-
-          state.resultsRows = scored.slice(0, 5); // Top 5
-          state.currentRowIndex = 0;
-          state.bestMatch = null;
-          state.step = 'CHECK_ROW';
-          setState(state);
-
-          // Click first row
-          const firstHref = state.resultsRows[0]?.href;
-          if (firstHref) {
-            document.getElementById('csc-status').textContent = `Opening result 1/${state.resultsRows.length}...`;
-            await wait(500);
-            window.location.href = firstHref;
+          if (shouldStop) {
+            setStatus("Stopped.");
             return;
           }
+        } else {
+          // Short wait then continue (maybe it was a transient message)
+          await sleep(3000);
         }
+
+        // Retry this same case after resume/short wait
+        i--;
+        continue;
       }
 
-      // No results found
-      await saveToServer(state.currentCase.instrumentNumber, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No cases in search results' });
-      state.notFound++;
-      state.done++;
-      state.currentIndex++;
-      if (state.currentIndex < state.cases.length) {
-        state.currentCase = state.cases[state.currentIndex];
-        state.step = 'NEED_SEARCH';
-      } else {
-        state.step = 'DONE';
-      }
-      setState(state);
-      location.reload();
-      return;
-    }
-
-    // Check for no results message or still on search page
-    const bodyText = document.body.innerText.toLowerCase();
-    if (bodyText.includes('no cases found') || bodyText.includes('returned 0')) {
-      await saveToServer(state.currentCase.instrumentNumber, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No cases found' });
-      state.notFound++;
-      state.done++;
-      state.currentIndex++;
-      if (state.currentIndex < state.cases.length) {
-        state.currentCase = state.cases[state.currentIndex];
-        state.step = 'NEED_SEARCH';
-      } else {
-        state.step = 'DONE';
-      }
-      setState(state);
-      location.reload();
-      return;
-    }
-  }
-
-  // STEP: Check a result row (we're on the jacket page)
-  if (state.step === 'CHECK_ROW') {
-    if (page === 'JACKET') {
-      const jacket = extractJacket();
-      const c = state.currentCase;
-      const csvDate = parseAnyDate(c.filingDate);
-      const initDt = parseAnyDate(jacket.caseInitiationDate);
-
-      const defSim = dice(c.defendant, jacket.caseCaption || '');
-      const plSim = dice(c.plaintiff, jacket.caseCaption || '');
-      const dScore = dateScore(csvDate, initDt);
-      const finalScore = (0.55 * defSim) + (0.25 * plSim) + (0.20 * dScore);
-
-      console.log('[CSC] Jacket score:', finalScore, jacket);
-
-      if (!state.bestMatch || finalScore > state.bestMatch.score) {
-        state.bestMatch = { score: finalScore, jacket };
+      // Post update back to your server
+      try {
+        await apiPostUpdate(instrumentNumber, result);
+        log(`✅ ${instrumentNumber} → ${result.courtStatus}`);
+      } catch (e) {
+        log(`❌ Update failed for ${instrumentNumber}: ${e.message}`);
       }
 
-      // Move to next row or finish
-      state.currentRowIndex++;
-      if (state.currentRowIndex < state.resultsRows.length) {
-        state.step = 'GO_BACK_FOR_NEXT';
-        setState(state);
-        // Go back to results
-        window.history.back();
-        return;
-      } else {
-        // Done checking rows - save best match
-        state.step = 'SAVE_BEST';
-        setState(state);
-        // Small delay then process
-        await wait(100);
-      }
-    }
-  }
-
-  // STEP: Go back to results to check next row
-  if (state.step === 'GO_BACK_FOR_NEXT') {
-    if (page === 'RESULTS') {
-      const nextHref = state.resultsRows[state.currentRowIndex]?.href;
-      if (nextHref) {
-        state.step = 'CHECK_ROW';
-        setState(state);
-        document.getElementById('csc-status').textContent = `Opening result ${state.currentRowIndex + 1}/${state.resultsRows.length}...`;
-        await wait(500);
-        window.location.href = nextHref;
-        return;
-      }
-    }
-    // If we're not on results yet, wait for back to complete
-    await wait(1000);
-    location.reload();
-    return;
-  }
-
-  // STEP: Save the best match and move to next case
-  if (state.step === 'SAVE_BEST') {
-    const c = state.currentCase;
-    
-    if (state.bestMatch && state.bestMatch.score > 0.3) {
-      const j = state.bestMatch.jacket;
-      const status = classify(j.caseStatus, j.caseDisposition);
-
-      await saveToServer(c.instrumentNumber, {
-        courtStatus: status,
-        courtStatusRaw: j.caseStatus || '',
-        courtDisposition: j.caseDisposition || '',
-        courtCaseType: j.caseType || '',
-        courtCaseCaption: j.caseCaption || '',
-        courtFiledDate: j.caseInitiationDate || '',
-        courtDocketNumber: j.docketNumber || '',
-        courtMatchScore: state.bestMatch.score,
-        courtStatusNote: `Matched ${(state.bestMatch.score * 100).toFixed(0)}%`
-      });
-
-      if (status === 'OPEN') state.open++;
-      else if (status === 'CLOSED') state.closed++;
-      else state.notFound++;
-    } else {
-      await saveToServer(c.instrumentNumber, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No confident match' });
-      state.notFound++;
+      await sleep(jitterDelay());
     }
 
-    state.done++;
-    state.currentIndex++;
-
-    if (state.currentIndex < state.cases.length) {
-      state.currentCase = state.cases[state.currentIndex];
-      state.resultsRows = [];
-      state.currentRowIndex = 0;
-      state.bestMatch = null;
-      state.step = 'NEED_SEARCH';
-      setState(state);
-      
-      // Navigate back to search page
-      const searchUrl = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
-      window.location.href = searchUrl;
-    } else {
-      state.step = 'DONE';
-      setState(state);
-      location.reload();
-    }
-    return;
-  }
-
-  // STEP: All done!
-  if (state.step === 'DONE') {
-    document.getElementById('csc-status').textContent = '🎉 All done!';
-    document.getElementById('csc-info').innerHTML = `
-      <div>✅ Completed ${state.total} cases</div>
-      <div>🟢 Open: ${state.open}</div>
-      <div>🔴 Closed: ${state.closed}</div>
-      <div>❌ Not Found: ${state.notFound}</div>
-      <div>⚠️ Errors: ${state.errors}</div>
-    `;
     clearState();
+    setStatus("🎉 Done! All cases processed.");
+    setActions([{ label: "Close", kind: "secondary", onClick: () => document.getElementById("njcs-overlay")?.remove() }]);
   }
+
+  // Small HTML escape for overlay rendering
+  function escapeHtml(s) {
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  // Start
+  main().catch(err => {
+    ensureOverlay();
+    setStatus(`❌ Unexpected error: <code>${escapeHtml(err.message)}</code>`);
+    log("Unexpected error: " + err.stack);
+  });
 
 })();
