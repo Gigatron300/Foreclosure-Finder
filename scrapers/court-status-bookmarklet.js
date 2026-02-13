@@ -1,40 +1,63 @@
-That confirms it — clicking the Search button causes a **full page reload**, which kills the script.
+javascript:(async function() {
+  const SERVER = '__SERVER_URL__';
+  const TOKEN = '__AUTH_TOKEN__';
+  const TEST_MODE = __TEST_MODE__;
+  const STORAGE_KEY = 'csc_state_v8';
 
-We need a completely different architecture. Let me use **localStorage** to persist state across page reloads. The script will:
+  // Check if already running
+  if (localStorage.getItem(STORAGE_KEY)) {
+    if (!confirm('A session is already in progress. Clear it and start fresh?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+  }
 
-1. Save its state (which case we're on, what step) to localStorage
-2. When the page reloads, check localStorage and resume where it left off
-3. Work through the flow: Search → Results → Click docket → Jacket page → Back → Next case
+  alert('Fetching cases from server...');
 
-Let me build v7 with this approach:Here's **v7** — a complete rewrite using a **state machine** that persists across page reloads:
+  let cases = [];
+  try {
+    const r = await fetch(`${SERVER}/api/camden?sortBy=daysSinceFiling&sortOrder=desc`, {
+      headers: { 'X-Auth-Token': TOKEN }
+    });
+    const data = await r.json();
+    cases = (data.cases || []).filter(c => {
+      const cs = c.courtStatus || '';
+      return !cs || cs === 'NOT_FOUND' || cs === 'ERROR';
+    });
+  } catch (e) {
+    alert('Error fetching cases: ' + e.message);
+    return;
+  }
 
----
+  if (TEST_MODE) cases = cases.slice(0, 10);
 
-## How It Works
+  if (!cases.length) {
+    alert('No cases need checking!');
+    return;
+  }
 
-1. **Saves state to localStorage** before any page navigation
-2. **On each page load**, checks localStorage and resumes from where it left off
-3. Works through a state machine:
-   - `NEED_SEARCH` → Type name, click search
-   - `WAITING_RESULTS` → Page reloads with results, score rows
-   - `CHECK_ROW` → Navigate to jacket, extract data
-   - `GO_BACK_FOR_NEXT` → Go back, check next row
-   - `SAVE_BEST` → Save best match, move to next case
-   - `DONE` → All finished
+  const state = {
+    cases: cases.map(c => ({
+      instrumentNumber: c.instrumentNumber,
+      defendant: c.primaryDefendant,
+      plaintiff: c.primaryPlaintiff,
+      filingDate: c.filingDateISO || c.filingDate
+    })),
+    currentIndex: 0,
+    currentCase: null,
+    step: 'NEED_SEARCH',
+    total: cases.length,
+    done: 0,
+    open: 0,
+    closed: 0,
+    notFound: 0,
+    errors: 0,
+    resultsRows: [],
+    currentRowIndex: 0,
+    bestMatch: null
+  };
 
----
+  state.currentCase = state.cases[0];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
-## How to Use
-
-1. Upload to GitHub → `scrapers/court-status-bookmarklet.js`
-2. Go to NJ Courts search page, click "Search By Party Name" tab
-3. Run the bookmarklet **once** — it will start processing
-4. **Every time the page reloads**, run the bookmarklet again (or we can make it auto-run)
-
-Actually, the issue is you need to **re-run the bookmarklet after each page reload**. That's annoying.
-
-Let me know if this version works, and then I can help you set up a way to auto-run it (like a Tampermonkey userscript that runs automatically on NJ Courts pages).
-
----
-
-**Test it:** Run the bookmarklet, let it search, then when the page reloads with results, **run the bookmarklet again**. It should pick up where it left off.
+  alert(`Ready! ${cases.length} cases to check.\n\nMake sure:\n1. Tampermonkey script is installed\n2. You're on the Search By Party Name tab\n\nClick OK to start.`);
+  location.reload();
+})();
