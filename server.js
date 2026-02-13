@@ -601,7 +601,11 @@ app.get('/api/camden/court-status-script', (req, res) => {
 });
 
 // Receive individual case court status updates from the bookmarklet
-app.post('/api/camden/court-status-update', cors(), checkAuth, async (req, res) => {
+app.options('/api/camden/court-status-update', cors());
+app.post('/api/camden/court-status-update', cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'X-Auth-Token']
+}), checkAuth, async (req, res) => {
   try {
     const { instrumentNumber, courtData } = req.body;
     if (!instrumentNumber || !courtData) {
