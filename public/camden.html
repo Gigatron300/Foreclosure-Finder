@@ -740,7 +740,7 @@ function copyCourtCmd() {
         if (btn) { btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 2000); }
     });
 }
-        function exportCSV() { window.open('/api/camden/export/csv', '_blank'); }
+        function exportCSV() { window.open('/api/camden/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
 
         function truncate(str, len) {
             if (!str) return '';
