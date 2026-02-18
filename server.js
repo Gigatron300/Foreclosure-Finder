@@ -548,7 +548,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
     // Filter to cases that need court status
     let cases = (data.cases || []).filter(c => {
       // Skip if already has a final court status
-      if (c.courtStatus === 'CLOSED' || c.courtStatus === 'OPEN') return false;
+      if (c.courtStatus === 'CLOSED') return false;
       // Skip if defendant can't be parsed
       if (!c.primaryDefendant) return false;
       return true;
@@ -636,7 +636,11 @@ app.post('/api/camden/court-status-update', cors({
 });
 
 // Export Camden CSV
-app.get('/api/camden/export/csv', checkAuth, async (req, res) => {
+app.get('/api/camden/export/csv', (req, res, next) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token === SITE_PASSWORD) next();
+  else res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
   try {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
     const data = JSON.parse(content);
