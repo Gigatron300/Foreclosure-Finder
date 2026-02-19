@@ -147,6 +147,8 @@ function parseCamdenCSV(csvText) {
     instrNum: header.findIndex(h => h.includes('instr')),
     status: header.findIndex(h => h === 'status'),
     flag: header.findIndex(h => h === 'flag'),
+    courtStatus: header.findIndex(h => h.includes('courtcasestatus')),
+    courtDocket: header.findIndex(h => h.includes('docketnumber') || h.includes('docket')),
   };
   
   console.log('Column mapping:', JSON.stringify(col));
@@ -170,6 +172,8 @@ function parseCamdenCSV(csvText) {
         lot: col.lot >= 0 ? (v[col.lot] || '').trim() : '',
         status: col.status >= 0 ? v[col.status] : '',
         docType: col.type >= 0 ? v[col.type] : '',
+        courtStatus: col.courtStatus >= 0 ? (v[col.courtStatus] || '').trim() : '',
+        courtDocket: col.courtDocket >= 0 ? (v[col.courtDocket] || '').trim() : '',
         plaintiffNames: [],
         defendantNames: [],
       });
@@ -238,6 +242,8 @@ function parseCamdenCSV(csvText) {
       allDefendants: raw.defendantNames,
       county: 'Camden',
       state: 'NJ',
+      courtStatus: raw.courtStatus || '',
+      courtDocketNumber: raw.courtDocket || '',
       // Enrichment fields (filled later)
       propertyAddress: '',
       assessedValue: null,
