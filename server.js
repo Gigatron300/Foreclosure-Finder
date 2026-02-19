@@ -558,6 +558,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
     cases = cases.map(c => ({
       instrumentNumber: c.instrumentNumber,
       defendant: c.primaryDefendant,
+      allDefendants: (c.allDefendants || []).filter(n => n),
       plaintiff: c.primaryPlaintiff || '',
       filingDate: c.filingDateISO || c.filingDate || ''
     }));
