@@ -635,35 +635,62 @@ app.post('/api/camden/court-status-update', cors({
   }
 });
 
-// Export Camden CSV
+// Export Camden CSV — preserves original format, adds court status columns
 app.get('/api/camden/export/csv', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token === SITE_PASSWORD) next();
   else res.status(401).json({ error: 'Unauthorized' });
 }, async (req, res) => {
   try {
-    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
-    const data = JSON.parse(content);
-    const headers = [
-      'Instrument #', 'Filing Date', 'Days Since Filing', 'Town',
-      'Block', 'Lot', 'Property Address',
-      'Plaintiff Type', 'Primary Plaintiff', 'Defendant Type', 'Primary Defendant',
-      'All Defendants', 'Entity Co-Defendants',
-      'Assessed Value', 'Land Value', 'Improvement Value',
-      'Building Desc', 'Year Built', 'Last Sale Price', 'Property Class',
-      'Court Status', 'Court Disposition', 'Docket Number', 'Court Filed Date'
-    ];
-    const esc = (s) => `"${(s || '').toString().replace(/"/g, '""')}"`;
-    const rows = data.cases.map(c => [
-      c.instrumentNumber, c.filingDate, c.daysSinceFiling, c.town,
-      c.block, c.lot, esc(c.propertyAddress),
-      c.plaintiffType, esc(c.primaryPlaintiff), c.defendantType, esc(c.primaryDefendant),
-      esc((c.allDefendants || []).join('; ')), esc((c.entityCoDefendants || []).join('; ')),
-      c.assessedValue || '', c.landValue || '', c.improvementValue || '',
-      esc(c.buildingDesc), c.yearConstructed || '', c.lastSalePrice || '', c.propertyClass || '',
-      c.courtStatus || '', esc(c.courtDisposition), c.courtDocketNumber || '', c.courtFiledDate || ''
-    ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    // Read the original CSV
+    let originalCsv;
+    try {
+      originalCsv = await fs.readFile(CAMDEN_CSV_FILE, 'utf8');
+    } catch (e) {
+      return res.status(404).json({ error: 'No CSV file found. Upload one first.' });
+    }
+
+    // Read the pipeline data to get court statuses
+    let caseData = {};
+    try {
+      const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+      const data = JSON.parse(content);
+      (data.cases || []).forEach(c => {
+        if (c.instrumentNumber) {
+          caseData[c.instrumentNumber] = {
+            status: c.courtStatus || '',
+            docket: c.courtDocketNumber || ''
+          };
+        }
+      });
+    } catch (e) {
+      // No pipeline data — export original with empty columns
+    }
+
+    // Process the CSV line by line
+    const lines = originalCsv.split('\n');
+    const outputLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) continue;
+
+      if (i === 0) {
+        // Header row — keep original columns, add Status and Docket Number
+        const cols = line.split(',');
+        const baseCols = cols.slice(0, 15);
+        outputLines.push(baseCols.join(',') + ',Status,Docket Number');
+      } else {
+        // Data row — find Instr# (column M, index 12) and append court status
+        const cols = line.split(',');
+        const instrNum = (cols[12] || '').trim();
+        const baseCols = cols.slice(0, 15);
+        const courtInfo = caseData[instrNum] || {};
+        outputLines.push(baseCols.join(',') + ',' + (courtInfo.status || '') + ',' + (courtInfo.docket || ''));
+      }
+    }
+
+    const csv = outputLines.join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=camden-lis-pendens.csv');
     res.send(csv);
