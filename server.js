@@ -642,7 +642,6 @@ app.get('/api/camden/export/csv', (req, res, next) => {
   else res.status(401).json({ error: 'Unauthorized' });
 }, async (req, res) => {
   try {
-    // Read the original CSV
     let originalCsv;
     try {
       originalCsv = await fs.readFile(CAMDEN_CSV_FILE, 'utf8');
@@ -650,7 +649,6 @@ app.get('/api/camden/export/csv', (req, res, next) => {
       return res.status(404).json({ error: 'No CSV file found. Upload one first.' });
     }
 
-    // Read the pipeline data to get court statuses
     let caseData = {};
     try {
       const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
@@ -663,11 +661,8 @@ app.get('/api/camden/export/csv', (req, res, next) => {
           };
         }
       });
-    } catch (e) {
-      // No pipeline data — export original with empty columns
-    }
+    } catch (e) {}
 
-    // Process the CSV line by line
     const lines = originalCsv.split('\n');
     const outputLines = [];
 
@@ -676,12 +671,10 @@ app.get('/api/camden/export/csv', (req, res, next) => {
       if (!line.trim()) continue;
 
       if (i === 0) {
-        // Header row — keep original columns, add Status and Docket Number
         const cols = line.split(',');
         const baseCols = cols.slice(0, 15);
-        outputLines.push(baseCols.join(',') + ',Status,Docket Number');
+        outputLines.push(baseCols.join(',') + ',Court Case Status,Docket Number');
       } else {
-        // Data row — find Instr# (column M, index 12) and append court status
         const cols = line.split(',');
         const instrNum = (cols[12] || '').trim();
         const baseCols = cols.slice(0, 15);
