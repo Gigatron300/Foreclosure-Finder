@@ -521,7 +521,7 @@
         }
 
         function createCard(c) {
-            const address = c.propertyAddress || 'Address pending enrichment';
+            const address = c.propertyAddress || 'Address pending';
             const town = c.town || '';
             const hasAddr = !!c.propertyAddress;
             const typeClass = c.plaintiffType === 'TAX_LIEN' ? 'tax-lien' : c.plaintiffType === 'GOVERNMENT' ? 'government' : 'mortgage';
@@ -538,10 +538,10 @@
 
             let streetViewHtml;
             if (!hasAddr) {
-                streetViewHtml = '<div class="no-image">📍 Address not yet resolved — click "Resolve Addresses"</div>';
+                streetViewHtml = '<div class="no-image">📍 Address not yet resolved</div>';
             } else if (!hasApiKey) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
-                    <div style="text-align:center;">🗺️ Click to view on Google Maps<br><small>Add API key for street photos</small></div>
+                    <div style="text-align:center;">🗺️ Click for Maps<br><small>Add API key for photos</small></div>
                 </a>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
@@ -552,7 +552,26 @@
 
             const months = Math.round((c.daysSinceFiling || 0) / 30);
 
-            // Value row
+            // Court status badge
+            let courtHtml = '';
+            if (c.courtStatus) {
+                const colors = {
+                    'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '🟢' },
+                    'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '🔴' },
+                    'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '🟡' }
+                };
+                const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '⚪' };
+                courtHtml = `
+                    <div style="margin-top:12px;padding:10px;background:${cs.bg};border-radius:6px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' — ' + c.courtDisposition : ''}</span>
+                        </div>
+                        ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber}</div>` : ''}
+                        ${c.courtDispositionDate ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
+                    </div>`;
+            }
+
+            // Values row
             let valueRow = '';
             if (c.assessedValue || c.lastSalePrice) {
                 valueRow = `<div class="value-row">
@@ -572,14 +591,14 @@
                     </div>
                     <div class="property-info">
                         <div class="property-address">${address}</div>
-                        <div class="property-location">${town}, NJ &mdash; Block ${c.block}, Lot ${c.lot}</div>
+                        <div class="property-location">${town}, NJ — Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' — ' + c.buildingDesc : ''}</div>
 
                         ${valueRow}
 
                         <div class="property-details">
                             <div class="detail-item">
                                 <div class="detail-label">Defendant</div>
-                                <div class="detail-value">${truncate(c.primaryDefendant, 28) || 'N/A'}</div>
+                                <div class="detail-value">${truncate(c.primaryDefendant, 30) || 'N/A'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Filed</div>
@@ -587,38 +606,20 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Plaintiff</div>
-                                <div class="detail-value">${truncate(c.primaryPlaintiff, 25) || 'N/A'}</div>
+                                <div class="detail-value">${truncate(c.primaryPlaintiff, 30) || 'N/A'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Instrument #</div>
                                 <div class="detail-value">${c.instrumentNumber || 'N/A'}</div>
                             </div>
-                            ${c.buildingDesc ? `<div class="detail-item"><div class="detail-label">Building</div><div class="detail-value">${c.buildingDesc}</div></div>` : ''}
-                            ${c.courtStatus ? `<div class="detail-item" style="grid-column: 1 / -1;">
-                                <div class="detail-label">Court Status</div>
-                                <div class="detail-value">
-                                    <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:600;
-                                        background:${c.courtStatus === 'OPEN' ? 'rgba(74,222,128,0.15);color:#4ade80' : c.courtStatus === 'CLOSED' ? 'rgba(248,113,113,0.15);color:#f87171' : 'rgba(148,163,184,0.15);color:#94a3b8'};">
-                                        ${c.courtStatus === 'OPEN' ? '🟢' : c.courtStatus === 'CLOSED' ? '🔴' : '⚪'} ${c.courtStatus}
-                                    </span>
-                                    ${c.courtDisposition ? `<span style="color:#94a3b8;font-size:0.75rem;margin-left:6px">${c.courtDisposition}</span>` : ''}
-                                    ${c.courtDocketNumber ? `<div style="color:#64748b;font-size:0.7rem;margin-top:2px">${c.courtDocketNumber}</div>` : ''}
-                                </div>
-                            </div>` : ''}
+                            ${c.lastSaleDate ? `<div class="detail-item"><div class="detail-label">Last Sold</div><div class="detail-value">${c.lastSaleDate}</div></div>` : ''}
                             ${c.yearConstructed ? `<div class="detail-item"><div class="detail-label">Year Built</div><div class="detail-value">${c.yearConstructed}</div></div>` : ''}
                         </div>
 
+                        ${courtHtml}
+
                         <div class="property-footer">
-                            <span style="font-size: 0.75rem; color: var(--benoro-text-muted);">${c.defendantType} defendant</span>
-                            ${c.courtStatus ? `<span style="font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; font-weight: 600;
-                                ${c.courtStatus === 'OPEN' ? 'background: rgba(74,222,128,0.2); color: #4ade80;' : 
-                                  c.courtStatus === 'CLOSED' ? 'background: rgba(248,113,113,0.2); color: #f87171;' :
-                                  'background: rgba(156,163,175,0.2); color: #9ca3af;'}">
-                                ${c.courtStatus === 'OPEN' ? '🟢 OPEN' : c.courtStatus === 'CLOSED' ? '🔴 CLOSED' : '⚪ ' + c.courtStatus}
-                                ${c.courtDisposition ? ' — ' + c.courtDisposition : ''}
-                            </span>` : ''}
-                            ${c.courtDocketNumber ? `<span style="font-size: 0.7rem; color: var(--benoro-text-light);">${c.courtDocketNumber}</span>` : ''}
-                            ${hasAddr ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : ''}
+                            ${hasAddr ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : '<span></span>'}
                         </div>
                     </div>
                 </div>
