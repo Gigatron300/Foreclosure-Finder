@@ -336,6 +336,7 @@
                     <option value="">All Court Status</option>
                     <option value="OPEN">Open Cases Only</option>
                     <option value="CLOSED">Closed/Dismissed Only</option>
+                    <option value="RECHECK">Needs Recheck</option>
                     <option value="NOT_CHECKED">Not Yet Checked</option>
                 </select>
 
@@ -491,6 +492,8 @@
                     cases = cases.filter(c => c.courtStatus === 'OPEN');
                 } else if (courtStatusFilter === 'CLOSED') {
                     cases = cases.filter(c => c.courtStatus === 'CLOSED');
+                } else if (courtStatusFilter === 'RECHECK') {
+                    cases = cases.filter(c => c.courtStatus === 'RECHECK');
                 } else if (courtStatusFilter === 'NOT_CHECKED') {
                     cases = cases.filter(c => !c.courtStatus);
                 }
