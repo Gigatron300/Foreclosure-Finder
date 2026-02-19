@@ -560,7 +560,8 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       defendant: c.primaryDefendant,
       allDefendants: (c.allDefendants || []).filter(n => n),
       plaintiff: c.primaryPlaintiff || '',
-      filingDate: c.filingDateISO || c.filingDate || ''
+      filingDate: c.filingDateISO || c.filingDate || '',
+      courtDocketNumber: c.courtDocketNumber || ''
     }));
 
     if (testMode) {
