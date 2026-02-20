@@ -616,7 +616,12 @@
                         ${courtHtml}
 
                         <div class="property-footer">
-                            ${hasAddr ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : '<span></span>'}
+                            ${hasAddr ? `
+                                <div style="display:flex;gap:8px;">
+                                    <a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>
+                                    <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Z Zillow</a>
+                                </div>
+                            ` : '<span></span>'}
                         </div>
                     </div>
                 </div>
