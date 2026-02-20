@@ -433,6 +433,7 @@ async function enrichCamdenCases(data, options = {}) {
         c.buildingDesc = result.buildingDesc;
         c.yearConstructed = result.yearConstructed;
         c.lastSalePrice = result.salePrice;
+        c.lastSaleDate = result.saleDate;
         c.propertyClass = result.propertyClass;
         c.enrichmentSource = 'NJ MOD-IV via ArcGIS REST';
         c.enrichedAt = new Date().toISOString();
