@@ -397,6 +397,20 @@ async function enrichCamdenCases(data, options = {}) {
     const prefix = `  ${i + 1}/${total}`;
 
     if (c.propertyAddress) {
+      // Backfill lastSaleDate if missing
+      if (!c.lastSaleDate && c.town && c.block && c.lot) {
+        const munCode = TOWN_TO_MUN_CODE[(c.town || '').toUpperCase().trim()];
+        if (munCode) {
+          await delay(400);
+          try {
+            const result = await queryParcel(munCode, c.block, c.lot);
+            if (result && result.saleDate) {
+              c.lastSaleDate = result.saleDate;
+              console.log(`${prefix} 📅 Backfilled sale date for ${c.instrumentNumber}`);
+            }
+          } catch (e) {}
+        }
+      }
       skipped++;
       continue;
     }
