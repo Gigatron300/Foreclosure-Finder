@@ -518,11 +518,15 @@
         }
         function formatSaleDate(d) {
             if (!d) return '';
-            if (typeof d === 'number') {
+            if (typeof d === 'number' && d > 10000000) {
                 const dt = new Date(d);
                 return (dt.getMonth() + 1) + '/' + dt.getDate() + '/' + dt.getFullYear();
             }
-            return d;
+            const s = String(d);
+            if (/^\d{6}$/.test(s)) {
+                return s.slice(0,2) + '/' + s.slice(2,4) + '/' + '20' + s.slice(4,6);
+            }
+            return s;
         }
         
         function createCard(c) {
@@ -617,7 +621,6 @@
                                 <div class="detail-label">Instrument #</div>
                                 <div class="detail-value">${c.instrumentNumber || 'N/A'}</div>
                             </div>
-                            ${c.lastSaleDate ? `<div class="detail-item"><div class="detail-label">Last Sold</div><div class="detail-value">${c.lastSaleDate}</div></div>` : ''}
                             ${c.yearConstructed ? `<div class="detail-item"><div class="detail-label">Year Built</div><div class="detail-value">${c.yearConstructed}</div></div>` : ''}
                         </div>
 
