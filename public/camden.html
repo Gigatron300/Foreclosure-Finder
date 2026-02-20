@@ -314,9 +314,6 @@
             <!-- Actions -->
             <div class="actions-bar">
                 <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">🏠 Resolve Addresses</button>
-                <button class="btn btn-secondary" onclick="enrichData(true)" id="testBtn" style="background: #8b5cf6; border: none; color: white;">⚡ Test (10 only)</button>
-                <button class="btn btn-secondary" onclick="checkCourtStatus(false)" id="courtStatusBtn" style="background: #0891b2; border: none; color: white;">⚖️ Check Court Status</button>
-                <button class="btn btn-secondary" onclick="checkCourtStatus(true)" id="courtStatusTestBtn" style="background: #6366f1; border: none; color: white;">⚡ Status Test (10)</button>
                 <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
 
                 <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
@@ -671,12 +668,7 @@
 
         function resetButtons() {
             document.getElementById('enrichBtn').disabled = false;
-            document.getElementById('testBtn').disabled = false;
             document.getElementById('enrichBtn').innerHTML = '🏠 Resolve Addresses';
-            document.getElementById('courtStatusBtn').disabled = false;
-            document.getElementById('courtStatusTestBtn').disabled = false;
-            document.getElementById('courtStatusBtn').innerHTML = '⚖️ Check Court Status';
-            document.getElementById('courtStatusTestBtn').innerHTML = '⚡ Status Test (10)';
         }
 
 async function checkCourtStatus(testMode = false) {
