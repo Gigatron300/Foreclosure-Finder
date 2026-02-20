@@ -630,9 +630,7 @@
 
         async function enrichData(testMode = false) {
             const enrichBtn = document.getElementById('enrichBtn');
-            const testBtn = document.getElementById('testBtn');
             enrichBtn.disabled = true;
-            testBtn.disabled = true;
             enrichBtn.innerHTML = testMode ? '⏳ Testing...' : '⏳ Resolving addresses... (~45 sec)';
 
             try {
