@@ -518,13 +518,16 @@
         }
         function formatSaleDate(d) {
             if (!d) return '';
-            if (typeof d === 'number' && d > 10000000) {
-                const dt = new Date(d);
-                return (dt.getMonth() + 1) + '/' + dt.getDate() + '/' + dt.getFullYear();
-            }
             const s = String(d);
+            if (/^\d{8}$/.test(s)) {
+                return s.slice(0,2) + '/' + s.slice(2,4) + '/' + s.slice(4,8);
+            }
             if (/^\d{6}$/.test(s)) {
                 return s.slice(0,2) + '/' + s.slice(2,4) + '/' + '20' + s.slice(4,6);
+            }
+            if (typeof d === 'number' && d > 1000000000) {
+                const dt = new Date(d);
+                return (dt.getMonth() + 1) + '/' + dt.getDate() + '/' + dt.getFullYear();
             }
             return s;
         }
@@ -587,7 +590,7 @@
                     ${c.assessedValue ? `<div class="value-item"><div class="value-amount">$${c.assessedValue.toLocaleString()}</div><div class="value-label">Assessed</div></div>` : ''}
                     ${c.landValue ? `<div class="value-item"><div class="value-amount">$${c.landValue.toLocaleString()}</div><div class="value-label">Land</div></div>` : ''}
                     ${c.improvementValue ? `<div class="value-item"><div class="value-amount">$${c.improvementValue.toLocaleString()}</div><div class="value-label">Improvement</div></div>` : ''}
-                    ${c.lastSalePrice ? `<div class="value-item"><div class="value-amount">$${c.lastSalePrice.toLocaleString()}</div><div class="value-label">Last Sale${c.lastSaleDate ? ' · ' + formatSaleDate(c.lastSaleDate) : ''}</div></div>` : ''}
+                    ${c.lastSalePrice ? `<div class="value-item"><div class="value-amount">$${c.lastSalePrice.toLocaleString()}</div><div class="value-label">Last Sale</div>${c.lastSaleDate ? `<div style="font-size:0.6rem;color:#6b7280;margin-top:2px;">${formatSaleDate(c.lastSaleDate)}</div>` : ''}</div>` : ''}
                 </div>`;
             }
 
