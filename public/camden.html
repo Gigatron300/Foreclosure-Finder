@@ -584,7 +584,7 @@
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' — ' + c.courtDisposition : ''}</span>
                         </div>
-                        ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber}</div>` : ''}
+                        ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
                         ${c.courtDispositionDate ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
                     </div>`;
             }
