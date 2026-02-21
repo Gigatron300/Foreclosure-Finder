@@ -553,7 +553,10 @@
 
             let streetViewHtml;
             if (!hasAddr) {
-                streetViewHtml = '<div class="no-image">📍 Address not yet resolved</div>';
+                streetViewHtml = `<div class="no-image" style="cursor:pointer;flex-direction:column;gap:8px;" onclick="manualAddress('${c.instrumentNumber}')">
+                    📍 Address not yet resolved<br>
+                    <span style="font-size:0.7rem;color:var(--benoro-gold);">Click to enter manually</span>
+                </div>`;
             } else if (!hasApiKey) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
                     <div style="text-align:center;">🗺️ Click for Maps<br><small>Add API key for photos</small></div>
@@ -775,7 +778,26 @@ function copyCourtCmd() {
             }
             return 'just now';
         }
+async function manualAddress(instrumentNumber) {
+            const address = prompt('Enter the property address (e.g. 123 MAIN ST):');
+            if (!address || !address.trim()) return;
 
+            try {
+                const r = await fetch('/api/camden/manual-address', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instrumentNumber, address: address.trim().toUpperCase() })
+                });
+                const result = await r.json();
+                if (result.success) {
+                    loadData();
+                } else {
+                    alert('Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
         checkExistingAuth();
     </script>
 </body>
