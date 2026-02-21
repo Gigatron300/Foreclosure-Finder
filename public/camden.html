@@ -190,7 +190,7 @@
             border-top: 1px solid var(--benoro-border); border-bottom: 1px solid var(--benoro-border);
         }
         .value-item { flex: 1; text-align: center; }
-        .value-amount { font-family: 'Cormorant Garamond', serif; font-size: 1.1rem; font-weight: 600; color: var(--benoro-gold); }
+        .value-amount { font-family: 'Montserrat', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--benoro-gold); }
         .value-label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
 
         .property-footer {
@@ -520,10 +520,13 @@
             if (!d) return '';
             const s = String(d);
             if (/^\d{8}$/.test(s)) {
-                return s.slice(0,2) + '/' + s.slice(2,4) + '/' + s.slice(4,8);
+                const a = s.slice(0,2), b = s.slice(2,4), c = s.slice(4,8);
+                return parseInt(a) > 12 ? (b + '/' + a + '/' + c) : (a + '/' + b + '/' + c);
             }
             if (/^\d{6}$/.test(s)) {
-                return s.slice(0,2) + '/' + s.slice(2,4) + '/' + '20' + s.slice(4,6);
+                const a = s.slice(0,2), b = s.slice(2,4), yy = s.slice(4,6);
+                const yr = parseInt(yy) > 50 ? '19' + yy : '20' + yy;
+                return parseInt(a) > 12 ? (b + '/' + a + '/' + yr) : (a + '/' + b + '/' + yr);
             }
             if (typeof d === 'number' && d > 1000000000) {
                 const dt = new Date(d);
@@ -588,9 +591,9 @@
             if (c.assessedValue || c.lastSalePrice) {
                 valueRow = `<div class="value-row">
                     ${c.assessedValue ? `<div class="value-item"><div class="value-amount">$${c.assessedValue.toLocaleString()}</div><div class="value-label">Assessed</div></div>` : ''}
-                    ${c.landValue ? `<div class="value-item"><div class="value-amount">$${c.landValue.toLocaleString()}</div><div class="value-label">Land</div></div>` : ''}
                     ${c.improvementValue ? `<div class="value-item"><div class="value-amount">$${c.improvementValue.toLocaleString()}</div><div class="value-label">Improvement</div></div>` : ''}
-                    ${c.lastSalePrice ? `<div class="value-item"><div class="value-amount">$${c.lastSalePrice.toLocaleString()}</div><div class="value-label">Sold ${c.lastSaleDate ? formatSaleDate(c.lastSaleDate) : ''}</div></div>` : ''}
+                    ${c.lastSalePrice ? `<div class="value-item"><div class="value-amount">$${c.lastSalePrice.toLocaleString()}</div><div class="value-label">Last Sale</div></div>` : ''}
+                    ${c.lastSaleDate ? `<div class="value-item"><div class="value-amount" style="font-size:0.85rem;">${formatSaleDate(c.lastSaleDate)}</div><div class="value-label">Sold Date</div></div>` : ''}
                 </div>`;
             }
 
