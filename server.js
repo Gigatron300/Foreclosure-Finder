@@ -369,6 +369,29 @@ app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
 
 // ============== CAMDEN COUNTY PIPELINE API ==============
 
+app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
+    try {
+      const { instrumentNumber, address } = req.body;
+      if (!instrumentNumber || !address) return res.status(400).json({ error: 'Missing fields' });
+
+      const dataFile = path.join(__dirname, 'data', 'camden-pipeline.json');
+      const raw = await fs.readFile(dataFile, 'utf8');
+      const data = JSON.parse(raw);
+
+      const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
+      if (!found) return res.status(404).json({ error: 'Case not found' });
+
+      found.propertyAddress = address;
+      found.enrichmentSource = 'Manual entry';
+      found.enrichedAt = new Date().toISOString();
+
+      await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
 // Upload Camden County CSV
 app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
   try {
