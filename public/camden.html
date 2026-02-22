@@ -6,7 +6,7 @@
     <title>Camden County Pipeline | Benoro Development</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --benoro-navy: #1a3a52;
@@ -46,8 +46,13 @@
             display: flex; justify-content: space-between; align-items: center;
             max-width: 1400px; margin: 0 auto; padding: 0 30px;
         }
-        .logo-section { display: flex; align-items: center; gap: 15px; }
-        .header-logo { height: 40px; width: auto; }
+        .logo-section { 
+            display: flex; 
+            align-items: center; 
+            gap: 15px; 
+            background: var(--benoro-navy-dark);
+        }
+        .header-logo { height: 55px; width: auto; }
         .page-title-section { flex: 1; text-align: center; }
         .page-title {
             font-family: 'Montserrat', sans-serif;
@@ -74,7 +79,7 @@
             border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.4);
         }
         .login-logo { width: 180px; margin-bottom: 25px; }
-        .login-box h2 { margin-bottom: 10px; color: var(--benoro-white); font-family: 'Cormorant Garamond', serif; font-size: 2rem; letter-spacing: 2px; }
+        .login-box h2 { margin-bottom: 10px; color: var(--benoro-white); font-family: 'Montserrat', sans-serif; font-size: 1.5rem; font-weight: 600; letter-spacing: 2px; }
         .login-box .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 30px; font-size: 0.85rem; }
         .login-box input { width: 100%; padding: 15px 20px; border-radius: 6px; border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); font-size: 0.9rem; margin-bottom: 20px; }
         .login-box input:focus { outline: none; border-color: var(--benoro-gold); }
@@ -96,7 +101,7 @@
             background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.2);
             border-radius: 4px; padding: 30px; margin-bottom: 25px; text-align: center;
         }
-        .upload-section h3 { color: var(--benoro-white); margin-bottom: 8px; font-family: 'Cormorant Garamond', serif; font-size: 1.3rem; }
+        .upload-section h3 { color: var(--benoro-white); margin-bottom: 8px; font-family: 'Montserrat', sans-serif; font-size: 1.1rem; font-weight: 600; }
         .upload-section p { color: var(--benoro-text-muted); margin-bottom: 20px; font-size: 0.85rem; }
         .upload-input { display: none; }
         .upload-label {
@@ -131,7 +136,7 @@
             display: flex; gap: 50px; flex-wrap: wrap;
         }
         .stat-item { text-align: center; }
-        .stat-value { font-family: 'Cormorant Garamond', serif; font-size: 2.2rem; font-weight: 600; color: var(--benoro-gold); }
+        .stat-value { font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 600; color: var(--benoro-gold); }
         .stat-label { color: var(--benoro-text-muted); font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 5px; }
 
         .filter-row { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
@@ -145,7 +150,7 @@
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid rgba(184,134,11,0.1);
         }
-        .results-header h2 { font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; }
+        .results-header h2 { font-family: 'Montserrat', sans-serif; font-size: 1.3rem; font-weight: 600; }
         .case-count { color: var(--benoro-text-muted); font-size: 1rem; }
 
         /* Property Cards */
@@ -208,13 +213,80 @@
         .spinner { width: 40px; height: 40px; border: 3px solid rgba(16,185,129,0.2); border-top-color: var(--benoro-gold); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* Google API Key */
-        .api-key-section {
-            background: rgba(184,134,11,0.08); border: 1px solid rgba(184,134,11,0.2);
-            border-radius: 2px; padding: 20px; margin-bottom: 25px; font-size: 0.85rem;
+        /* Google API Key - Collapsible Dropdown */
+        .api-dropdown {
+            background: var(--benoro-card); 
+            border: 1px solid rgba(184,134,11,0.15);
+            border-radius: 4px; 
+            margin-bottom: 25px;
+            overflow: hidden;
         }
-        .api-key-section input { width: 300px; padding: 8px 12px; border-radius: 6px; border: 1px solid #374151; background: #1f2937; color: #f3f4f6; margin-right: 10px; }
-        .api-key-section button { padding: 8px 15px; border-radius: 6px; border: none; background: var(--benoro-gold); color: var(--benoro-navy-dark); cursor: pointer; font-weight: 500; }
+        .api-dropdown-header {
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .api-dropdown-header:hover {
+            background: rgba(255,255,255,0.03);
+        }
+        .api-dropdown-title {
+            font-size: 0.85rem;
+            color: var(--benoro-text-muted);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .api-dropdown-arrow {
+            color: var(--benoro-text-muted);
+            transition: transform 0.3s;
+            font-size: 0.7rem;
+        }
+        .api-dropdown.open .api-dropdown-arrow {
+            transform: rotate(180deg);
+        }
+        .api-dropdown-content {
+            display: none;
+            padding: 15px 20px 20px 20px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .api-dropdown.open .api-dropdown-content {
+            display: block;
+        }
+        .api-key-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .api-key-row input { 
+            width: 300px; 
+            padding: 8px 12px; 
+            border-radius: 6px; 
+            border: 1px solid #374151; 
+            background: #1f2937; 
+            color: #f3f4f6;
+        }
+        .api-key-row button { 
+            padding: 8px 15px; 
+            border-radius: 6px; 
+            border: none; 
+            background: var(--benoro-gold); 
+            color: var(--benoro-navy-dark); 
+            cursor: pointer; 
+            font-weight: 500;
+        }
+        .api-help-link {
+            color: var(--benoro-gold);
+            font-size: 0.8rem;
+            text-decoration: none;
+            margin-left: 10px;
+        }
+        .api-help-link:hover {
+            text-decoration: underline;
+        }
 
         @media (max-width: 768px) {
             .cases-grid { grid-template-columns: 1fr; }
@@ -260,22 +332,31 @@
                 <div id="enrichmentInfo" style="color: var(--benoro-text-light); font-size: 0.8rem;"></div>
             </div>
 
-            <!-- Google API Key -->
-            <div class="api-key-section" id="apiKeySection">
-                <strong>📷 Street View Images:</strong> Enter your Google Maps API key for property photos.
-                <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" style="color: var(--benoro-gold);">Get a free API key</a>
-                <br><br>
-                <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
-                <button onclick="saveApiKey()">Save Key</button>
-                <span id="apiKeyStatus" style="margin-left: 10px;"></span>
+            <!-- Google API Key - Collapsible -->
+            <div class="api-dropdown" id="apiDropdown">
+                <div class="api-dropdown-header" onclick="toggleApiDropdown()">
+                    <div class="api-dropdown-title">
+                        <span>📷</span>
+                        <span>Street View Images</span>
+                        <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
+                    </div>
+                    <span class="api-dropdown-arrow">▼</span>
+                </div>
+                <div class="api-dropdown-content">
+                    <div class="api-key-row">
+                        <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
+                        <button onclick="saveApiKey()">Save Key</button>
+                        <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                    </div>
+                </div>
             </div>
 
             <!-- CSV Upload -->
             <div class="upload-section" id="uploadSection">
-                <h3>📁 Upload Camden County Lis Pendens CSV</h3>
+                <h3>Upload Camden County Lis Pendens CSV</h3>
                 <p>Export from the <a href="#" style="color: var(--benoro-gold);">Camden County Clerk's document search</a> — select Lis Pendens filings for your target month</p>
                 <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
-                <label for="csvUpload" class="upload-label">📤 Choose CSV File</label>
+                <label for="csvUpload" class="upload-label">Choose CSV File</label>
                 <div class="csv-status" id="csvStatus">Checking for existing data...</div>
             </div>
 
@@ -303,18 +384,18 @@
                 </div>
                 <div class="stat-item">
                     <div class="stat-value" id="openCount" style="color: var(--benoro-success);">-</div>
-                    <div class="stat-label">🟢 Open Cases</div>
+                    <div class="stat-label">Open Cases</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-value" id="closedCount" style="color: #f87171;">-</div>
-                    <div class="stat-label">🔴 Closed/Dismissed</div>
+                    <div class="stat-label">Closed/Dismissed</div>
                 </div>
             </div>
 
             <!-- Actions -->
             <div class="actions-bar">
-                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">🏠 Resolve Addresses</button>
-                <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
+                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
+                <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
                 <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                     <option value="daysSinceFiling">Sort: Days Since Filing</option>
@@ -347,7 +428,7 @@
             </div>
 
             <div class="results-header">
-                <h2>📋 Cases <span class="case-count" id="caseCount">(0)</span></h2>
+                <h2>Cases <span class="case-count" id="caseCount">(0)</span></h2>
             </div>
 
             <div class="cases-grid" id="casesGrid">
@@ -360,13 +441,20 @@
         let authToken = localStorage.getItem('pipelineAuth');
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
 
+        function toggleApiDropdown() {
+            document.getElementById('apiDropdown').classList.toggle('open');
+        }
+
         function checkExistingAuth() {
             const savedKey = localStorage.getItem('googleMapsApiKey');
             if (savedKey) {
                 document.getElementById('googleApiKey').value = savedKey;
                 document.getElementById('apiKeyStatus').textContent = '✓ Key saved';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-gold)';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 googleApiKey = savedKey;
+            } else {
+                document.getElementById('apiKeyStatus').textContent = 'No key set';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
             }
             if (authToken) {
                 fetch('/api/camden', { headers: { 'X-Auth-Token': authToken } })
@@ -392,7 +480,7 @@
                 localStorage.setItem('googleMapsApiKey', key);
                 googleApiKey = key;
                 document.getElementById('apiKeyStatus').textContent = '✓ Key saved!';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-gold)';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 loadData();
             }
         }
@@ -574,11 +662,11 @@
             let courtHtml = '';
             if (c.courtStatus) {
                 const colors = {
-                    'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '🟢' },
-                    'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '🔴' },
-                    'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '🟡' }
+                    'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '●' },
+                    'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '○' },
+                    'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '◐' }
                 };
-                const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '⚪' };
+                const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '○' };
                 courtHtml = `
                     <div style="margin-top:12px;padding:10px;background:${cs.bg};border-radius:6px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -638,8 +726,8 @@
                         <div class="property-footer">
                             ${hasAddr ? `
                                 <div style="display:flex;gap:8px;">
-                                    <a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>
-                                    <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Z Zillow</a>
+                                    <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
+                                    <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Zillow</a>
                                 </div>
                             ` : '<span></span>'}
                         </div>
@@ -691,7 +779,7 @@
 
         function resetButtons() {
             document.getElementById('enrichBtn').disabled = false;
-            document.getElementById('enrichBtn').innerHTML = '🏠 Resolve Addresses';
+            document.getElementById('enrichBtn').innerHTML = 'Resolve Addresses';
         }
 
 async function checkCourtStatus(testMode = false) {
@@ -802,4 +890,3 @@ async function manualAddress(instrumentNumber) {
     </script>
 </body>
 </html>
-root@srv-d5om1656ubrc73dn630g-85bc9864bc-2gnk9:/app# 
