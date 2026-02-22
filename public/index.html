@@ -4,19 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Foreclosure Property Finder</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0f1419;
-            --bg-secondary: #1a1f26;
-            --bg-card: #232a34;
-            --accent: #10b981;
-            --accent-hover: #059669;
-            --accent-glow: rgba(16, 185, 129, 0.2);
-            --text-primary: #f3f4f6;
-            --text-secondary: #9ca3af;
-            --text-muted: #6b7280;
-            --border: #374151;
+            --bg-primary: #1a3a52;
+            --bg-secondary: #152d42;
+            --bg-card: #1f4460;
+            --accent: #d4a84b;
+            --accent-hover: #e0bc6a;
+            --accent-glow: rgba(212, 168, 75, 0.18);
+            --text-primary: #f8fafc;
+            --text-secondary: #a0b4c4;
+            --text-muted: #7a9bb5;
+            --border: rgba(255, 255, 255, 0.12);
             --danger: #ef4444;
             --warning: #f59e0b;
             --info: #3b82f6;
@@ -29,7 +31,7 @@
         }
 
         body {
-            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
@@ -141,25 +143,51 @@
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
+            padding: 0 2rem 2rem;
         }
 
         header {
-            text-align: center;
-            padding: 3rem 0;
-            border-bottom: 1px solid var(--border);
+            padding: 1rem 0;
+            border-bottom: 2px solid var(--accent);
             margin-bottom: 2rem;
+            background: var(--bg-secondary);
+            border-radius: 0 0 0.5rem 0.5rem;
+        }
+
+        .header-inner {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 0.5rem 1.5rem;
+        }
+
+        .logo-section img {
+            height: 40px;
+            width: auto;
+        }
+
+        .title-group {
+            text-align: center;
+        }
+
+        .page-tag {
+            color: var(--accent);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            margin-top: 0.35rem;
         }
 
         h1 {
-            font-family: 'Playfair Display', Georgia, serif;
-            font-size: 3rem;
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-size: 2.4rem;
             font-weight: 700;
             background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.2rem;
         }
 
         .subtitle {
@@ -203,27 +231,33 @@
 
         .nav-links {
             display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin: 1rem 0;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin: 0;
+            flex-wrap: wrap;
         }
 
         .nav-links a {
             color: var(--text-secondary);
             text-decoration: none;
             font-weight: 500;
-            padding: 0.5rem 1rem;
+            padding: 0.45rem 0.8rem;
             border-radius: 0.5rem;
             transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-size: 0.72rem;
+            border: 1px solid transparent;
         }
 
         .nav-links a:hover {
             color: var(--accent);
+            border-color: rgba(212, 168, 75, 0.4);
         }
 
         .nav-links a.active {
-            color: var(--accent);
-            background: rgba(16, 185, 129, 0.1);
+            color: var(--bg-secondary);
+            background: var(--accent);
         }
 
         .sources-badge {
@@ -884,6 +918,16 @@
                 padding: 1rem;
             }
 
+            .header-inner {
+                grid-template-columns: 1fr;
+                justify-items: center;
+                text-align: center;
+            }
+
+            .nav-links {
+                justify-content: center;
+            }
+
             .property-header {
                 flex-direction: column;
                 gap: 0.5rem;
@@ -947,14 +991,22 @@
     
     <div class="container">
         <header>
-            <h1>Foreclosure Property Finder</h1>
-            <p class="subtitle">Live data from sheriff sale listings</p>
-            <nav class="nav-links">
-                <a href="/" class="active">Sheriff Sales</a>
-                <a href="/pipeline.html">MontCo Pipeline</a>
-                <a href="/camden.html">Camden Pipeline</a>
-            </nav>
-            <div class="data-status" id="dataStatus">
+            <div class="header-inner">
+                <div class="logo-section">
+                    <img src="/images/logo-horizontal.png" alt="Benoro Development">
+                </div>
+                <div class="title-group">
+                    <h1>Sheriff Sales Finder</h1>
+                    <p class="subtitle">Live data from sheriff sale listings</p>
+                    <p class="page-tag">Camden + Montgomery County</p>
+                </div>
+                <nav class="nav-links">
+                    <a href="/" class="active">Sheriff Sales</a>
+                    <a href="/pipeline.html">MontCo Pipeline</a>
+                    <a href="/camden.html">Camden Pipeline</a>
+                </nav>
+            </div>
+            <div class="data-status" id="dataStatus" style="margin-top: 1rem;">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Checking data...</span>
             </div>
