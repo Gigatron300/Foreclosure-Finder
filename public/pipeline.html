@@ -4,30 +4,98 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pre-Foreclosure Pipeline | Foreclosure Finder</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --benoro-navy: #1a3a52;
+            --benoro-navy-dark: #152d42;
+            --benoro-navy-light: #234a66;
+            --benoro-gold: #d4a84b;
+            --benoro-gold-light: #e0bc6a;
+            --benoro-gold-dark: #b8923f;
+            --benoro-white: #f8fafc;
+            --benoro-card: #1f4460;
+            --benoro-card-hover: #245070;
+            --benoro-text-muted: #a0b4c4;
+            --benoro-text-light: #7a9bb5;
+            --benoro-border: rgba(255,255,255,0.12);
+            --benoro-success: #4ade80;
+            --benoro-warning: #fbbf24;
+            --benoro-danger: #f87171;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--benoro-navy);
             min-height: 100vh;
-            color: #f3f4f6;
-            padding: 20px;
+            color: var(--benoro-white);
         }
-        .container { max-width: 1600px; margin: 0 auto; }
-        header { text-align: center; margin-bottom: 30px; }
+        .bg-pattern {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background:
+                linear-gradient(rgba(21,45,66,0.92), rgba(21,45,66,0.92)),
+                radial-gradient(circle at 18% 80%, rgba(212,168,75,0.18) 0%, transparent 52%),
+                radial-gradient(circle at 80% 14%, rgba(122,155,181,0.18) 0%, transparent 50%),
+                url('/images/BENORO%20Variations-04.png') center/560px no-repeat,
+                var(--benoro-navy);
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 0 30px 30px; }
+        header {
+            background: var(--benoro-navy-dark);
+            border-bottom: 2px solid var(--benoro-gold);
+            padding: 15px 0;
+            margin-bottom: 30px;
+        }
+        .header-inner {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 16px;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 30px;
+        }
+        .logo-section { display: flex; align-items: center; }
+        .header-logo { height: 40px; width: auto; }
+        .page-title-section { text-align: center; }
+        .page-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            letter-spacing: 2.5px;
+            color: var(--benoro-gold);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
         h1 {
-            font-size: 2.5rem;
-            font-style: italic;
-            background: linear-gradient(135deg, #10b981, #34d399);
+            font-family: 'Cormorant Garamond', Georgia, serif;
+            font-size: 2.1rem;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 2px;
+            background: linear-gradient(120deg, var(--benoro-white), var(--benoro-gold));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
+            background-clip: text;
         }
-        .subtitle { color: #9ca3af; font-size: 1.1rem; }
-        .nav-links { margin-top: 15px; }
-        .nav-links a { color: #10b981; text-decoration: none; margin: 0 15px; font-weight: 500; }
-        .nav-links a:hover { text-decoration: underline; }
-        .nav-links a.active { color: #34d399; border-bottom: 2px solid #34d399; padding-bottom: 3px; }
+        .subtitle { color: var(--benoro-text-muted); font-size: 0.95rem; }
+        .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+        .nav-links a {
+            color: var(--benoro-text-muted);
+            text-decoration: none;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            padding: 7px 10px;
+            transition: all 0.25s;
+        }
+        .nav-links a:hover { color: var(--benoro-gold); border-color: rgba(212,168,75,0.45); }
+        .nav-links a.active { color: var(--benoro-navy-dark); background: var(--benoro-gold); }
         
         .status-bar {
             background: rgba(255,255,255,0.05);
@@ -530,8 +598,69 @@
             color: white;
             cursor: pointer;
         }
+
+        .status-bar { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 8px; }
+        .status-dot { background: var(--benoro-success); }
+        .status-dot.stale { background: var(--benoro-warning); }
+        .upload-section { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.24); border-radius: 8px; }
+        .upload-section h3 { color: var(--benoro-white); font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.3rem; }
+        .upload-section p { color: var(--benoro-text-muted); }
+        .upload-label { background: transparent; border: 1px solid var(--benoro-gold); color: var(--benoro-gold); }
+        .upload-label:hover { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .csv-status.has-file { color: var(--benoro-success); }
+        .csv-status.no-file { color: var(--benoro-warning); }
+        .btn { border-radius: 6px; font-size: 0.75rem; letter-spacing: 1.3px; text-transform: uppercase; font-weight: 600; }
+        .btn-primary { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .btn-primary:hover { background: var(--benoro-gold-light); }
+        .btn-secondary { background: var(--benoro-navy-light); border: 1px solid var(--benoro-border); color: var(--benoro-white); }
+        .btn-secondary:hover { background: var(--benoro-card-hover); border-color: var(--benoro-gold); }
+        .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
+        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
+        .stats-summary { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.14); border-radius: 8px; }
+        .stat-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 2rem; color: var(--benoro-gold); }
+        .stat-label { color: var(--benoro-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+        .results-header h2 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; }
+        .case-count { color: var(--benoro-text-muted); }
+        .property-card { background: var(--benoro-card); border: 1px solid var(--benoro-border); }
+        .property-card:hover { border-color: var(--benoro-gold); }
+        .property-card.sweet-spot { border: 1px solid var(--benoro-gold); box-shadow: 0 0 18px rgba(212,168,75,0.25); }
+        .street-view-container { background: var(--benoro-navy-dark); height: 180px; }
+        .no-image { color: var(--benoro-text-light); }
+        .days-badge.sweet-spot { background: rgba(212,168,75,0.92); color: var(--benoro-navy-dark); }
+        .property-address { color: var(--benoro-white); }
+        .property-location { color: var(--benoro-text-muted); }
+        .detail-label { color: var(--benoro-text-light); }
+        .detail-value { color: var(--benoro-white); }
+        .property-footer { border-top: 1px solid var(--benoro-border); }
+        .property-footer a { color: var(--benoro-gold); }
+        .score-details { border: 1px solid var(--benoro-border); border-radius: 6px; }
+        .score-badge.grade-a { background: rgba(74,222,128,0.24); color: #9de7b9; }
+        .score-badge.grade-b { background: rgba(96,165,250,0.24); color: #93c5fd; }
+        .score-badge.grade-c { background: rgba(251,191,36,0.22); color: #facc15; }
+        .score-badge.grade-d { background: rgba(251,146,60,0.24); color: #fdba74; }
+        .score-badge.grade-f { background: rgba(248,113,113,0.26); color: #fca5a5; }
+        .score-number, .grade-meaning, .event-type { color: var(--benoro-text-muted); }
+        .expand-icon, .event-date, .docket-stat, .no-factors, .detail-label { color: var(--benoro-text-light); }
+        .login-overlay { background: var(--benoro-navy); }
+        .login-box { background: var(--benoro-card); border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
+        .login-logo { width: 180px; margin-bottom: 20px; }
+        .login-box h2 { color: var(--benoro-white); font-family: 'Cormorant Garamond', Georgia, serif; margin-bottom: 8px; }
+        .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 24px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; }
+        .login-box input { border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); }
+        .login-box input:focus { border-color: var(--benoro-gold); }
+        .login-box button { background: var(--benoro-gold); color: var(--benoro-navy-dark); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+        .login-box button:hover { background: var(--benoro-gold-light); }
+        .login-error { color: var(--benoro-danger); }
+        .api-key-section { background: rgba(184,134,11,0.08); border: 1px solid rgba(184,134,11,0.2); border-radius: 8px; }
+        .api-key-section input, .actions-bar select, .actions-bar input { border: 1px solid var(--benoro-border); background: var(--benoro-card); color: var(--benoro-white); }
+        .api-key-section button { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .themed-link { color: var(--benoro-gold); }
+        .themed-link:hover { color: var(--benoro-gold-light); }
         
         @media (max-width: 768px) {
+            .header-inner { grid-template-columns: 1fr; text-align: center; }
+            .logo-section { justify-content: center; }
+            .nav-links { justify-content: center; }
             .cases-grid { grid-template-columns: 1fr; }
             .property-details { grid-template-columns: 1fr; }
         }
