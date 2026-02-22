@@ -6,7 +6,7 @@
     <title>Pre-Foreclosure Pipeline | Foreclosure Finder</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --benoro-navy: #1a3a52;
@@ -60,8 +60,8 @@
             padding: 0 30px;
         }
         .logo-section { display: flex; align-items: center; }
-        .header-logo { height: 40px; width: auto; }
-        .page-title-section { text-align: center; }
+        .header-logo { height: 78px; width: auto; }
+        .page-title-section { flex: 1; text-align: center; }
         .page-title {
             font-size: 0.8rem;
             font-weight: 600;
@@ -71,31 +71,27 @@
             margin-bottom: 4px;
         }
         h1 {
-            font-family: 'Cormorant Garamond', Georgia, serif;
-            font-size: 2.1rem;
-            font-weight: 700;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 600;
             line-height: 1.1;
             margin-bottom: 2px;
-            background: linear-gradient(120deg, var(--benoro-white), var(--benoro-gold));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: var(--benoro-white);
         }
-        .subtitle { color: var(--benoro-text-muted); font-size: 0.95rem; }
+        .subtitle { color: var(--benoro-text-muted); font-size: 0.85rem; }
         .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
         .nav-links a {
             color: var(--benoro-text-muted);
             text-decoration: none;
-            font-size: 0.72rem;
+            font-size: 0.78rem;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            border-radius: 8px;
-            border: 1px solid transparent;
-            padding: 7px 10px;
-            transition: all 0.25s;
+            letter-spacing: 0.1em;
+            border-radius: 0;
+            border: none;
+            padding: 7px 2px;
+            transition: color 0.25s;
         }
-        .nav-links a:hover { color: var(--benoro-gold); border-color: rgba(212,168,75,0.45); }
-        .nav-links a.active { color: var(--benoro-navy-dark); background: var(--benoro-gold); }
+        .nav-links a:hover, .nav-links a.active { color: var(--benoro-gold); }
         
         .status-bar {
             background: rgba(255,255,255,0.05);
@@ -603,7 +599,7 @@
         .status-dot { background: var(--benoro-success); }
         .status-dot.stale { background: var(--benoro-warning); }
         .upload-section { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.24); border-radius: 8px; }
-        .upload-section h3 { color: var(--benoro-white); font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.3rem; }
+        .upload-section h3 { color: var(--benoro-white); font-family: 'Montserrat', sans-serif; font-size: 1.15rem; font-weight: 600; }
         .upload-section p { color: var(--benoro-text-muted); }
         .upload-label { background: transparent; border: 1px solid var(--benoro-gold); color: var(--benoro-gold); }
         .upload-label:hover { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
@@ -617,9 +613,9 @@
         .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
         .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
         .stats-summary { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.14); border-radius: 8px; }
-        .stat-value { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 2rem; color: var(--benoro-gold); }
+        .stat-value { font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 600; color: var(--benoro-gold); }
         .stat-label { color: var(--benoro-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
-        .results-header h2 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 1.5rem; }
+        .results-header h2 { font-family: 'Montserrat', sans-serif; font-size: 1.25rem; font-weight: 600; }
         .case-count { color: var(--benoro-text-muted); }
         .property-card { background: var(--benoro-card); border: 1px solid var(--benoro-border); }
         .property-card:hover { border-color: var(--benoro-gold); }
@@ -643,8 +639,8 @@
         .expand-icon, .event-date, .docket-stat, .no-factors, .detail-label { color: var(--benoro-text-light); }
         .login-overlay { background: var(--benoro-navy); }
         .login-box { background: var(--benoro-card); border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
-        .login-logo { width: 180px; margin-bottom: 20px; }
-        .login-box h2 { color: var(--benoro-white); font-family: 'Cormorant Garamond', Georgia, serif; margin-bottom: 8px; }
+        .login-logo { width: 250px; margin-bottom: 20px; }
+        .login-box h2 { color: var(--benoro-white); font-family: 'Montserrat', sans-serif; margin-bottom: 8px; font-size: 1.5rem; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; }
         .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 24px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; }
         .login-box input { border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); }
         .login-box input:focus { border-color: var(--benoro-gold); }
@@ -669,23 +665,30 @@
 <body>
     <div class="login-overlay" id="loginOverlay">
         <div class="login-box">
-            <h2>🏠 Pre-Foreclosure Pipeline</h2>
-            <p style="color: #9ca3af; margin-bottom: 20px;">Enter password to access</p>
+            <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-01.png" alt="Benoro Development" class="login-logo">
+            <h2>MontCo Pipeline</h2>
+            <p class="login-subtitle">Montgomery County Pipeline</p>
             <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')login()">
-            <button onclick="login()">Enter</button>
+            <button onclick="login()">Continue</button>
             <div class="login-error" id="loginError">Invalid password</div>
         </div>
     </div>
 
     <div class="container" id="mainContent" style="display: none;">
         <header>
-            <h1>Pre-Foreclosure Pipeline</h1>
-            <p class="subtitle">Montgomery County distressed properties</p>
-            <nav class="nav-links">
-                <a href="/">Sheriff Sales</a>
-                <a href="/pipeline.html" class="active">MontCo Pipeline</a>
-                <a href="/camden.html">Camden Pipeline</a>
-            </nav>
+            <div class="header-inner">
+                <div class="logo-section">
+                    <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-03.png" alt="Benoro Development" class="header-logo">
+                </div>
+                <div class="page-title-section">
+                    <div class="page-title">Montgomery County &mdash; Pre-Foreclosure Pipeline</div>
+                </div>
+                <nav class="nav-links">
+                    <a href="/">Sheriff Sales</a>
+                    <a href="/pipeline.html" class="active">MontCo Pipeline</a>
+                    <a href="/camden.html">Camden Pipeline</a>
+                </nav>
+            </div>
         </header>
         
         <div class="status-bar">
@@ -699,7 +702,7 @@
         <!-- Google API Key Section -->
         <div class="api-key-section" id="apiKeySection">
             <strong>📷 Street View Images:</strong> Enter your Google Maps API key for property photos.
-            <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" style="color: #10b981;">Get a free API key</a>
+            <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" style="color: var(--benoro-gold);">Get a free API key</a>
             <br><br>
             <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
             <button onclick="saveApiKey()">Save Key</button>
@@ -709,7 +712,7 @@
         <!-- CSV Upload Section -->
         <div class="upload-section" id="uploadSection">
             <h3>📁 Upload Court Data CSV</h3>
-            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: #10b981;">Montgomery County Courts</a></p>
+            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: var(--benoro-gold);">Montgomery County Courts</a></p>
             <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
             <label for="csvUpload" class="upload-label">📤 Choose CSV File</label>
             <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
@@ -722,7 +725,7 @@
                 <div class="stat-label">Properties</div>
             </div>
             <div class="stat-item">
-                <div class="stat-value" id="sweetSpotCount" style="color: #10b981;">-</div>
+                <div class="stat-value" id="sweetSpotCount">-</div>
                 <div class="stat-label">🎯 Sweet Spot (9-18mo)</div>
             </div>
             <div class="stat-item">
@@ -738,9 +741,9 @@
         <!-- Actions -->
         <div class="actions-bar">
             <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">🔄 Process All</button>
-            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: #8b5cf6;">⚡ Test (10 only)</button>
+            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">⚡ Test (10 only)</button>
             <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
-            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: #10b981; color: #10b981;">🎯 Sweet Spot Only</button>
+            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">🎯 Sweet Spot Only</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High → Low)</option>
@@ -775,11 +778,11 @@
             sweetSpotOnly = !sweetSpotOnly;
             const btn = document.getElementById('sweetSpotFilter');
             if (sweetSpotOnly) {
-                btn.style.background = '#10b981';
+                btn.style.background = '#d4a84b';
                 btn.style.color = 'white';
             } else {
                 btn.style.background = 'transparent';
-                btn.style.color = '#10b981';
+                btn.style.color = '#d4a84b';
             }
             loadData();
         }
@@ -790,7 +793,7 @@
             if (savedKey) {
                 document.getElementById('googleApiKey').value = savedKey;
                 document.getElementById('apiKeyStatus').textContent = '✓ Key saved';
-                document.getElementById('apiKeyStatus').style.color = '#10b981';
+                document.getElementById('apiKeyStatus').style.color = '#d4a84b';
                 googleApiKey = savedKey;
             }
             
@@ -818,7 +821,7 @@
                 localStorage.setItem('googleMapsApiKey', key);
                 googleApiKey = key;
                 document.getElementById('apiKeyStatus').textContent = '✓ Key saved! Reload to see images.';
-                document.getElementById('apiKeyStatus').style.color = '#10b981';
+                document.getElementById('apiKeyStatus').style.color = '#d4a84b';
                 loadData(); // Reload to show images
             }
         }
