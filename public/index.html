@@ -6,7 +6,7 @@
     <title>Foreclosure Property Finder</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #1a3a52;
@@ -79,9 +79,16 @@
             text-align: center;
         }
 
+        .login-logo {
+            width: 250px;
+            margin-bottom: 20px;
+        }
+
         .login-box h1 {
-            font-family: 'Playfair Display', Georgia, serif;
-            font-size: 2rem;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.5rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
             margin-bottom: 0.5rem;
         }
 
@@ -163,7 +170,7 @@
         }
 
         .logo-section img {
-            height: 40px;
+            height: 78px;
             width: auto;
         }
 
@@ -180,13 +187,10 @@
         }
 
         h1 {
-            font-family: 'Cormorant Garamond', Georgia, serif;
-            font-size: 2.4rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 1.7rem;
+            font-weight: 600;
+            color: var(--text-primary);
             margin-bottom: 0.2rem;
         }
 
@@ -240,24 +244,23 @@
         .nav-links a {
             color: var(--text-secondary);
             text-decoration: none;
-            font-weight: 500;
-            padding: 0.45rem 0.8rem;
-            border-radius: 0.5rem;
-            transition: all 0.2s ease;
+            font-weight: 400;
+            padding: 0.45rem 0.2rem;
+            border-radius: 0;
+            transition: color 0.2s ease;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
-            font-size: 0.72rem;
-            border: 1px solid transparent;
+            letter-spacing: 0.08em;
+            font-size: 0.78rem;
+            border: none;
         }
 
         .nav-links a:hover {
             color: var(--accent);
-            border-color: rgba(212, 168, 75, 0.4);
         }
 
         .nav-links a.active {
-            color: var(--bg-secondary);
-            background: var(--accent);
+            color: var(--accent);
+            background: transparent;
         }
 
         .sources-badge {
@@ -978,10 +981,11 @@
     <!-- Login Screen -->
     <div id="loginScreen" class="login-screen">
         <div class="login-box">
-            <h1>🏠 Foreclosure Finder</h1>
+            <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-01.png" alt="Benoro Development" class="login-logo">
+            <h1>Sheriff Sales Finder</h1>
             <p class="subtitle">Enter password to access</p>
             <input type="password" id="loginPassword" placeholder="Password" onkeypress="if(event.key==='Enter')attemptLogin()">
-            <button onclick="attemptLogin()">Login</button>
+            <button onclick="attemptLogin()">Continue</button>
             <p id="loginError" class="login-error">Invalid password. Please try again.</p>
         </div>
     </div>
@@ -993,7 +997,7 @@
         <header>
             <div class="header-inner">
                 <div class="logo-section">
-                    <img src="/images/logo-horizontal.png" alt="Benoro Development">
+                    <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-03.png" alt="Benoro Development">
                 </div>
                 <div class="title-group">
                     <h1>Sheriff Sales Finder</h1>
