@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
-const { parseCamdenCSV, enrichCamdenCases } = require('./scrapers/camden-enrichment');
+const { parseCamdenCSV, enrichCamdenCases, scoreCamdenCase } = require('./scrapers/camden-enrichment');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
 // Court status is now checked via browser-based bookmarklet (court-status-bookmarklet.js)
 
@@ -384,6 +384,7 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       found.propertyAddress = address;
       found.enrichmentSource = 'Manual entry';
       found.enrichedAt = new Date().toISOString();
+      Object.assign(found, scoreCamdenCase(found));
 
       await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
       res.json({ success: true });
@@ -449,7 +450,7 @@ app.get('/api/camden', checkAuth, async (req, res) => {
   try {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
     const data = JSON.parse(content);
-    let cases = data.cases || [];
+    let cases = (data.cases || []).map(scoreCamdenCase);
 
     // Filters
     if (req.query.plaintiffType) {
@@ -471,6 +472,7 @@ app.get('/api/camden', checkAuth, async (req, res) => {
     const sortBy = req.query.sortBy || 'daysSinceFiling';
     const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
     cases.sort((a, b) => {
+      if (sortBy === 'sellerScore') return ((a.sellerScore || 0) - (b.sellerScore || 0)) * sortOrder;
       if (sortBy === 'daysSinceFiling') return ((a.daysSinceFiling || 0) - (b.daysSinceFiling || 0)) * sortOrder;
       if (sortBy === 'assessedValue') return ((a.assessedValue || 0) - (b.assessedValue || 0)) * sortOrder;
       if (sortBy === 'town') return (a.town || '').localeCompare(b.town || '') * sortOrder;
@@ -650,6 +652,7 @@ app.post('/api/camden/court-status-update', cors({
     }
 
     Object.assign(data.cases[caseIdx], courtData);
+    data.cases[caseIdx] = scoreCamdenCase(data.cases[caseIdx]);
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
 
     console.log(`⚖️ ${instrumentNumber} → ${courtData.courtStatus} (${courtData.courtDisposition || 'N/A'})`);
