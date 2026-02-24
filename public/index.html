@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -154,11 +154,13 @@
         }
 
         header {
-            padding: 1rem 0;
+            padding: 15px 0;
             border-bottom: 2px solid var(--accent);
             margin-bottom: 2rem;
             background: var(--bg-secondary);
-            border-radius: 0 0 0.5rem 0.5rem;
+            width: 100vw;
+            margin-left: calc(50% - 50vw);
+            margin-right: calc(50% - 50vw);
         }
 
         .header-inner {
@@ -166,7 +168,9 @@
             grid-template-columns: auto 1fr auto;
             align-items: center;
             gap: 1.5rem;
-            padding: 0.5rem 1.5rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 30px;
         }
 
         .logo-section img {
@@ -199,16 +203,24 @@
             font-size: 1.1rem;
         }
 
-        .data-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin: 1rem 0 0 1.5rem;
-            padding: 0.5rem 1rem;
+        .status-bar {
             background: var(--bg-card);
-            border-radius: 2rem;
-            font-size: 0.875rem;
-            border: 1px solid var(--border);
+            border: 1px solid rgba(184,134,11,0.15);
+            border-radius: 4px;
+            padding: 18px 25px;
+            margin: 0 0 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
         }
 
         .status-dot {
@@ -263,112 +275,96 @@
             background: transparent;
         }
 
-        /* API Key Section */
-        .api-section {
+        .api-dropdown {
             background: var(--bg-card);
-            border-radius: 1rem;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid var(--border);
+            border: 1px solid rgba(184,134,11,0.15);
+            border-radius: 4px;
+            margin: 0 0 1.5rem;
+            overflow: hidden;
         }
 
-        .api-header {
+        .api-dropdown-header {
+            padding: 15px 20px;
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            cursor: pointer;
-        }
-
-        .api-header h3 {
-            font-size: 1rem;
-            display: flex;
             align-items: center;
-            gap: 0.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
         }
 
-        .api-toggle {
-            background: none;
-            border: none;
+        .api-dropdown-header:hover {
+            background: rgba(255,255,255,0.03);
+        }
+
+        .api-dropdown-title {
+            font-size: 0.85rem;
             color: var(--text-secondary);
-            cursor: pointer;
-            font-size: 0.875rem;
             display: flex;
             align-items: center;
-            gap: 0.25rem;
+            gap: 10px;
         }
 
-        .api-content {
+        .api-dropdown-arrow {
+            color: var(--text-secondary);
+            transition: transform 0.3s;
+            font-size: 0.7rem;
+        }
+
+        .api-dropdown.open .api-dropdown-arrow {
+            transform: rotate(180deg);
+        }
+
+        .api-dropdown-content {
             display: none;
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border);
+            padding: 15px 20px 20px 20px;
+            border-top: 1px solid rgba(255,255,255,0.05);
         }
 
-        .api-content.active {
+        .api-dropdown.open .api-dropdown-content {
             display: block;
         }
 
-        .api-input-group {
-            display: flex;
-            gap: 1rem;
-            align-items: end;
-        }
-
-        .api-input-group .form-field {
-            flex: 1;
-        }
-
-        .api-input-group input {
-            padding: 0.75rem 1rem;
-            font-size: 0.9rem;
-        }
-
-        .api-status {
+        .api-key-row {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            margin-top: 0.75rem;
-            font-size: 0.85rem;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
-        .api-status.connected {
+        .api-key-row input {
+            width: 300px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #f3f4f6;
+        }
+
+        .api-key-row button {
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: none;
+            background: var(--accent);
+            color: #0f172a;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .api-help-link {
             color: var(--accent);
-        }
-
-        .api-status.disconnected {
-            color: var(--text-muted);
-        }
-
-        .api-help {
-            margin-top: 1rem;
-            padding: 1rem;
-            background: var(--bg-secondary);
-            border-radius: 0.5rem;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-
-        .api-help a {
-            color: var(--accent);
+            font-size: 0.8rem;
             text-decoration: none;
+            margin-left: 10px;
         }
 
-        .api-help a:hover {
+        .api-help-link:hover {
             text-decoration: underline;
-        }
-
-        .api-help ol {
-            margin: 0.5rem 0 0 1.25rem;
-        }
-
-        .api-help li {
-            margin: 0.25rem 0;
         }
 
         /* Search Section */
         .search-section {
             background: var(--bg-card);
-            border-radius: 1rem;
+            border-radius: 4px;
             padding: 2rem;
             margin-bottom: 2rem;
             border: 1px solid var(--border);
@@ -541,7 +537,7 @@
         .stat-card {
             background: var(--bg-card);
             padding: 1.5rem;
-            border-radius: 1rem;
+            border-radius: 4px;
             border: 1px solid var(--border);
             text-align: center;
         }
@@ -593,7 +589,7 @@
 
         .property-card {
             background: var(--bg-card);
-            border-radius: 1rem;
+            border-radius: 4px;
             border: 1px solid var(--border);
             overflow: hidden;
             transition: all 0.3s ease;
@@ -983,58 +979,38 @@
                     <a href="/camden.html">Camden Pipeline</a>
                 </nav>
             </div>
-            <div class="data-status" id="dataStatus">
-                <span class="status-dot" id="statusDot"></span>
+        </header>
+
+        <div class="status-bar">
+            <div class="status-info">
+                <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Checking data...</span>
             </div>
-        </header>
+            <div id="enrichmentInfo" style="color: var(--text-muted); font-size: 0.8rem;"></div>
+        </div>
 
         <!-- Scrape Status Banner -->
         <div class="scrape-banner" id="scrapeBanner">
             <div class="spinner"></div>
             <span id="scrapeMessage">Scraping properties from county websites... This may take a few minutes.</span>
         </div>
-
-        <!-- Google API Key Section -->
-        <section class="api-section">
-            <div class="api-header" onclick="toggleApiSection()">
-                <h3>
-                    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                        <path d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
-                        <path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/>
-                    </svg>
-                    Google Street View Setup (Optional)
-                </h3>
-                <button class="api-toggle">
-                    <span id="apiToggleText">Show</span>
-                    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                        <path d="m6 9 6 6 6-6"/>
-                    </svg>
-                </button>
+        <div class="api-dropdown" id="apiDropdown">
+            <div class="api-dropdown-header" onclick="toggleApiDropdown()">
+                <div class="api-dropdown-title">
+                    <span>📷</span>
+                    <span>Street View Images</span>
+                    <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
+                </div>
+                <span class="api-dropdown-arrow">▼</span>
             </div>
-            <div class="api-content" id="apiContent">
-                <div class="api-input-group">
-                    <div class="form-field">
-                        <label for="googleApiKey">Google Maps API Key</label>
-                        <input type="text" id="googleApiKey" placeholder="Enter your API key here...">
-                    </div>
-                    <button class="btn btn-secondary btn-sm" onclick="saveGoogleApiKey()">Save Key</button>
-                </div>
-                <div class="api-status" id="googleApiStatus">
-                    <span class="status-dot"></span>
-                    <span id="googleApiStatusText">No API key saved</span>
-                </div>
-                <div class="api-help">
-                    <strong>How to get a free Google API key:</strong>
-                    <ol>
-                        <li>Go to <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
-                        <li>Create a new project → Enable "Street View Static API"</li>
-                        <li>Go to Credentials → Create API Key</li>
-                        <li>Copy and paste here</li>
-                    </ol>
+            <div class="api-dropdown-content">
+                <div class="api-key-row">
+                    <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key">
+                    <button onclick="saveGoogleApiKey()">Save Key</button>
+                    <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
                 </div>
             </div>
-        </section>
+        </div>
 
         <section class="search-section">
             <div class="search-header">
@@ -1264,14 +1240,14 @@
                     
                     if (hoursAgo < 24) {
                         statusDot.className = 'status-dot';
-                        statusText.textContent = `Updated ${formatTimeAgo(lastUpdate)} • ${data.total} properties`;
+                        statusText.textContent = `Updated ${formatTimeAgo(lastUpdate)} - ${data.total} properties`;
                     } else {
                         statusDot.className = 'status-dot stale';
-                        statusText.textContent = `Data is ${Math.floor(hoursAgo)} hours old • Click "Refresh Data" to update`;
+                        statusText.textContent = `Data is ${Math.floor(hoursAgo)} hours old - Click "Refresh Data" to update`;
                     }
                 } else {
                     statusDot.className = 'status-dot error';
-                    statusText.textContent = 'No data yet • Click "Refresh Data from Counties" to start';
+                    statusText.textContent = 'No data yet - Click "Refresh Data from Counties" to start';
                 }
             } catch (err) {
                 document.getElementById('statusDot').className = 'status-dot error';
@@ -1456,7 +1432,7 @@
                         <div class="property-footer">
                             <span class="source-badge ${sourceClass}">${prop.source} - ${prop.county}</span>
                             <div class="property-links">
-                                <a href="${getCountySearchUrl(prop.county)}" target="_blank">View Source ↗</a>
+                                <a href="${getCountySearchUrl(prop.county)}" target="_blank">View Source -></a>
                             </div>
                         </div>
                     </div>
@@ -1512,11 +1488,8 @@
         }
 
         // Google API key functions
-        function toggleApiSection() {
-            const content = document.getElementById('apiContent');
-            const toggleText = document.getElementById('apiToggleText');
-            content.classList.toggle('active');
-            toggleText.textContent = content.classList.contains('active') ? 'Hide' : 'Show';
+        function toggleApiDropdown() {
+            document.getElementById('apiDropdown').classList.toggle('open');
         }
 
         function saveGoogleApiKey() {
@@ -1531,15 +1504,13 @@
         }
 
         function updateGoogleApiStatus() {
-            const statusEl = document.getElementById('googleApiStatus');
-            const statusText = document.getElementById('googleApiStatusText');
-            
+            const statusText = document.getElementById('apiKeyStatus');
             if (googleApiKey) {
-                statusEl.className = 'api-status connected';
-                statusText.textContent = 'API key saved - Street View images enabled';
+                statusText.textContent = '✓ Key saved';
+                statusText.style.color = 'var(--accent)';
             } else {
-                statusEl.className = 'api-status disconnected';
-                statusText.textContent = 'No API key - photos will not display';
+                statusText.textContent = 'No key set';
+                statusText.style.color = 'var(--text-muted)';
             }
         }
 
@@ -1572,3 +1543,4 @@
     </script>
 </body>
 </html>
+

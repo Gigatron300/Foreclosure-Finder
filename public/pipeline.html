@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -49,6 +49,9 @@
             border-bottom: 2px solid var(--benoro-gold);
             padding: 15px 0;
             margin-bottom: 30px;
+            width: 100vw;
+            margin-left: calc(50% - 50vw);
+            margin-right: calc(50% - 50vw);
         }
         .header-inner {
             display: grid;
@@ -200,7 +203,7 @@
         
         .property-card {
             background: rgba(255,255,255,0.05);
-            border-radius: 12px;
+            border-radius: 4px;
             overflow: hidden;
             transition: all 0.2s;
             border: 1px solid transparent;
@@ -595,10 +598,11 @@
             cursor: pointer;
         }
 
-        .status-bar { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 8px; }
-        .status-dot { background: var(--benoro-success); }
+        .status-bar { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 4px; padding: 18px 25px; }
+        .status-info { font-size: 0.85rem; }
+        .status-dot { width: 8px; height: 8px; background: var(--benoro-success); }
         .status-dot.stale { background: var(--benoro-warning); }
-        .upload-section { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.24); border-radius: 8px; }
+        .upload-section { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.24); border-radius: 4px; }
         .upload-section h3 { color: var(--benoro-white); font-family: 'Montserrat', sans-serif; font-size: 1.15rem; font-weight: 600; }
         .upload-section p { color: var(--benoro-text-muted); }
         .upload-label { background: transparent; border: 1px solid var(--benoro-gold); color: var(--benoro-gold); }
@@ -612,7 +616,7 @@
         .btn-secondary:hover { background: var(--benoro-card-hover); border-color: var(--benoro-gold); }
         .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
         .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
-        .stats-summary { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.14); border-radius: 8px; }
+        .stats-summary { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.14); border-radius: 4px; }
         .stat-value { font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 600; color: var(--benoro-gold); }
         .stat-label { color: var(--benoro-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
         .results-header h2 { font-family: 'Montserrat', sans-serif; font-size: 1.25rem; font-weight: 600; }
@@ -647,9 +651,19 @@
         .login-box button { background: var(--benoro-gold); color: var(--benoro-navy-dark); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
         .login-box button:hover { background: var(--benoro-gold-light); }
         .login-error { color: var(--benoro-danger); }
-        .api-key-section { background: rgba(184,134,11,0.08); border: 1px solid rgba(184,134,11,0.2); border-radius: 8px; }
-        .api-key-section input, .actions-bar select, .actions-bar input { border: 1px solid var(--benoro-border); background: var(--benoro-card); color: var(--benoro-white); }
-        .api-key-section button { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .api-dropdown { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 4px; margin-bottom: 25px; overflow: hidden; }
+        .api-dropdown-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s; }
+        .api-dropdown-header:hover { background: rgba(255,255,255,0.03); }
+        .api-dropdown-title { font-size: 0.85rem; color: var(--benoro-text-muted); display: flex; align-items: center; gap: 10px; }
+        .api-dropdown-arrow { color: var(--benoro-text-muted); transition: transform 0.3s; font-size: 0.7rem; }
+        .api-dropdown.open .api-dropdown-arrow { transform: rotate(180deg); }
+        .api-dropdown-content { display: none; padding: 15px 20px 20px 20px; border-top: 1px solid rgba(255,255,255,0.05); }
+        .api-dropdown.open .api-dropdown-content { display: block; }
+        .api-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .api-key-row input, .actions-bar select, .actions-bar input { border: 1px solid var(--benoro-border); background: var(--benoro-card); color: var(--benoro-white); }
+        .api-key-row button { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
+        .api-help-link { color: var(--benoro-gold); font-size: 0.8rem; text-decoration: none; margin-left: 10px; }
+        .api-help-link:hover { text-decoration: underline; }
         .themed-link { color: var(--benoro-gold); }
         .themed-link:hover { color: var(--benoro-gold-light); }
         
@@ -696,25 +710,32 @@
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Loading...</span>
             </div>
-            <div id="sourceInfo" style="color: #9ca3af; font-size: 0.9rem;"></div>
+            <div id="sourceInfo" style="color: var(--benoro-text-light); font-size: 0.8rem;"></div>
         </div>
-        
-        <!-- Google API Key Section -->
-        <div class="api-key-section" id="apiKeySection">
-            <strong>📷 Street View Images:</strong> Enter your Google Maps API key for property photos.
-            <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" style="color: var(--benoro-gold);">Get a free API key</a>
-            <br><br>
-            <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
-            <button onclick="saveApiKey()">Save Key</button>
-            <span id="apiKeyStatus" style="margin-left: 10px;"></span>
+        <div class="api-dropdown" id="apiDropdown">
+            <div class="api-dropdown-header" onclick="toggleApiDropdown()">
+                <div class="api-dropdown-title">
+                    <span>📷</span>
+                    <span>Street View Images</span>
+                    <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
+                </div>
+                <span class="api-dropdown-arrow">▼</span>
+            </div>
+            <div class="api-dropdown-content">
+                <div class="api-key-row">
+                    <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
+                    <button onclick="saveApiKey()">Save Key</button>
+                    <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                </div>
+            </div>
         </div>
         
         <!-- CSV Upload Section -->
         <div class="upload-section" id="uploadSection">
-            <h3>📁 Upload Court Data CSV</h3>
+            <h3>Upload Court Data CSV</h3>
             <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: var(--benoro-gold);">Montgomery County Courts</a></p>
             <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
-            <label for="csvUpload" class="upload-label">📤 Choose CSV File</label>
+            <label for="csvUpload" class="upload-label">Choose CSV File</label>
             <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
         </div>
         
@@ -726,7 +747,7 @@
             </div>
             <div class="stat-item">
                 <div class="stat-value" id="sweetSpotCount">-</div>
-                <div class="stat-label">🎯 Sweet Spot (9-18mo)</div>
+                <div class="stat-label">Sweet Spot (9-18mo)</div>
             </div>
             <div class="stat-item">
                 <div class="stat-value" id="withAddress">-</div>
@@ -740,14 +761,14 @@
         
         <!-- Actions -->
         <div class="actions-bar">
-            <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">🔄 Process All</button>
-            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">⚡ Test (10 only)</button>
-            <button class="btn btn-outline" onclick="exportCSV()">📊 Export CSV</button>
-            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">🎯 Sweet Spot Only</button>
+            <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">Process All</button>
+            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
+            <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
+            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
-                <option value="scoreDesc">Sort: Score (High → Low)</option>
-                <option value="scoreAsc">Sort: Score (Low → High)</option>
+                <option value="scoreDesc">Sort: Score (High -> Low)</option>
+                <option value="scoreAsc">Sort: Score (Low -> High)</option>
                 <option value="sweetSpot">Sort: Sweet Spot First</option>
                 <option value="daysOpen">Sort: Days Open</option>
                 <option value="commencedDate">Sort: Filed Date</option>
@@ -758,7 +779,7 @@
         </div>
         
         <div class="results-header">
-            <h2>📋 Properties <span class="case-count" id="caseCount">(0)</span></h2>
+            <h2>Properties <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
         
         <div class="cases-grid" id="casesGrid">
@@ -786,15 +807,22 @@
             }
             loadData();
         }
+
+        function toggleApiDropdown() {
+            document.getElementById('apiDropdown').classList.toggle('open');
+        }
         
         function checkExistingAuth() {
             // Load saved API key
             const savedKey = localStorage.getItem('googleMapsApiKey');
             if (savedKey) {
                 document.getElementById('googleApiKey').value = savedKey;
-                document.getElementById('apiKeyStatus').textContent = '✓ Key saved';
-                document.getElementById('apiKeyStatus').style.color = '#d4a84b';
+                document.getElementById('apiKeyStatus').textContent = 'Key saved';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 googleApiKey = savedKey;
+            } else {
+                document.getElementById('apiKeyStatus').textContent = 'No key set';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
             }
             
             if (authToken) {
@@ -820,8 +848,8 @@
             if (key) {
                 localStorage.setItem('googleMapsApiKey', key);
                 googleApiKey = key;
-                document.getElementById('apiKeyStatus').textContent = '✓ Key saved! Reload to see images.';
-                document.getElementById('apiKeyStatus').style.color = '#d4a84b';
+                document.getElementById('apiKeyStatus').textContent = 'Key saved';
+                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 loadData(); // Reload to show images
             }
         }
@@ -855,10 +883,10 @@
                 const data = await response.json();
                 const statusEl = document.getElementById('csvStatus');
                 if (data.exists) {
-                    statusEl.textContent = `✓ CSV loaded: ${data.caseCount} cases (uploaded ${getTimeAgo(new Date(data.lastModified))})`;
+                    statusEl.textContent = `CSV loaded: ${data.caseCount} cases (uploaded ${getTimeAgo(new Date(data.lastModified))})`;
                     statusEl.className = 'csv-status has-file';
                 } else {
-                    statusEl.textContent = '⚠ No CSV uploaded - please upload court data';
+                    statusEl.textContent = 'No CSV uploaded - please upload court data';
                     statusEl.className = 'csv-status no-file';
                 }
             } catch (e) {
@@ -871,13 +899,13 @@
             if (!file) return;
             
             const statusEl = document.getElementById('csvStatus');
-            statusEl.textContent = '⏳ Reading file...';
+            statusEl.textContent = 'Reading file...';
             
             try {
                 // Read file as text
                 const csvData = await file.text();
                 
-                statusEl.textContent = '⏳ Uploading...';
+                statusEl.textContent = 'Uploading...';
                 
                 const response = await fetch('/api/pipeline/upload-csv', {
                     method: 'POST',
@@ -889,14 +917,14 @@
                 });
                 const result = await response.json();
                 if (result.success) {
-                    statusEl.textContent = `✓ Uploaded! ${result.rowCount} cases found. Click "Process Pipeline Data" to scrape.`;
+                    statusEl.textContent = `Uploaded: ${result.rowCount} cases found. Click "Process Pipeline Data" to scrape.`;
                     statusEl.className = 'csv-status has-file';
                 } else {
-                    statusEl.textContent = '❌ Error: ' + result.error;
+                    statusEl.textContent = 'Error: ' + result.error;
                     statusEl.className = 'csv-status no-file';
                 }
             } catch (e) {
-                statusEl.textContent = '❌ Upload failed: ' + e.message;
+                statusEl.textContent = 'Upload failed: ' + e.message;
                 statusEl.className = 'csv-status no-file';
             }
         }
@@ -994,22 +1022,22 @@
             
             let streetViewHtml;
             if (!c.propertyAddress) {
-                streetViewHtml = '<div class="no-image">📍 No address available</div>';
+                streetViewHtml = '<div class="no-image">No address available</div>';
             } else if (!hasApiKey) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
-                    <div style="text-align:center;">🗺️ Click to view on Google Maps<br><small>Add API key above for street photos</small></div>
+                    <div style="text-align:center;">Click to view on Google Maps<br><small>Add API key above for street photos</small></div>
                 </a>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
                     <img class="street-view-img" src="${streetViewUrl}" alt="Street View" 
-                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📍 No Street View available</div>'">
+                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View available</div>'">
                 </a>`;
             }
             
             // Sweet spot indicator (9-18 months)
             const monthsOpen = c.monthsOpen || Math.round((c.daysOpen || 0) / 30);
             const sweetSpotClass = c.inSweetSpot ? 'sweet-spot' : '';
-            const sweetSpotIcon = c.inSweetSpot ? ' 🎯' : '';
+            const sweetSpotIcon = c.inSweetSpot ? ' *' : '';
             
             return `
                 <div class="property-card ${sweetSpotClass}">
@@ -1046,13 +1074,13 @@
                                 <span class="score-badge grade-${(c.leadGrade || 'C').toLowerCase()}">${c.leadGrade || '?'}</span>
                                 <span class="score-number">Score: ${c.leadScore || 0}</span>
                                 <span class="grade-meaning">${getGradeMeaning(c.leadGrade)}</span>
-                                <span class="expand-icon">▼</span>
+                                <span class="expand-icon">v</span>
                             </summary>
                             <div class="score-breakdown">
                                 <div class="score-interpretation">${getGradeAction(c.leadGrade)}</div>
                                 
                                 <!-- 1. Contributing Factors -->
-                                <div class="factors-header">✅ Contributing Factors</div>
+                                <div class="factors-header">Contributing Factors</div>
                                 ${(() => {
                                     const positiveFactors = (c.scoreFactors || []).filter(f => (f.impact || 0) > 0);
                                     if (positiveFactors.length > 0) {
@@ -1068,7 +1096,7 @@
                                     const negativeFactors = (c.scoreFactors || []).filter(f => (f.impact || 0) < 0);
                                     if (negativeFactors.length > 0) {
                                         return '<div class="negative-section">' +
-                                            '<div class="negative-header">❌ Negative Signals</div>' +
+                                            '<div class="negative-header">Negative Signals</div>' +
                                             negativeFactors.map(f => 
                                                 '<div class="score-factor negative"><span class="factor-text">' + f.text + '</span><span class="factor-impact">' + f.impact + '</span></div>'
                                             ).join('') + '</div>';
@@ -1081,18 +1109,18 @@
                                     const missingPositives = getMissingPositives(c);
                                     if (missingPositives.length > 0) {
                                         return '<details class="missing-details">' +
-                                            '<summary class="missing-summary">📭 What\'s Holding It Back <span class="missing-count">(' + missingPositives.length + ' items)</span></summary>' +
+                                            '<summary class="missing-summary">What\'s Holding It Back <span class="missing-count">(' + missingPositives.length + ' items)</span></summary>' +
                                             '<div class="missing-content">' +
                                             missingPositives.map(m => 
-                                                '<div class="missing-item"><span class="missing-text">🔶 ' + m.text + '</span><span class="missing-explanation">' + m.explanation + '</span></div>'
+                                                '<div class="missing-item"><span class="missing-text">- ' + m.text + '</span><span class="missing-explanation">' + m.explanation + '</span></div>'
                                             ).join('') + '</div></details>';
                                     }
-                                    return '<div class="all-good">🎉 This lead has all the key signals!</div>';
+                                    return '<div class="all-good">This lead has all the key signals.</div>';
                                 })()}
                                 
                                 ${c.docket && c.docket.entries > 0 ? `
                                 <div class="docket-info">
-                                    <div class="docket-header">📋 Recent Docket Activity</div>
+                                    <div class="docket-header">Recent Docket Activity</div>
                                     ${c.docket.recentEvents && c.docket.recentEvents.length > 0 ? 
                                         c.docket.recentEvents.slice(-3).map(e => 
                                             '<div class="docket-event"><span class="event-date">' + e.date + '</span> <span class="event-type">' + e.type + '</span></div>'
@@ -1103,8 +1131,8 @@
                         </details>
                         
                         <div class="property-footer">
-                            <a href="${c.detailUrl}" target="_blank">Court Record ↗</a>
-                            ${c.propertyAddress ? `<a href="${mapsUrl}" target="_blank" class="maps-link">🗺️ Maps</a>` : ''}
+                            <a href="${c.detailUrl}" target="_blank">Court Record -></a>
+                            ${c.propertyAddress ? `<a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>` : ''}
                         </div>
                     </div>
                 </div>
@@ -1148,22 +1176,22 @@
         
         function getGradeMeaning(grade) {
             const meanings = {
-                'A': '🔥 Highly willing',
-                'B': '⭐ Strong candidate', 
-                'C': '📋 On the fence',
-                'D': '⏳ Low probability',
-                'F': '❌ Not ready'
+                'A': 'Highly willing',
+                'B': 'Strong candidate', 
+                'C': 'On the fence',
+                'D': 'Low probability',
+                'F': 'Not ready'
             };
             return meanings[grade] || '';
         }
         
         function getGradeAction(grade) {
             const actions = {
-                'A': '📞 <strong>Call immediately</strong> - High likelihood of motivated seller',
-                'B': '📬 <strong>Direct mail + call</strong> - Strong candidate for outreach',
-                'C': '🌱 <strong>Nurture</strong> - May need more time or follow-up',
-                'D': '👀 <strong>Watchlist</strong> - Monitor for changes',
-                'F': '⏸️ <strong>Skip for now</strong> - Not showing selling signals'
+                'A': '<strong>Call immediately</strong> - High likelihood of motivated seller',
+                'B': '<strong>Direct mail + call</strong> - Strong candidate for outreach',
+                'C': '<strong>Nurture</strong> - May need more time or follow-up',
+                'D': '<strong>Watchlist</strong> - Monitor for changes',
+                'F': '<strong>Skip for now</strong> - Not showing selling signals'
             };
             return actions[grade] || '';
         }
@@ -1175,9 +1203,9 @@
             testBtn.disabled = true;
             
             if (testMode) {
-                testBtn.innerHTML = '⏳ Testing...';
+                testBtn.innerHTML = 'Testing...';
             } else {
-                btn.innerHTML = '⏳ Processing... (may take a few minutes)';
+                btn.innerHTML = 'Processing... (may take a few minutes)';
             }
             
             try {
@@ -1193,8 +1221,8 @@
                     alert('Please upload a CSV file first!');
                     btn.disabled = false;
                     testBtn.disabled = false;
-                    btn.innerHTML = '🔄 Process All';
-                    testBtn.innerHTML = '⚡ Test (10 only)';
+                    btn.innerHTML = 'Process All';
+                    testBtn.innerHTML = 'Test (10 only)';
                     return;
                 }
                 
@@ -1202,8 +1230,8 @@
                     alert('Processing already in progress. Please wait.');
                     btn.disabled = false;
                     testBtn.disabled = false;
-                    btn.innerHTML = '🔄 Process All';
-                    testBtn.innerHTML = '⚡ Test (10 only)';
+                    btn.innerHTML = 'Process All';
+                    testBtn.innerHTML = 'Test (10 only)';
                     return;
                 }
                 
@@ -1217,8 +1245,8 @@
                     } else {
                         btn.disabled = false;
                         testBtn.disabled = false;
-                        btn.innerHTML = '🔄 Process All';
-                        testBtn.innerHTML = '⚡ Test (10 only)';
+                        btn.innerHTML = 'Process All';
+                        testBtn.innerHTML = 'Test (10 only)';
                         loadData();
                         checkCsvStatus();
                         
@@ -1235,8 +1263,8 @@
             } catch (error) {
                 btn.disabled = false;
                 testBtn.disabled = false;
-                btn.innerHTML = '🔄 Process All';
-                testBtn.innerHTML = '⚡ Test (10 only)';
+                btn.innerHTML = 'Process All';
+                testBtn.innerHTML = 'Test (10 only)';
                 alert('Error: ' + error.message);
             }
         }
@@ -1273,3 +1301,4 @@
     </script>
 </body>
 </html>
+
