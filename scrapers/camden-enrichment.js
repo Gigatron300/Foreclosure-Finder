@@ -104,6 +104,151 @@ function classifyDefendant(name) {
   return 'INDIVIDUAL';
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function gradeFromScore(score) {
+  if (score >= 80) return 'A';
+  if (score >= 65) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 35) return 'D';
+  return 'F';
+}
+
+function labelFromGrade(grade) {
+  if (grade === 'A') return 'Very High';
+  if (grade === 'B') return 'High';
+  if (grade === 'C') return 'Moderate';
+  if (grade === 'D') return 'Low';
+  return 'Very Low';
+}
+
+function scoreCamdenCase(caseData) {
+  const c = caseData || {};
+  const status = (c.status || '').toUpperCase();
+  const courtStatus = (c.courtStatus || '').toUpperCase();
+  const caseType = (c.courtCaseType || '').toUpperCase();
+  const disposition = (c.courtDisposition || '').toUpperCase();
+  const actionList = Array.isArray(c.courtCaseActions) ? c.courtCaseActions : [];
+  const actionText = (
+    c.courtCaseActionsText ||
+    actionList.map(a => (a && a.docketText) ? a.docketText : '').join(' | ')
+  ).toUpperCase();
+  const latestActionText = (c.courtLatestActionText || '').toUpperCase();
+  const contextText = [status, courtStatus, caseType, disposition, actionText, latestActionText].join(' | ');
+  const factors = [];
+  const has = (s) => contextText.includes(s);
+  const hasAny = (arr) => arr.some(has);
+  const hasAll = (arr) => arr.every(has);
+
+  const defaultSignals = hasAny(['DEFAULT', 'DEFAULTED', 'REQUEST FOR DEFAULT']);
+  const settlementSignals = hasAny(['STIPULATION OF SETTLEMENT', 'STIPULATION OF DISMISSAL', 'SETTLEMENT']);
+  const bankruptcySignals = hasAny(['BANKRUPTCY', 'AUTOMATIC STAY', 'CHAPTER 7', 'CHAPTER 13']);
+  const saleStaySignals = hasAny(['MOTION TO STAY OF SHERIFF SALE', 'STAY OF SHERIFF SALE', 'POSTPONEMENT LETTER', 'SHERIFF SALE']);
+  const contestedWithCounterclaim = hasAny(['CONTESTED ANSWER W/ COUNTERCLAIM', 'CONTESTED ANSWER WITH COUNTERCLAIM']);
+  const contestedAnswerOnly = hasAny(['CONTESTED ANSWER']) && !contestedWithCounterclaim;
+  const trialSignals = hasAny(['TRIAL SCHEDULED', 'TRIAL DATE', 'TRIAL']);
+
+  // A) Stage & Time Pressure (0-35): highest that applies
+  const hasWritReturn = hasAny(['WRIT RETURN']);
+  const hasWritIssued = hasAny(['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT']);
+  const hasFinalJudgment = hasAny(['UNCONTESTED ORDER FOR FINAL JUDGMENT', 'ORDER FOR FINAL JUDGMENT', 'FINAL JUDGMENT']);
+  const hasMfjFiled = hasAny(['MOTION FOR FINAL JUDGMENT']);
+  let stageA = 2;
+  if (saleStaySignals) stageA = 35;
+  else if (hasWritReturn) stageA = 30;
+  else if (hasWritIssued) stageA = 25;
+  else if (hasFinalJudgment) stageA = 20;
+  else if (hasMfjFiled) stageA = 12;
+  else if (defaultSignals) stageA = 6;
+  stageA = clamp(stageA, 0, 35);
+  factors.push({ text: 'A Stage & Time Pressure', impact: stageA });
+
+  // B) Distress Signals (0-25): additive, capped
+  let distressB = 0;
+  if (defaultSignals) distressB += 8;
+  if (hasAny(['ADDITIONAL SUMS'])) distressB += 6;
+  if (hasAny(['ALIAS WRIT'])) distressB += 6;
+  if (hasAny(['FORECLOSURE JUDGMENT NOTICE', 'FORECLOSURE WRIT NOTICE'])) distressB += 5;
+  if (hasAny(['CERTIFICATION REGARDING 14-DAY NOTICE', '14-DAY NOTICE'])) distressB += 4;
+  distressB = clamp(distressB, 0, 25);
+  factors.push({ text: 'B Distress Signals', impact: distressB });
+
+  // C) Resistance / Defense (-30..0): subtractive section
+  let resistanceC = 0;
+  if (contestedWithCounterclaim) resistanceC -= 25;
+  else if (contestedAnswerOnly) resistanceC -= 18;
+  if (trialSignals) resistanceC -= 12;
+  if (hasAny(['NOTICE OF APPEARANCE'])) resistanceC -= 10;
+  if (saleStaySignals) resistanceC -= 10;
+  if (hasAny(['OBJECTION', 'REPLY BRIEF', 'OPPOSITION'])) resistanceC -= 6;
+  resistanceC = clamp(resistanceC, -30, 0);
+  factors.push({ text: 'C Resistance / Defense', impact: resistanceC });
+
+  // D) Title/Probate/Friction (-25..0): subtractive section
+  let frictionD = 0;
+  const heirsOrGal = hasAny(['GUARDIAN AD LITEM', 'HEIRS', 'DEVISEES', 'DECEASED', 'ESTATE', 'PERSONAL REPRESENTATIVE']);
+  const substitutionOrLimitedRep = hasAny(['SUBSTITUTION OF ATTORNEY', 'LIMITED REPRESENTATION', 'DEFICIENCY NOTICE']);
+  const diligentInquiry = hasAny(['CERTIFICATION OF DILIGENT INQUIRY', 'DILIGENT INQUIRY']);
+  const reformOrCorrection = hasAny(['MOTION TO REFORM MORTGAGE', 'REFORM MORTGAGE', 'CORRECTING DEFENDANT NAME']);
+  if (bankruptcySignals) frictionD -= 25;
+  else if (heirsOrGal) frictionD -= 15;
+  if (substitutionOrLimitedRep) frictionD -= 10;
+  if (diligentInquiry) frictionD -= 6;
+  if (reformOrCorrection) frictionD -= 5;
+  frictionD = clamp(frictionD, -25, 0);
+  factors.push({ text: 'D Title/Probate/Friction', impact: frictionD });
+
+  // E) Exit / Resolution Signals (0-20): additive, capped
+  let exitE = 0;
+  const redemptionOrder = hasAny(['MOTION FIXING AMOUNT', 'ORDER FIXING AMOUNT', 'REDEMPTION']);
+  const softWindow = hasAny(['POSTPONEMENT LETTER', 'SALE POSTPONEMENT', 'LIMITED REPRESENTATION']);
+  if (settlementSignals) exitE += 20;
+  if (softWindow) exitE += 10;
+  if (hasAny(['MOTION WITHDRAWN', 'WITHDRAWN'])) exitE += 6;
+  if (redemptionOrder) exitE = Math.max(exitE, 20);
+  exitE = clamp(exitE, 0, 20);
+  factors.push({ text: 'E Exit / Resolution', impact: exitE });
+
+  // Small confidence guardrail
+  let confidenceAdj = 0;
+  if (actionList.length > 0) confidenceAdj += 2;
+  if (c.courtDocketNumber) confidenceAdj += 1;
+  if (courtStatus === 'NOT_FOUND' || courtStatus === 'ERROR') confidenceAdj -= 3;
+  confidenceAdj = clamp(confidenceAdj, -5, 5);
+  if (confidenceAdj !== 0) factors.push({ text: 'Confidence adjustment', impact: confidenceAdj });
+
+  const rawScore = stageA + distressB + resistanceC + frictionD + exitE + confidenceAdj;
+  const score = clamp(Math.round(rawScore), 0, 100);
+  const grade = gradeFromScore(score);
+  const summary = [
+    `A:${stageA}`,
+    `B:${distressB}`,
+    `C:${resistanceC}`,
+    `D:${frictionD}`,
+    `E:${exitE}`,
+    `Conf:${confidenceAdj}`
+  ].join(' ');
+
+  return {
+    ...c,
+    sellerScore: score,
+    sellerGrade: grade,
+    sellerLikelihood: labelFromGrade(grade),
+    sellerFactors: factors,
+    sellerScoreSummary: summary,
+    scoreComponents: {
+      stageA,
+      distressB,
+      resistanceC,
+      frictionD,
+      exitE,
+      confidenceAdj
+    }
+  };
+}
+
 // ============================================================
 // CSV Parsing - Camden County Clerk format
 // ============================================================
@@ -257,8 +402,10 @@ function parseCamdenCSV(csvText) {
     });
   }
 
+  const scoredCases = cases.map(scoreCamdenCase);
+
   // Sort by town then date
-  cases.sort((a, b) => {
+  scoredCases.sort((a, b) => {
     const townCmp = a.town.localeCompare(b.town);
     if (townCmp !== 0) return townCmp;
     return (a.daysSinceFiling || 0) - (b.daysSinceFiling || 0);
@@ -268,7 +415,7 @@ function parseCamdenCSV(csvText) {
   const byPlaintiffType = {};
   const byDefendantType = {};
   const byTown = {};
-  for (const c of cases) {
+  for (const c of scoredCases) {
     byPlaintiffType[c.plaintiffType] = (byPlaintiffType[c.plaintiffType] || 0) + 1;
     byDefendantType[c.defendantType] = (byDefendantType[c.defendantType] || 0) + 1;
     byTown[c.town] = (byTown[c.town] || 0) + 1;
@@ -277,10 +424,10 @@ function parseCamdenCSV(csvText) {
   return {
     source: 'Camden County Clerk - Lis Pendens Filed',
     processedAt: new Date().toISOString(),
-    totalCases: cases.length,
+    totalCases: scoredCases.length,
     totalRows: lines.length - 1,
     summary: { byPlaintiffType, byDefendantType, byTown },
-    cases
+    cases: scoredCases
   };
 }
 
@@ -471,8 +618,12 @@ async function enrichCamdenCases(data, options = {}) {
   if (testMode) {
     // In test mode, only update the cases we processed
     for (let i = 0; i < cases.length; i++) {
-      data.cases[i] = cases[i];
+      data.cases[i] = scoreCamdenCase(cases[i]);
     }
+  }
+
+  if (!testMode) {
+    data.cases = (data.cases || []).map(scoreCamdenCase);
   }
 
   data.enrichmentSummary = {
@@ -501,6 +652,7 @@ async function enrichCamdenCases(data, options = {}) {
 module.exports = {
   parseCamdenCSV,
   enrichCamdenCases,
+  scoreCamdenCase,
   classifyPlaintiff,
   classifyDefendant,
   TOWN_TO_MUN_CODE
