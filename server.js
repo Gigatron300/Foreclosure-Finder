@@ -727,14 +727,15 @@ ensureDataDir().then(() => {
     console.log(`🚀 Foreclosure Finder server running on port ${PORT}`);
     console.log(`   Open http://localhost:${PORT} in your browser`);
     
-    // Schedule pipeline scrape at 3 AM Eastern Time every day
-    scheduleNightlyScrape();
+    // Schedule automatic jobs
+    scheduleNightlySheriffScrape();   // 2 AM ET
+    scheduleNightlyPipelineScrape();  // 3 AM ET
   });
 });
 
 // ============== SCHEDULED SCRAPING ==============
 
-function scheduleNightlyScrape() {
+function scheduleNightlyPipelineScrape() {
   const SCRAPE_HOUR = 3;  // 3 AM
   const TIMEZONE_OFFSET = -5;  // Eastern Time (adjust for daylight saving if needed: -4 for EDT, -5 for EST)
   
@@ -807,6 +808,74 @@ function scheduleNightlyScrape() {
         console.log(`   ❌ Scheduled scrape error: ${error.message}`);
       } finally {
         isPipelineScrapingInProgress = false;
+      }
+      
+      // Schedule the next one
+      scheduleNext();
+    }, msUntilScrape);
+  }
+  
+  scheduleNext();
+}
+
+function scheduleNightlySheriffScrape() {
+  const SCRAPE_HOUR = 2;  // 2 AM
+  const TIMEZONE_OFFSET = -5;  // Eastern Time (adjust for daylight saving if needed: -4 for EDT, -5 for EST)
+  
+  function getNextScrapeTime() {
+    const now = new Date();
+    const targetUTCHour = SCRAPE_HOUR - TIMEZONE_OFFSET;  // Convert 2 AM ET to UTC
+    
+    let next = new Date(now);
+    next.setUTCHours(targetUTCHour, 0, 0, 0);
+    
+    // If we've passed 2 AM today, schedule for tomorrow
+    if (now >= next) {
+      next.setDate(next.getDate() + 1);
+    }
+    
+    return next;
+  }
+  
+  function scheduleNext() {
+    const nextScrape = getNextScrapeTime();
+    const msUntilScrape = nextScrape.getTime() - Date.now();
+    
+    console.log(`📅 Next scheduled sheriff scrape: ${nextScrape.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`);
+    console.log(`   (in ${Math.round(msUntilScrape / 1000 / 60 / 60 * 10) / 10} hours)`);
+    
+    setTimeout(async () => {
+      console.log(`\n⏰ Starting scheduled 2 AM sheriff scrape...`);
+      
+      // Check if scrape is already in progress
+      if (isScrapingInProgress) {
+        console.log('   ⚠️ Sheriff scrape already in progress, skipping');
+        scheduleNext();
+        return;
+      }
+      
+      isScrapingInProgress = true;
+      lastScrapeStatus = { started: new Date().toISOString(), status: 'running', scheduled: true };
+      
+      try {
+        const properties = await runScraper();
+        lastScrapeStatus = {
+          completed: new Date().toISOString(),
+          status: 'completed',
+          propertiesFound: properties.length,
+          scheduled: true
+        };
+        console.log(`   ✅ Scheduled sheriff scrape complete: ${properties.length} properties`);
+      } catch (error) {
+        lastScrapeStatus = {
+          completed: new Date().toISOString(),
+          status: 'error',
+          error: error.message,
+          scheduled: true
+        };
+        console.log(`   ❌ Scheduled sheriff scrape error: ${error.message}`);
+      } finally {
+        isScrapingInProgress = false;
       }
       
       // Schedule the next one
