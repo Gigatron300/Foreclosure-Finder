@@ -203,6 +203,58 @@
         .score-badge.grade-d { background: rgba(251,146,60,0.18); color: #fb923c; }
         .score-badge.grade-f { background: rgba(248,113,113,0.18); color: #f87171; }
         .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
+        .score-explain {
+            margin: 8px 0 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.02);
+            overflow: hidden;
+        }
+        .score-explain > summary {
+            cursor: pointer;
+            list-style: none;
+            padding: 8px 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--benoro-gold);
+            user-select: none;
+        }
+        .score-explain > summary::-webkit-details-marker { display: none; }
+        .score-explain-body {
+            border-top: 1px solid rgba(255,255,255,0.06);
+            padding: 8px 10px 10px;
+        }
+        .score-breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.72rem;
+            color: var(--benoro-text-muted);
+            margin-bottom: 4px;
+        }
+        .score-breakdown-row b { color: var(--benoro-white); font-weight: 600; }
+        .score-upside {
+            margin-top: 8px;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.02);
+        }
+        .score-upside > summary {
+            cursor: pointer;
+            list-style: none;
+            padding: 7px 9px;
+            font-size: 0.72rem;
+            color: #9fd3b0;
+            user-select: none;
+        }
+        .score-upside > summary::-webkit-details-marker { display: none; }
+        .score-upside ul {
+            margin: 0;
+            padding: 0 12px 10px 22px;
+            color: var(--benoro-text-muted);
+            font-size: 0.7rem;
+            line-height: 1.35;
+        }
         .action-strip {
             margin-top: 10px;
             padding: 8px;
@@ -657,6 +709,80 @@
             }
             return s;
         }
+
+        function hasAnySignal(text, list) {
+            return list.some(v => text.includes(v));
+        }
+
+        function buildHowToScoreHigherTips(c) {
+            const context = [
+                c.courtStatus || '',
+                c.courtCaseType || '',
+                c.courtDisposition || '',
+                c.courtCaseActionsText || '',
+                c.courtLatestActionText || ''
+            ].join(' ').toUpperCase();
+            const tips = [];
+
+            if (!hasAnySignal(context, ['SETTLEMENT', 'REDEMPTION', 'ORDER FIXING AMOUNT', 'MOTION FIXING AMOUNT'])) {
+                tips.push('No settlement or redemption signal detected yet (up to +20 in Exit).');
+            }
+            if (!hasAnySignal(context, ['ADDITIONAL SUMS'])) {
+                tips.push('No additional sums filing detected (+6 in Distress if it appears).');
+            }
+            if (!hasAnySignal(context, ['ALIAS WRIT'])) {
+                tips.push('No alias writ signal detected (+6 in Distress if it appears).');
+            }
+            if (!hasAnySignal(context, ['14-DAY NOTICE', 'CERTIFICATION REGARDING 14-DAY NOTICE'])) {
+                tips.push('No 14-day notice signal detected (+4 in Distress if it appears).');
+            }
+            if (!hasAnySignal(context, ['FORECLOSURE WRIT NOTICE', 'FORECLOSURE JUDGMENT NOTICE'])) {
+                tips.push('No foreclosure notice signal detected (+5 in Distress if it appears).');
+            }
+
+            if (tips.length === 0) {
+                tips.push('Most positive scoring signals are already present. Major score change likely needs a new case event.');
+            }
+
+            return tips.slice(0, 4);
+        }
+
+        function buildScoreExplainHtml(c) {
+            const sc = c.scoreComponents || {};
+            const stageA = Number(sc.stageA) || 0;
+            const distressB = Number(sc.distressB) || 0;
+            const resistanceC = Number(sc.resistanceC) || 0;
+            const frictionD = Number(sc.frictionD) || 0;
+            const exitE = Number(sc.exitE) || 0;
+            const confidenceAdj = Number(sc.confidenceAdj) || 0;
+            const total = Number(c.sellerScore) || 0;
+
+            const rows = [
+                ['A Stage & Time Pressure', stageA],
+                ['B Distress Signals', distressB],
+                ['C Resistance / Defense', resistanceC],
+                ['D Title / Friction', frictionD],
+                ['E Exit / Resolution', exitE],
+                ['Confidence', confidenceAdj]
+            ];
+
+            const tips = buildHowToScoreHigherTips(c);
+            return `
+                <details class="score-explain">
+                    <summary>Score Breakdown</summary>
+                    <div class="score-explain-body">
+                        ${rows.map(([label, val]) => `<div class="score-breakdown-row"><span>${label}</span><b>${val >= 0 ? '+' : ''}${val}</b></div>`).join('')}
+                        <div class="score-breakdown-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+                            <span>Total</span><b>${total}</b>
+                        </div>
+                        <details class="score-upside">
+                            <summary>How To Score Higher</summary>
+                            <ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul>
+                        </details>
+                    </div>
+                </details>
+            `;
+        }
         
         function createCard(c) {
             const address = c.propertyAddress || 'Address pending';
@@ -696,6 +822,7 @@
             const sellerGrade = (c.sellerGrade || 'F').toUpperCase();
             const sellerLikelihood = c.sellerLikelihood || 'Very Low';
             const scoreClass = `grade-${sellerGrade.toLowerCase()}`;
+            const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
 
@@ -741,6 +868,7 @@
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
                         </div>
+                        ${scoreExplainHtml}
                         <div class="property-address">${address}</div>
                         <div class="property-location">${town}, NJ — Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' — ' + c.buildingDesc : ''}</div>
 
