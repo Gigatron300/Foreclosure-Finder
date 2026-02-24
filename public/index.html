@@ -203,7 +203,7 @@
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            margin-top: 1rem;
+            margin: 1rem 0 0 1.5rem;
             padding: 0.5rem 1rem;
             background: var(--bg-card);
             border-radius: 2rem;
@@ -261,33 +261,6 @@
         .nav-links a.active {
             color: var(--accent);
             background: transparent;
-        }
-
-        .sources-badge {
-            display: inline-flex;
-            gap: 1rem;
-            margin-top: 1rem;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-
-        .source-tag {
-            background: var(--bg-card);
-            padding: 0.5rem 1rem;
-            border-radius: 2rem;
-            font-size: 0.875rem;
-            border: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .source-tag::before {
-            content: '';
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--accent);
         }
 
         /* API Key Section */
@@ -1010,13 +983,9 @@
                     <a href="/camden.html">Camden Pipeline</a>
                 </nav>
             </div>
-            <div class="data-status" id="dataStatus" style="margin-top: 1rem;">
+            <div class="data-status" id="dataStatus">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Checking data...</span>
-            </div>
-            <div class="sources-badge">
-                <span class="source-tag">CivilView - Camden County, NJ</span>
-                <span class="source-tag">CivilView - Montgomery County, PA</span>
             </div>
         </header>
 
