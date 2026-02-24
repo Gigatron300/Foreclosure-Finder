@@ -184,6 +184,34 @@
         .property-info { padding: 20px; }
         .property-address { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--benoro-white); }
         .property-location { color: var(--benoro-text-muted); font-size: 0.85rem; margin-bottom: 15px; }
+        .score-strip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .score-badge {
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .score-badge.grade-a { background: rgba(74,222,128,0.18); color: #4ade80; }
+        .score-badge.grade-b { background: rgba(96,165,250,0.18); color: #60a5fa; }
+        .score-badge.grade-c { background: rgba(251,191,36,0.18); color: #fbbf24; }
+        .score-badge.grade-d { background: rgba(251,146,60,0.18); color: #fb923c; }
+        .score-badge.grade-f { background: rgba(248,113,113,0.18); color: #f87171; }
+        .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
+        .action-strip {
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(255,255,255,0.04);
+            border-left: 2px solid var(--benoro-gold);
+            font-size: 0.75rem;
+            color: var(--benoro-text-muted);
+            line-height: 1.35;
+        }
 
         .property-details { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
         .detail-item { font-size: 0.85rem; }
@@ -398,6 +426,8 @@
                 <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
                 <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
+                    <option value="sellerScoreDesc">Sort: Seller Score (High to Low)</option>
+                    <option value="sellerScoreAsc">Sort: Seller Score (Low to High)</option>
                     <option value="daysSinceFiling">Sort: Days Since Filing</option>
                     <option value="assessedValue">Sort: Assessed Value</option>
                     <option value="town">Sort: Town</option>
@@ -558,7 +588,12 @@
             const courtStatusFilter = document.getElementById('courtStatusFilter').value;
 
             try {
-                let url = `/api/camden?sortBy=${sortBy}&sortOrder=desc`;
+                let apiSortBy = sortBy;
+                let sortOrder = 'desc';
+                if (sortBy === 'sellerScoreDesc') apiSortBy = 'sellerScore';
+                else if (sortBy === 'sellerScoreAsc') { apiSortBy = 'sellerScore'; sortOrder = 'asc'; }
+
+                let url = `/api/camden?sortBy=${apiSortBy}&sortOrder=${sortOrder}`;
                 if (typeFilter) url += `&plaintiffType=${typeFilter}`;
                 if (addressFilter) url += `&hasAddress=${addressFilter}`;
                 if (townFilter) url += `&town=${encodeURIComponent(townFilter)}`;
@@ -657,6 +692,12 @@
             }
 
             const months = Math.round((c.daysSinceFiling || 0) / 30);
+            const sellerScore = c.sellerScore || 0;
+            const sellerGrade = (c.sellerGrade || 'F').toUpperCase();
+            const sellerLikelihood = c.sellerLikelihood || 'Very Low';
+            const scoreClass = `grade-${sellerGrade.toLowerCase()}`;
+            const latestAction = c.courtLatestActionText || '';
+            const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
 
             // Court status badge
             let courtHtml = '';
@@ -696,6 +737,10 @@
                         <span class="days-badge">${months} mo</span>
                     </div>
                     <div class="property-info">
+                        <div class="score-strip">
+                            <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
+                            <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
+                        </div>
                         <div class="property-address">${address}</div>
                         <div class="property-location">${town}, NJ — Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' — ' + c.buildingDesc : ''}</div>
 
@@ -722,6 +767,7 @@
                         </div>
 
                         ${courtHtml}
+                        ${latestAction ? `<div class="action-strip"><b>Latest Action</b> (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
 
                         <div class="property-footer">
                             ${hasAddr ? `
