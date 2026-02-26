@@ -572,8 +572,9 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
 
     // Filter to cases that need court status
     let cases = (data.cases || []).filter(c => {
-      // Skip if already has a final court status
-      if (c.courtStatus === 'CLOSED') return false;
+      // Skip if already closed; OPEN cases can be re-scanned for richer docket/action data.
+      const existingStatus = (c.courtStatus || '').toUpperCase();
+      if (existingStatus === 'CLOSED') return false;
       // Skip if defendant can't be parsed
       if (!c.primaryDefendant) return false;
       return true;
@@ -649,6 +650,15 @@ app.post('/api/camden/court-status-update', cors({
     const caseIdx = data.cases.findIndex(c => c.instrumentNumber === instrumentNumber);
     if (caseIdx === -1) {
       return res.status(404).json({ error: `Case ${instrumentNumber} not found` });
+    }
+
+    const existingStatus = (data.cases[caseIdx].courtStatus || '').toUpperCase();
+    const incomingStatus = (courtData.courtStatus || '').toUpperCase();
+
+    // Preserve manual/final overrides: do not downgrade OPEN/CLOSED to RECHECK.
+    if ((existingStatus === 'OPEN' || existingStatus === 'CLOSED') && incomingStatus === 'RECHECK') {
+      console.log(`⚖️ ${instrumentNumber} → kept ${existingStatus}, ignored incoming RECHECK`);
+      return res.json({ success: true, instrumentNumber, status: existingStatus, ignored: true });
     }
 
     Object.assign(data.cases[caseIdx], courtData);
