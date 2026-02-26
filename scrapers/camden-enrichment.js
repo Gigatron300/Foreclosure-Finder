@@ -300,6 +300,13 @@ function parseCamdenCSV(csvText) {
 
   // Group rows by instrument number
   const caseMap = new Map();
+  const statusPriority = (s) => {
+    const u = (s || '').toUpperCase().trim();
+    if (u === 'OPEN' || u === 'CLOSED') return 3;
+    if (u === 'RECHECK') return 2;
+    if (u) return 1;
+    return 0;
+  };
 
   for (let i = 1; i < lines.length; i++) {
     const v = parseCSVLine(lines[i]);
@@ -325,6 +332,17 @@ function parseCamdenCSV(csvText) {
     }
 
     const entry = caseMap.get(instrNum);
+    const rowCourtStatus = col.courtStatus >= 0 ? (v[col.courtStatus] || '').trim() : '';
+    const rowCourtDocket = col.courtDocket >= 0 ? (v[col.courtDocket] || '').trim() : '';
+
+    // CSV contains one row per party; preserve best non-empty manual override across all rows for the same case.
+    if (statusPriority(rowCourtStatus) > statusPriority(entry.courtStatus)) {
+      entry.courtStatus = rowCourtStatus;
+    }
+    if (rowCourtDocket && !entry.courtDocket) {
+      entry.courtDocket = rowCourtDocket;
+    }
+
     const partyCode = col.partyCode >= 0 ? (v[col.partyCode] || '').toUpperCase().trim() : '';
     // The "Name" column has the full name for this party row
     const fullName = col.name >= 0 ? (v[col.name] || '').trim() : '';
