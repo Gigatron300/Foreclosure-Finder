@@ -587,6 +587,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       allDefendants: (c.allDefendants || []).filter(n => n),
       plaintiff: c.primaryPlaintiff || '',
       filingDate: c.filingDateISO || c.filingDate || '',
+      courtStatus: c.courtStatus || '',
       courtDocketNumber: c.courtDocketNumber || ''
     }));
 
@@ -655,18 +656,25 @@ app.post('/api/camden/court-status-update', cors({
     const existingStatus = (data.cases[caseIdx].courtStatus || '').toUpperCase();
     const incomingStatus = (courtData.courtStatus || '').toUpperCase();
 
-    // Preserve manual/final overrides: do not downgrade OPEN/CLOSED to RECHECK.
-    if ((existingStatus === 'OPEN' || existingStatus === 'CLOSED') && incomingStatus === 'RECHECK') {
-      console.log(`⚖️ ${instrumentNumber} → kept ${existingStatus}, ignored incoming RECHECK`);
-      return res.json({ success: true, instrumentNumber, status: existingStatus, ignored: true });
+    // Preserve manual/final overrides: don't downgrade OPEN/CLOSED to uncertain statuses.
+    const isFinalStatus = existingStatus === 'OPEN' || existingStatus === 'CLOSED';
+    const isDowngrade = incomingStatus === 'RECHECK' || incomingStatus === 'NOT_FOUND' || incomingStatus === 'UNKNOWN';
+    const mergedCourtData = { ...courtData };
+
+    if (isFinalStatus && isDowngrade) {
+      mergedCourtData.courtStatus = existingStatus;
+      if (!mergedCourtData.courtDocketNumber) {
+        mergedCourtData.courtDocketNumber = data.cases[caseIdx].courtDocketNumber || '';
+      }
+      console.log(`⚖️ ${instrumentNumber} → kept ${existingStatus}, merged non-status updates`);
     }
 
-    Object.assign(data.cases[caseIdx], courtData);
+    Object.assign(data.cases[caseIdx], mergedCourtData);
     data.cases[caseIdx] = scoreCamdenCase(data.cases[caseIdx]);
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
 
-    console.log(`⚖️ ${instrumentNumber} → ${courtData.courtStatus} (${courtData.courtDisposition || 'N/A'})`);
-    res.json({ success: true, instrumentNumber, status: courtData.courtStatus });
+    console.log(`⚖️ ${instrumentNumber} → ${data.cases[caseIdx].courtStatus} (${mergedCourtData.courtDisposition || 'N/A'})`);
+    res.json({ success: true, instrumentNumber, status: data.cases[caseIdx].courtStatus });
   } catch (error) {
     console.error('Court status update error:', error);
     res.status(500).json({ error: error.message });
