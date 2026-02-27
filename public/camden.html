@@ -656,13 +656,31 @@
             loadData();
         }
 
-        function loadStreetViewImage(btn, streetViewUrl, mapsUrl) {
+        function getFreshStreetViewUrl(streetViewUrl) {
+            const hasQuery = streetViewUrl.includes('?');
+            const sep = hasQuery ? '&' : '?';
+            return `${streetViewUrl}${sep}cb=${Date.now()}`;
+        }
+
+        function buildStreetViewErrorHtml(streetViewUrl, mapsUrl) {
+            return `<div class="no-image" style="flex-direction:column;gap:8px;">
+                <button class="load-photo-btn" onclick="retryStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Retry Photo</button>
+                <a href="${mapsUrl}" target="_blank" style="font-size:0.72rem;color:#93c5fd;text-decoration:none;">Open in Maps</a>
+            </div>`;
+        }
+
+        function loadStreetViewImage(btn, streetViewUrl, mapsUrl, forceRefresh = false) {
             const container = btn.closest('.no-image');
             if (!container) return;
+            const imageUrl = forceRefresh ? getFreshStreetViewUrl(streetViewUrl) : streetViewUrl;
             container.outerHTML = `<a href="${mapsUrl}" target="_blank">
-                <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
-                     onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View</div>'">
+                <img class="street-view-img" src="${imageUrl}" alt="Street View" loading="lazy"
+                     onerror="this.parentElement.outerHTML=buildStreetViewErrorHtml('${streetViewUrl}','${mapsUrl}')">
             </a>`;
+        }
+
+        function retryStreetViewImage(btn, streetViewUrl, mapsUrl) {
+            loadStreetViewImage(btn, streetViewUrl, mapsUrl, true);
         }
 
         function login() {
@@ -978,7 +996,7 @@
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
                     <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
-                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View</div>'">
+                         onerror="this.parentElement.outerHTML=buildStreetViewErrorHtml('${streetViewUrl}','${mapsUrl}')">
                 </a>`;
             }
 
