@@ -393,6 +393,39 @@
         .api-help-link:hover {
             text-decoration: underline;
         }
+        .streetview-mode-row {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            color: var(--benoro-text-muted);
+            font-size: 0.8rem;
+        }
+        .streetview-mode-row select {
+            padding: 7px 10px;
+            border-radius: 6px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #f3f4f6;
+            font-size: 0.8rem;
+        }
+        .streetview-mode-note {
+            font-size: 0.75rem;
+            color: var(--benoro-text-light);
+        }
+        .load-photo-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .load-photo-btn:hover {
+            background: rgba(212,168,75,0.25);
+        }
 
         @media (max-width: 768px) {
             .cases-grid { grid-template-columns: 1fr; }
@@ -453,6 +486,15 @@
                         <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
                         <button onclick="saveApiKey()">Save Key</button>
                         <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                    </div>
+                    <div class="streetview-mode-row">
+                        <label for="streetViewMode">Photo loading:</label>
+                        <select id="streetViewMode" onchange="saveStreetViewMode()">
+                            <option value="open-only">Auto-load OPEN only (recommended)</option>
+                            <option value="on-demand">On-demand all cards</option>
+                            <option value="auto">Auto-load all cards</option>
+                        </select>
+                        <span class="streetview-mode-note">OPEN-only mode auto-loads active cases and keeps closed/dismissed as click-to-load.</span>
                     </div>
                 </div>
             </div>
@@ -548,6 +590,7 @@
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
+        let streetViewMode = localStorage.getItem('camdenStreetViewMode') || 'open-only';
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
@@ -564,6 +607,8 @@
                 document.getElementById('apiKeyStatus').textContent = 'No key set';
                 document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
             }
+            const modeSelect = document.getElementById('streetViewMode');
+            if (modeSelect) modeSelect.value = streetViewMode;
             if (authToken) {
                 fetch('/api/camden', { headers: { 'X-Auth-Token': authToken } })
                     .then(r => {
@@ -591,6 +636,22 @@
                 document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 loadData();
             }
+        }
+
+        function saveStreetViewMode() {
+            const mode = document.getElementById('streetViewMode').value;
+            streetViewMode = (mode === 'auto' || mode === 'open-only' || mode === 'on-demand') ? mode : 'open-only';
+            localStorage.setItem('camdenStreetViewMode', streetViewMode);
+            loadData();
+        }
+
+        function loadStreetViewImage(btn, streetViewUrl, mapsUrl) {
+            const container = btn.closest('.no-image');
+            if (!container) return;
+            container.outerHTML = `<a href="${mapsUrl}" target="_blank">
+                <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
+                     onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View</div>'">
+            </a>`;
         }
 
         function login() {
@@ -856,6 +917,7 @@
                 ? `https://maps.googleapis.com/maps/api/streetview?size=400x180&location=${encodedAddress}&key=${googleApiKey}`
                 : '';
             const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
+            const autoLoadThisCard = streetViewMode === 'auto' || (streetViewMode === 'open-only' && c.courtStatus === 'OPEN');
 
             let streetViewHtml;
             if (!hasAddr) {
@@ -867,10 +929,15 @@
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
                     <div style="text-align:center;">🗺️ Click for Maps<br><small>Add API key for photos</small></div>
                 </a>`;
+            } else if (!autoLoadThisCard) {
+                streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
+                    <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Load Photo</button>
+                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">${streetViewMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
+                </div>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
-                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View"
-                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>📍 No Street View</div>'">
+                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
+                         onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View</div>'">
                 </a>`;
             }
 
