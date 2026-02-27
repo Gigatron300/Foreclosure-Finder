@@ -911,6 +911,36 @@
                 </details>
             `;
         }
+
+        function toTitleWords(text) {
+            return String(text || '')
+                .toLowerCase()
+                .split(' ')
+                .filter(Boolean)
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+        }
+
+        function formatCourtStatusNote(note) {
+            if (!note) return '';
+            const parts = String(note)
+                .split('|')
+                .map(p => p.trim())
+                .filter(Boolean);
+            if (!parts.length) return '';
+
+            let primary = parts.shift();
+
+            if (primary.startsWith('RECHECK_REASON:')) {
+                primary = primary.replace('RECHECK_REASON:', '');
+                primary = toTitleWords(primary.replace(/_/g, ' '));
+            } else if (primary === 'MATCHED') {
+                primary = 'Matched';
+            }
+
+            const detail = parts.join(' | ');
+            return detail ? `${primary} (${detail})` : primary;
+        }
         
         function createCard(c, repeatCount = 1) {
             const address = c.propertyAddress || 'Address pending';
@@ -971,6 +1001,7 @@
                 };
                 const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '○' };
                 const statusNote = c.courtStatusNote ? String(c.courtStatusNote).trim() : '';
+                const statusNoteDisplay = formatCourtStatusNote(statusNote);
                 courtHtml = `
                     <div style="margin-top:12px;padding:10px;background:${cs.bg};border-radius:6px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -978,7 +1009,7 @@
                         </div>
                         ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
                         ${c.courtDispositionDate ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
-                        ${(c.courtStatus === 'RECHECK' && statusNote) ? `<div style="color:#e2e8f0;font-size:0.75rem;margin-top:6px;line-height:1.35;">Reason: ${statusNote}</div>` : ''}
+                        ${(c.courtStatus === 'RECHECK' && statusNoteDisplay) ? `<div style="color:#e2e8f0;font-size:0.75rem;margin-top:6px;line-height:1.35;">Reason: ${statusNoteDisplay}</div>` : ''}
                     </div>`;
             }
 
