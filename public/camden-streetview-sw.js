@@ -1,4 +1,4 @@
-const STREETVIEW_CACHE = 'camden-streetview-v1';
+const STREETVIEW_CACHE = 'camden-streetview-v2';
 const MAX_CACHE_ENTRIES = 600;
 
 self.addEventListener('install', (event) => {
@@ -6,7 +6,15 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((k) => k.startsWith('camden-streetview-') && k !== STREETVIEW_CACHE)
+        .map((k) => caches.delete(k))
+    );
+    await self.clients.claim();
+  })());
 });
 
 async function trimCache(cache) {
@@ -18,14 +26,26 @@ async function trimCache(cache) {
   }
 }
 
+function normalizeStreetViewUrl(rawUrl) {
+  const normalized = new URL(rawUrl);
+  normalized.searchParams.delete('cb');
+  return normalized.toString();
+}
+
 async function cacheFirstStreetView(request) {
+  const normalizedUrl = normalizeStreetViewUrl(request.url);
+  const normalizedRequest = new Request(normalizedUrl, { method: 'GET', mode: 'no-cors' });
+  const isBypass = new URL(request.url).searchParams.has('cb');
+
   const cache = await caches.open(STREETVIEW_CACHE);
-  const cached = await cache.match(request);
-  if (cached) return cached;
+  if (!isBypass) {
+    const cached = await cache.match(normalizedRequest);
+    if (cached) return cached;
+  }
 
   const response = await fetch(request);
   if (response && (response.ok || response.type === 'opaque')) {
-    await cache.put(request, response.clone());
+    await cache.put(normalizedRequest, response.clone());
     await trimCache(cache);
   }
   return response;
