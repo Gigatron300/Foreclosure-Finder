@@ -664,6 +664,39 @@
         .api-key-row button { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
         .api-help-link { color: var(--benoro-gold); font-size: 0.8rem; text-decoration: none; margin-left: 10px; }
         .api-help-link:hover { text-decoration: underline; }
+        .streetview-mode-row {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            color: var(--benoro-text-muted);
+            font-size: 0.8rem;
+        }
+        .streetview-mode-row select {
+            padding: 7px 10px;
+            border-radius: 6px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #f3f4f6;
+            font-size: 0.8rem;
+        }
+        .streetview-mode-note {
+            font-size: 0.75rem;
+            color: var(--benoro-text-light);
+        }
+        .load-photo-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+        .load-photo-btn:hover {
+            background: rgba(212,168,75,0.25);
+        }
         .themed-link { color: var(--benoro-gold); }
         .themed-link:hover { color: var(--benoro-gold-light); }
         
@@ -726,6 +759,14 @@
                     <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
                     <button onclick="saveApiKey()">Save Key</button>
                     <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                </div>
+                <div class="streetview-mode-row">
+                    <label for="streetViewMode">Photo loading:</label>
+                    <select id="streetViewMode" onchange="saveStreetViewMode()">
+                        <option value="on-demand">On-demand (recommended)</option>
+                        <option value="auto">Auto-load all cards</option>
+                    </select>
+                    <span class="streetview-mode-note">On-demand only calls Google when you click "Load Photo".</span>
                 </div>
             </div>
         </div>
@@ -793,6 +834,7 @@
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
+        let streetViewMode = localStorage.getItem('pipelineStreetViewMode') || 'on-demand';
         let sweetSpotOnly = false;
         
         function toggleSweetSpot() {
@@ -824,6 +866,8 @@
                 document.getElementById('apiKeyStatus').textContent = 'No key set';
                 document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
             }
+            const modeSelect = document.getElementById('streetViewMode');
+            if (modeSelect) modeSelect.value = streetViewMode;
             
             if (authToken) {
                 fetch('/api/pipeline', { headers: { 'X-Auth-Token': authToken } })
@@ -852,6 +896,22 @@
                 document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
                 loadData(); // Reload to show images
             }
+        }
+
+        function saveStreetViewMode() {
+            const mode = document.getElementById('streetViewMode').value;
+            streetViewMode = mode === 'auto' ? 'auto' : 'on-demand';
+            localStorage.setItem('pipelineStreetViewMode', streetViewMode);
+            loadData();
+        }
+
+        function loadStreetViewImage(btn, streetViewUrl, mapsUrl) {
+            const container = btn.closest('.no-image');
+            if (!container) return;
+            container.outerHTML = `<a href="${mapsUrl}" target="_blank">
+                <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
+                     onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View available</div>'">
+            </a>`;
         }
         
         function login() {
@@ -1014,6 +1074,7 @@
             const streetViewUrl = (c.propertyAddress && hasApiKey)
                 ? `https://maps.googleapis.com/maps/api/streetview?size=400x200&location=${encodedAddress}&key=${googleApiKey}`
                 : '';
+            const autoLoadThisCard = streetViewMode === 'auto';
             
             // Google Maps URL
             const mapsUrl = c.propertyAddress
@@ -1027,9 +1088,14 @@
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
                     <div style="text-align:center;">Click to view on Google Maps<br><small>Add API key above for street photos</small></div>
                 </a>`;
+            } else if (!autoLoadThisCard) {
+                streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
+                    <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Load Photo</button>
+                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">On-demand mode</span>
+                </div>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
-                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View" 
+                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
                          onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View available</div>'">
                 </a>`;
             }
