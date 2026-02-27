@@ -328,7 +328,7 @@
     const midField = document.getElementById('searchByPartyNameForm:partyMName');
 
     if (lastField) lastField.value = parsed.last;
-    if (firstField) firstField.value = parsed.first;
+    if (firstField) firstField.value = (parsed.first || '').slice(0, 9);
     if (midField) midField.value = parsed.mid;
 
     // Update state to expect results on next page load
