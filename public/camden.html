@@ -209,6 +209,28 @@
             background: #e0bc6a;
             box-shadow: 0 0 0 2px rgba(224,188,106,0.2);
         }
+        .sheriff-flag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            margin-bottom: 4px;
+            border-radius: 999px;
+            border: 1px solid rgba(248,113,113,0.5);
+            background: rgba(248,113,113,0.14);
+            color: #fecaca;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+        .sheriff-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f87171;
+            box-shadow: 0 0 0 2px rgba(248,113,113,0.22);
+        }
         .property-location { color: var(--benoro-text-muted); font-size: 0.85rem; margin-bottom: 15px; }
         .score-strip {
             display: flex;
@@ -609,6 +631,8 @@
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
         let streetViewMode = localStorage.getItem('camdenStreetViewMode') || 'open-only';
         const streetViewCacheVersion = 'v2';
+        let camdenSheriffAddressKeys = null;
+        let camdenSheriffAddressKeysPromise = null;
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
@@ -843,12 +867,15 @@
                     if (!key) continue;
                     addressCounts.set(key, (addressCounts.get(key) || 0) + 1);
                 }
+                const sheriffKeys = await getCamdenSheriffAddressKeys();
 
                 grid.innerHTML = cases
                     .map(c => {
                         const key = getAddressRepeatKey(c);
                         const repeatCount = key ? (addressCounts.get(key) || 1) : 1;
-                        return createCard(c, repeatCount);
+                        const caseSheriffKeys = getCaseSheriffKeys(c);
+                        const onSheriffSale = caseSheriffKeys.some(k => sheriffKeys.has(k));
+                        return createCard(c, repeatCount, onSheriffSale);
                     })
                     .join('');
             } catch (e) {
@@ -893,6 +920,108 @@
             if (!addr) return '';
             const town = String(c.town || '').toUpperCase().trim();
             return `${addr}|${town}`;
+        }
+
+        function normalizeTownRoot(value) {
+            const cleaned = String(value || '')
+                .toUpperCase()
+                .replace(/[.,]/g, ' ')
+                .replace(/\b(TOWNSHIP|TWP|CITY|BOROUGH|BORO)\b/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (!cleaned) return '';
+            return cleaned.split(' ')[0] || '';
+        }
+
+        function getStreetMatchParts(address) {
+            const raw = normalizeAddressKey(address);
+            if (!raw) return null;
+
+            // Fix fused suffix+direction formats like "AVENUEWEST" -> "AVENUE WEST"
+            const expanded = raw.replace(
+                /\b(AVENUE|AVE|STREET|ST|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|PLACE|PL|TERRACE|TER|BOULEVARD|BLVD|CIRCLE|CIR|WAY)(NORTH|SOUTH|EAST|WEST|N|S|E|W)\b/g,
+                '$1 $2'
+            );
+            const tokens = expanded.split(' ').filter(Boolean);
+            if (!tokens.length) return null;
+
+            const houseNumber = tokens[0];
+            if (!/^\d+[A-Z]?(?:-\d+[A-Z]?)?$/.test(houseNumber)) return null;
+
+            const suffixMap = {
+                AVENUE: 'AVE', AVE: 'AVE',
+                STREET: 'ST', ST: 'ST',
+                ROAD: 'RD', RD: 'RD',
+                DRIVE: 'DR', DR: 'DR',
+                LANE: 'LN', LN: 'LN',
+                COURT: 'CT', CT: 'CT',
+                PLACE: 'PL', PL: 'PL',
+                TERRACE: 'TER', TER: 'TER',
+                BOULEVARD: 'BLVD', BLVD: 'BLVD',
+                CIRCLE: 'CIR', CIR: 'CIR'
+            };
+            const streetTokens = tokens
+                .slice(1)
+                .map(t => suffixMap[t] || t)
+                .filter(t => t && t !== 'NJ' && !/^\d{5}(-\d{4})?$/.test(t));
+
+            if (!streetTokens.length) return null;
+
+            const firstStreetToken = streetTokens[0] || '';
+            const stemCandidate = firstStreetToken.replace(
+                /(AVENUE|AVE|STREET|ST|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|PLACE|PL|TERRACE|TER|BOULEVARD|BLVD|CIRCLE|CIR|WAY)(NORTH|SOUTH|EAST|WEST|N|S|E|W)?$/g,
+                ''
+            );
+            const streetStem = (stemCandidate || firstStreetToken).trim();
+
+            return { houseNumber, streetTokens, streetStem };
+        }
+
+        function getStreetTownMatchKeys(address, town) {
+            const parts = getStreetMatchParts(address);
+            if (!parts) return [];
+            const townRoot = normalizeTownRoot(town);
+            if (!townRoot) return [];
+
+            const fullStreet = parts.streetTokens.join(' ');
+            const keys = [
+                `${parts.houseNumber}|${fullStreet}|${townRoot}`,
+                `${parts.houseNumber}|${parts.streetStem}|${townRoot}`
+            ];
+            return [...new Set(keys.filter(Boolean))];
+        }
+
+        function getCaseSheriffKeys(c) {
+            if (!c || !c.propertyAddress) return [];
+            return getStreetTownMatchKeys(c.propertyAddress, c.town);
+        }
+
+        async function getCamdenSheriffAddressKeys() {
+            if (camdenSheriffAddressKeys) return camdenSheriffAddressKeys;
+            if (camdenSheriffAddressKeysPromise) return camdenSheriffAddressKeysPromise;
+
+            camdenSheriffAddressKeysPromise = (async () => {
+                try {
+                    const r = await fetch('/api/properties?county=Camden', {
+                        headers: { 'X-Auth-Token': authToken }
+                    });
+                    const data = await r.json();
+                    const properties = data.properties || [];
+                    const set = new Set();
+                    for (const p of properties) {
+                        const keys = getStreetTownMatchKeys(p.address, p.city || p.township);
+                        for (const key of keys) set.add(key);
+                    }
+                    camdenSheriffAddressKeys = set;
+                    return set;
+                } catch (e) {
+                    console.warn('Unable to load Camden sheriff address set:', e.message);
+                    camdenSheriffAddressKeys = new Set();
+                    return camdenSheriffAddressKeys;
+                }
+            })();
+
+            return camdenSheriffAddressKeysPromise;
         }
 
         function buildHowToScoreHigherTips(c) {
@@ -995,7 +1124,7 @@
             return detail ? `${primary} (${detail})` : primary;
         }
         
-        function createCard(c, repeatCount = 1) {
+        function createCard(c, repeatCount = 1, onSheriffSale = false) {
             const address = c.propertyAddress || 'Address pending';
             const town = c.town || '';
             const hasAddr = !!c.propertyAddress;
@@ -1093,7 +1222,10 @@
                         ${scoreExplainHtml}
                         <div class="address-row">
                             <div class="property-address">${address}</div>
-                            ${isRepeatAddress ? `<span class="repeat-flag" title="This address appears in ${repeatCount} cases"><span class="repeat-dot"></span>Repeat x${repeatCount}</span>` : ''}
+                            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                                ${onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
+                                ${isRepeatAddress ? `<span class="repeat-flag" title="This address appears in ${repeatCount} cases"><span class="repeat-dot"></span>Repeat x${repeatCount}</span>` : ''}
+                            </div>
                         </div>
                         <div class="property-location">${town}, NJ — Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' — ' + c.buildingDesc : ''}</div>
 
