@@ -45,7 +45,11 @@
     const p = n.split(' ').filter(x => x);
     if (!p.length) return null;
     // CSV format is "LAST FIRST MIDDLE" (defendants from Camden Clerk)
-    return { last: (p[0] || '').slice(0, 9), first: p[1] || '', mid: p[2] || '' };
+    return {
+      last: p[0] || '',
+      first: (p[1] || '').slice(0, 9),
+      mid: p[2] || ''
+    };
   }
 
   // ── Plaintiff keyword for matching ───────────────────────────
