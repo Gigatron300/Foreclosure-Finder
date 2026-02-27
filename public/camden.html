@@ -591,9 +591,20 @@
         let authToken = localStorage.getItem('pipelineAuth');
         let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
         let streetViewMode = localStorage.getItem('camdenStreetViewMode') || 'open-only';
+        const streetViewCacheVersion = 'v1';
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
+        }
+
+        async function registerStreetViewCache() {
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                const registration = await navigator.serviceWorker.register(`/camden-streetview-sw.js?v=${streetViewCacheVersion}`);
+                if (!registration) return;
+            } catch (e) {
+                console.warn('Street View cache service worker not available:', e.message);
+            }
         }
 
         function checkExistingAuth() {
@@ -1187,6 +1198,7 @@ async function manualAddress(instrumentNumber) {
                 alert('Error: ' + e.message);
             }
         }
+        registerStreetViewCache();
         checkExistingAuth();
     </script>
 </body>
