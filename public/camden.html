@@ -755,7 +755,8 @@
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
                 }
 
-                let cases = data.cases || [];
+                const allCases = data.cases || [];
+                let cases = allCases;
 
                 // Court status filter (client-side since it's a new field)
                 if (courtStatusFilter === 'OPEN') {
@@ -769,7 +770,6 @@
                 }
 
                 // Stats (from unfiltered data for totals)
-                const allCases = data.cases || [];
                 document.getElementById('totalCases').textContent = cases.length;
                 document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
                 document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
@@ -785,7 +785,7 @@
                 }
 
                 const addressCounts = new Map();
-                for (const c of cases) {
+                for (const c of allCases) {
                     const key = getAddressRepeatKey(c);
                     if (!key) continue;
                     addressCounts.set(key, (addressCounts.get(key) || 0) + 1);
