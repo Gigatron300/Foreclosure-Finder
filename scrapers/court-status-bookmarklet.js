@@ -120,6 +120,12 @@
     return 'UNKNOWN';
   }
 
+  function buildStatusNote(reason, extra = '') {
+    const parts = [reason];
+    if (extra) parts.push(extra);
+    return parts.join(' | ');
+  }
+
   // ── Save result to server ────────────────────────────────────
   async function saveToServer(instrumentNumber, courtData) {
     try {
@@ -347,7 +353,10 @@
     if (page === 'SEARCH') {
       // No results returned (search came back empty)
       setStatus('No results found for this name');
-      await saveToServer(c.instrumentNumber, { courtStatus: 'NOT_FOUND', courtStatusNote: 'No search results' });
+      await saveToServer(c.instrumentNumber, {
+        courtStatus: 'NOT_FOUND',
+        courtStatusNote: buildStatusNote('RECHECK_REASON:NO_RESULTS', 'name search returned no rows')
+      });
       state.notFound++; state.done++; state.currentIndex++;
       await wait(500);
 
@@ -375,7 +384,10 @@
       const match = findBestMatch(rows, c.plaintiff, c.filingDate);
 
       if (!match) {
-        await saveToServer(c.instrumentNumber, { courtStatus: 'NOT_FOUND', courtStatusNote: rows.length + ' results, no confident match' });
+        await saveToServer(c.instrumentNumber, {
+          courtStatus: 'NOT_FOUND',
+          courtStatusNote: buildStatusNote('RECHECK_REASON:NO_CONFIDENT_MATCH', `${rows.length} results scanned`)
+        });
         state.notFound++; state.done++; state.currentIndex++;
 
         if (state.currentIndex < state.cases.length) {
@@ -476,7 +488,7 @@
       courtDocketNumber: jacket.docketNumber,
       courtDispositionDate: jacket.dispositionDate,
       courtMatchScore: match.matchScore || 0,
-      courtStatusNote: 'Matched score ' + (match.matchScore || 0)
+      courtStatusNote: buildStatusNote('MATCHED', `score ${match.matchScore || 0}`)
     });
 
     if (status === 'OPEN') state.open++;
