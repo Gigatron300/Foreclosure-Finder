@@ -426,6 +426,23 @@
         .load-photo-btn:hover {
             background: rgba(212,168,75,0.25);
         }
+        .retry-photo-btn {
+            position: absolute;
+            right: 10px;
+            bottom: 10px;
+            z-index: 3;
+            border: 1px solid rgba(147,197,253,0.75);
+            background: rgba(15,23,42,0.72);
+            color: #dbeafe;
+            border-radius: 6px;
+            padding: 5px 9px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            backdrop-filter: blur(2px);
+        }
+        .retry-photo-btn:hover {
+            background: rgba(30,41,59,0.9);
+        }
 
         @media (max-width: 768px) {
             .cases-grid { grid-template-columns: 1fr; }
@@ -669,18 +686,36 @@
             </div>`;
         }
 
-        function loadStreetViewImage(btn, streetViewUrl, mapsUrl, forceRefresh = false) {
-            const container = btn.closest('.no-image');
-            if (!container) return;
+        function renderStreetViewAnchor(streetViewUrl, mapsUrl, forceRefresh = false) {
             const imageUrl = forceRefresh ? getFreshStreetViewUrl(streetViewUrl) : streetViewUrl;
-            container.outerHTML = `<a href="${mapsUrl}" target="_blank">
+            return `<a href="${mapsUrl}" target="_blank">
                 <img class="street-view-img" src="${imageUrl}" alt="Street View" loading="lazy"
                      onerror="this.parentElement.outerHTML=buildStreetViewErrorHtml('${streetViewUrl}','${mapsUrl}')">
             </a>`;
         }
 
+        function loadStreetViewImage(btn, streetViewUrl, mapsUrl, forceRefresh = false) {
+            const container = btn.closest('.no-image');
+            if (!container) return;
+            container.outerHTML = renderStreetViewAnchor(streetViewUrl, mapsUrl, forceRefresh);
+        }
+
         function retryStreetViewImage(btn, streetViewUrl, mapsUrl) {
             loadStreetViewImage(btn, streetViewUrl, mapsUrl, true);
+        }
+
+        function retryStreetViewFromCard(btn, streetViewUrl, mapsUrl) {
+            const container = btn.closest('.street-view-container');
+            if (!container) return;
+            const img = container.querySelector('img.street-view-img');
+            if (img) {
+                img.src = getFreshStreetViewUrl(streetViewUrl);
+                return;
+            }
+            const noImage = container.querySelector('.no-image');
+            if (noImage) {
+                noImage.outerHTML = renderStreetViewAnchor(streetViewUrl, mapsUrl, true);
+            }
         }
 
         function login() {
@@ -994,11 +1029,11 @@
                     <span style="font-size:0.72rem;color:var(--benoro-text-light);">${streetViewMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
                 </div>`;
             } else {
-                streetViewHtml = `<a href="${mapsUrl}" target="_blank">
-                    <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
-                         onerror="this.parentElement.outerHTML=buildStreetViewErrorHtml('${streetViewUrl}','${mapsUrl}')">
-                </a>`;
+                streetViewHtml = renderStreetViewAnchor(streetViewUrl, mapsUrl, false);
             }
+            const retryButtonHtml = (hasAddr && hasApiKey)
+                ? `<button class="retry-photo-btn" onclick="retryStreetViewFromCard(this, '${streetViewUrl}', '${mapsUrl}')">Retry</button>`
+                : '';
 
             const months = Math.round((c.daysSinceFiling || 0) / 30);
             const sellerScore = c.sellerScore || 0;
@@ -1046,6 +1081,7 @@
                 <div class="property-card ${typeClass}${isRepeatAddress ? ' duplicate-address' : ''}">
                     <div class="street-view-container">
                         ${streetViewHtml}
+                        ${retryButtonHtml}
                         <span class="type-badge ${typeClass}">${typeLabel}</span>
                         <span class="days-badge">${months} mo</span>
                     </div>
