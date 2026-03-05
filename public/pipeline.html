@@ -685,6 +685,28 @@
             font-size: 0.75rem;
             color: var(--benoro-text-light);
         }
+        .mode-lock-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            color: var(--benoro-text-muted);
+            font-size: 0.8rem;
+        }
+        .mode-lock-note {
+            font-size: 0.75rem;
+            color: var(--benoro-text-light);
+        }
+        .mode-unlock-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
         .load-photo-btn {
             border: 1px solid rgba(212,168,75,0.7);
             background: rgba(212,168,75,0.15);
@@ -750,17 +772,15 @@
                 <div class="api-dropdown-title">
                     <span>📷</span>
                     <span>Street View Images</span>
-                    <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
                 </div>
                 <span class="api-dropdown-arrow">▼</span>
             </div>
             <div class="api-dropdown-content">
-                <div class="api-key-row">
-                    <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
-                    <button onclick="saveApiKey()">Save Key</button>
-                    <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                <div class="mode-lock-row" id="streetViewModeLockRow">
+                    <button class="mode-unlock-btn" onclick="unlockStreetViewMode()">Unlock Mode Change</button>
+                    <span class="mode-lock-note" id="streetViewModeLockNote">Mode is locked to default.</span>
                 </div>
-                <div class="streetview-mode-row">
+                <div class="streetview-mode-row" id="streetViewModeRow">
                     <label for="streetViewMode">Photo loading:</label>
                     <select id="streetViewMode" onchange="saveStreetViewMode()">
                         <option value="on-demand">On-demand (recommended)</option>
@@ -833,8 +853,10 @@
 
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
-        let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
-        let streetViewMode = localStorage.getItem('pipelineStreetViewMode') || 'on-demand';
+        const PIPELINE_DEFAULT_STREETVIEW_MODE = 'on-demand';
+        let streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
+        let streetViewModeUnlocked = false;
+        let streetViewModeRequiresPasskey = true;
         let sweetSpotOnly = false;
         
         function toggleSweetSpot() {
@@ -853,22 +875,86 @@
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
         }
+
+        function getEffectiveStreetViewMode() {
+            return streetViewModeUnlocked ? streetViewMode : PIPELINE_DEFAULT_STREETVIEW_MODE;
+        }
+
+        function renderStreetViewModeControls() {
+            const lockRow = document.getElementById('streetViewModeLockRow');
+            const lockNote = document.getElementById('streetViewModeLockNote');
+            const modeRow = document.getElementById('streetViewModeRow');
+            const modeSelect = document.getElementById('streetViewMode');
+
+            if (!lockRow || !lockNote || !modeRow || !modeSelect) return;
+
+            if (!streetViewModeRequiresPasskey) {
+                streetViewModeUnlocked = true;
+                lockRow.style.display = 'none';
+                modeRow.style.display = 'flex';
+            } else if (streetViewModeUnlocked) {
+                lockRow.style.display = 'none';
+                modeRow.style.display = 'flex';
+            } else {
+                lockRow.style.display = 'flex';
+                modeRow.style.display = 'none';
+                lockNote.textContent = `Mode is locked to default (${PIPELINE_DEFAULT_STREETVIEW_MODE}).`;
+                streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
+            }
+
+            modeSelect.value = streetViewMode;
+        }
+
+        async function initStreetViewModeControls() {
+            try {
+                const response = await fetch('/api/streetview-mode/config', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                if (!response.ok) throw new Error('Config endpoint unavailable');
+                const data = await response.json();
+                streetViewModeRequiresPasskey = !!data.requiresPasskey;
+            } catch (e) {
+                streetViewModeRequiresPasskey = false;
+            }
+
+            if (!streetViewModeRequiresPasskey) {
+                streetViewModeUnlocked = true;
+                streetViewMode = localStorage.getItem('pipelineStreetViewMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
+            } else {
+                streetViewModeUnlocked = false;
+                streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
+            }
+
+            renderStreetViewModeControls();
+        }
+
+        async function unlockStreetViewMode() {
+            const passkey = prompt('Enter Street View mode passkey');
+            if (!passkey) return;
+
+            try {
+                const response = await fetch('/api/streetview-mode/unlock', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': authToken
+                    },
+                    body: JSON.stringify({ passkey })
+                });
+                if (!response.ok) {
+                    alert('Invalid passkey.');
+                    return;
+                }
+                streetViewModeUnlocked = true;
+                streetViewMode = localStorage.getItem('pipelineStreetViewMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
+                renderStreetViewModeControls();
+                loadData();
+            } catch (e) {
+                alert('Could not unlock mode controls.');
+            }
+        }
         
         function checkExistingAuth() {
-            // Load saved API key
-            const savedKey = localStorage.getItem('googleMapsApiKey');
-            if (savedKey) {
-                document.getElementById('googleApiKey').value = savedKey;
-                document.getElementById('apiKeyStatus').textContent = 'Key saved';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
-                googleApiKey = savedKey;
-            } else {
-                document.getElementById('apiKeyStatus').textContent = 'No key set';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
-            }
-            const modeSelect = document.getElementById('streetViewMode');
-            if (modeSelect) modeSelect.value = streetViewMode;
-            
             if (authToken) {
                 fetch('/api/pipeline', { headers: { 'X-Auth-Token': authToken } })
                     .then(r => {
@@ -878,7 +964,7 @@
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
-                            loadData();
+                            initStreetViewModeControls().finally(() => loadData());
                             checkCsvStatus();
                         }
                     });
@@ -887,18 +973,11 @@
             }
         }
         
-        function saveApiKey() {
-            const key = document.getElementById('googleApiKey').value.trim();
-            if (key) {
-                localStorage.setItem('googleMapsApiKey', key);
-                googleApiKey = key;
-                document.getElementById('apiKeyStatus').textContent = 'Key saved';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
-                loadData(); // Reload to show images
-            }
-        }
-
         function saveStreetViewMode() {
+            if (!streetViewModeUnlocked) {
+                renderStreetViewModeControls();
+                return;
+            }
             const mode = document.getElementById('streetViewMode').value;
             streetViewMode = mode === 'auto' ? 'auto' : 'on-demand';
             localStorage.setItem('pipelineStreetViewMode', streetViewMode);
@@ -929,7 +1008,7 @@
                     localStorage.setItem('pipelineAuth', authToken);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
-                    loadData();
+                    initStreetViewModeControls().finally(() => loadData());
                     checkCsvStatus();
                 } else {
                     document.getElementById('loginError').style.display = 'block';
@@ -1070,13 +1149,11 @@
             const encodedAddress = encodeURIComponent(fullAddress);
             
             // Google Street View Static API URL
-            const hasApiKey = googleApiKey && googleApiKey.length > 10;
             const canLoadStreetView = c.propertyAddress && authToken;
-            const keyParam = hasApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
             const streetViewUrl = canLoadStreetView
-                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}${keyParam}`
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}`
                 : '';
-            const autoLoadThisCard = streetViewMode === 'auto';
+            const autoLoadThisCard = getEffectiveStreetViewMode() === 'auto';
             
             // Google Maps URL
             const mapsUrl = c.propertyAddress

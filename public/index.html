@@ -1011,24 +1011,6 @@
             <div class="spinner"></div>
             <span id="scrapeMessage">Scraping properties from county websites... This may take a few minutes.</span>
         </div>
-        <div class="api-dropdown" id="apiDropdown">
-            <div class="api-dropdown-header" onclick="toggleApiDropdown()">
-                <div class="api-dropdown-title">
-                    <span>📷</span>
-                    <span>Street View Images</span>
-                    <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
-                </div>
-                <span class="api-dropdown-arrow">▼</span>
-            </div>
-            <div class="api-dropdown-content">
-                <div class="api-key-row">
-                    <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key">
-                    <button onclick="saveGoogleApiKey()">Save Key</button>
-                    <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
-                </div>
-            </div>
-        </div>
-
         <section class="search-section">
             <div class="search-header">
                 <div class="search-icon">
@@ -1146,7 +1128,6 @@
         const API_BASE = window.location.origin;
         let allProperties = [];
         let filteredProperties = [];
-        let googleApiKey = localStorage.getItem('googleApiKey') || '';
         let authToken = sessionStorage.getItem('authToken') || '';
         let scrapeCheckInterval = null;
         const streetViewCacheVersion = 'v2';
@@ -1270,11 +1251,7 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', async function() {
             registerStreetViewCache();
-            if (googleApiKey) {
-                document.getElementById('googleApiKey').value = googleApiKey;
-            }
-            updateGoogleApiStatus();
-            
+
             if (await checkExistingAuth()) {
                 checkDataStatus();
                 loadProperties();
@@ -1451,7 +1428,7 @@
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
                         </svg>
-                        <span>Add Google API key for photos</span>
+                        <span>No Street View available</span>
                     </div>`;
 
                 card.innerHTML = `
@@ -1525,8 +1502,7 @@
         function getStreetViewUrl(address, city, state, zip) {
             if (!address || !authToken) return null;
             const fullAddress = `${address}, ${city || ''}, ${state || ''} ${zip || ''}`;
-            const keyParam = googleApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
-            return `/api/streetview?token=${encodeURIComponent(authToken)}&size=600x400&location=${encodeURIComponent(fullAddress)}${keyParam}`;
+            return `/api/streetview?token=${encodeURIComponent(authToken)}&size=600x400&location=${encodeURIComponent(fullAddress)}`;
         }
 
         function getZillowUrl(address, city, state, zip) {
@@ -1551,33 +1527,6 @@
             if (!detailUrl) return '';
             const match = detailUrl.match(/PropertyId=(\d+)/i);
             return match ? match[1] : '';
-        }
-
-        // Google API key functions
-        function toggleApiDropdown() {
-            document.getElementById('apiDropdown').classList.toggle('open');
-        }
-
-        function saveGoogleApiKey() {
-            googleApiKey = document.getElementById('googleApiKey').value.trim();
-            if (googleApiKey) {
-                localStorage.setItem('googleApiKey', googleApiKey);
-            } else {
-                localStorage.removeItem('googleApiKey');
-            }
-            updateGoogleApiStatus();
-            loadProperties(); // Reload to show images
-        }
-
-        function updateGoogleApiStatus() {
-            const statusText = document.getElementById('apiKeyStatus');
-            if (googleApiKey) {
-                statusText.textContent = '✓ Key saved';
-                statusText.style.color = 'var(--accent)';
-            } else {
-                statusText.textContent = 'No key set';
-                statusText.style.color = 'var(--text-muted)';
-            }
         }
 
         // Export

@@ -13,6 +13,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const SITE_PASSWORD = process.env.SITE_PASSWORD || 'Benoro';
+const STREETVIEW_MODE_PASSKEY = process.env.STREETVIEW_MODE_PASSKEY || '';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -52,6 +53,21 @@ function isAuthorized(req) {
   const tokenQuery = req.query.token;
   return authHeader === SITE_PASSWORD || tokenQuery === SITE_PASSWORD;
 }
+
+app.get('/api/streetview-mode/config', checkAuth, (req, res) => {
+  res.json({ requiresPasskey: !!STREETVIEW_MODE_PASSKEY });
+});
+
+app.post('/api/streetview-mode/unlock', checkAuth, (req, res) => {
+  const passkey = (req.body?.passkey || '').toString();
+  if (!STREETVIEW_MODE_PASSKEY) {
+    return res.json({ success: true, unlocked: true, requiresPasskey: false });
+  }
+  if (passkey === STREETVIEW_MODE_PASSKEY) {
+    return res.json({ success: true, unlocked: true, requiresPasskey: true });
+  }
+  return res.status(403).json({ success: false, unlocked: false, error: 'Invalid passkey' });
+});
 
 async function trimStreetViewCache() {
   try {

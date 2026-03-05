@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -436,6 +436,28 @@
             font-size: 0.75rem;
             color: var(--benoro-text-light);
         }
+        .mode-lock-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            color: var(--benoro-text-muted);
+            font-size: 0.8rem;
+        }
+        .mode-lock-note {
+            font-size: 0.75rem;
+            color: var(--benoro-text-light);
+        }
+        .mode-unlock-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
         .load-photo-btn {
             border: 1px solid rgba(212,168,75,0.7);
             background: rgba(212,168,75,0.15);
@@ -514,19 +536,17 @@
             <div class="api-dropdown" id="apiDropdown">
                 <div class="api-dropdown-header" onclick="toggleApiDropdown()">
                     <div class="api-dropdown-title">
-                        <span>📷</span>
+                        <span>Photo</span>
                         <span>Street View Images</span>
-                        <span id="apiKeyStatus" style="font-size: 0.75rem; margin-left: 10px;"></span>
                     </div>
                     <span class="api-dropdown-arrow">▼</span>
                 </div>
                 <div class="api-dropdown-content">
-                    <div class="api-key-row">
-                        <input type="text" id="googleApiKey" placeholder="Enter Google Maps API Key" value="">
-                        <button onclick="saveApiKey()">Save Key</button>
-                        <a href="https://developers.google.com/maps/documentation/streetview/get-api-key" target="_blank" class="api-help-link">Get a free API key →</a>
+                    <div class="mode-lock-row" id="streetViewModeLockRow">
+                        <button class="mode-unlock-btn" onclick="unlockStreetViewMode()">Unlock Mode Change</button>
+                        <span class="mode-lock-note" id="streetViewModeLockNote">Mode is locked to default.</span>
                     </div>
-                    <div class="streetview-mode-row">
+                    <div class="streetview-mode-row" id="streetViewModeRow">
                         <label for="streetViewMode">Photo loading:</label>
                         <select id="streetViewMode" onchange="saveStreetViewMode()">
                             <option value="open-only">Auto-load OPEN only (recommended)</option>
@@ -541,7 +561,7 @@
             <!-- CSV Upload -->
             <div class="upload-section" id="uploadSection">
                 <h3>Upload Camden County Lis Pendens CSV</h3>
-                <p>Export from the <a href="#" style="color: var(--benoro-gold);">Camden County Clerk's document search</a> — select Lis Pendens filings for your target month</p>
+                <p>Export from the <a href="#" style="color: var(--benoro-gold);">Camden County Clerk's document search</a> - select Lis Pendens filings for your target month</p>
                 <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
                 <label for="csvUpload" class="upload-label">Choose CSV File</label>
                 <div class="csv-status" id="csvStatus">Checking for existing data...</div>
@@ -628,14 +648,94 @@
 
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
-        let googleApiKey = localStorage.getItem('googleMapsApiKey') || '';
-        let streetViewMode = localStorage.getItem('camdenStreetViewMode') || 'open-only';
+        const CAMDEN_DEFAULT_STREETVIEW_MODE = 'open-only';
+        let streetViewMode = CAMDEN_DEFAULT_STREETVIEW_MODE;
+        let streetViewModeUnlocked = false;
+        let streetViewModeRequiresPasskey = true;
         const streetViewCacheVersion = 'v2';
         let camdenSheriffAddressKeys = null;
         let camdenSheriffAddressKeysPromise = null;
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
+        }
+
+        function getEffectiveStreetViewMode() {
+            return streetViewModeUnlocked ? streetViewMode : CAMDEN_DEFAULT_STREETVIEW_MODE;
+        }
+
+        function renderStreetViewModeControls() {
+            const lockRow = document.getElementById('streetViewModeLockRow');
+            const lockNote = document.getElementById('streetViewModeLockNote');
+            const modeRow = document.getElementById('streetViewModeRow');
+            const modeSelect = document.getElementById('streetViewMode');
+
+            if (!lockRow || !lockNote || !modeRow || !modeSelect) return;
+
+            if (!streetViewModeRequiresPasskey) {
+                streetViewModeUnlocked = true;
+                lockRow.style.display = 'none';
+                modeRow.style.display = 'flex';
+            } else if (streetViewModeUnlocked) {
+                lockRow.style.display = 'none';
+                modeRow.style.display = 'flex';
+            } else {
+                lockRow.style.display = 'flex';
+                modeRow.style.display = 'none';
+                lockNote.textContent = `Mode is locked to default (${CAMDEN_DEFAULT_STREETVIEW_MODE}).`;
+                streetViewMode = CAMDEN_DEFAULT_STREETVIEW_MODE;
+            }
+
+            modeSelect.value = streetViewMode;
+        }
+
+        async function initStreetViewModeControls() {
+            try {
+                const response = await fetch('/api/streetview-mode/config', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                if (!response.ok) throw new Error('Config endpoint unavailable');
+                const data = await response.json();
+                streetViewModeRequiresPasskey = !!data.requiresPasskey;
+            } catch (e) {
+                streetViewModeRequiresPasskey = false;
+            }
+
+            if (!streetViewModeRequiresPasskey) {
+                streetViewModeUnlocked = true;
+                streetViewMode = localStorage.getItem('camdenStreetViewMode') || CAMDEN_DEFAULT_STREETVIEW_MODE;
+            } else {
+                streetViewModeUnlocked = false;
+                streetViewMode = CAMDEN_DEFAULT_STREETVIEW_MODE;
+            }
+
+            renderStreetViewModeControls();
+        }
+
+        async function unlockStreetViewMode() {
+            const passkey = prompt('Enter Street View mode passkey');
+            if (!passkey) return;
+
+            try {
+                const response = await fetch('/api/streetview-mode/unlock', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': authToken
+                    },
+                    body: JSON.stringify({ passkey })
+                });
+                if (!response.ok) {
+                    alert('Invalid passkey.');
+                    return;
+                }
+                streetViewModeUnlocked = true;
+                streetViewMode = localStorage.getItem('camdenStreetViewMode') || CAMDEN_DEFAULT_STREETVIEW_MODE;
+                renderStreetViewModeControls();
+                loadData();
+            } catch (e) {
+                alert('Could not unlock mode controls.');
+            }
         }
 
         async function registerStreetViewCache() {
@@ -649,18 +749,6 @@
         }
 
         function checkExistingAuth() {
-            const savedKey = localStorage.getItem('googleMapsApiKey');
-            if (savedKey) {
-                document.getElementById('googleApiKey').value = savedKey;
-                document.getElementById('apiKeyStatus').textContent = '✓ Key saved';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
-                googleApiKey = savedKey;
-            } else {
-                document.getElementById('apiKeyStatus').textContent = 'No key set';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-text-muted)';
-            }
-            const modeSelect = document.getElementById('streetViewMode');
-            if (modeSelect) modeSelect.value = streetViewMode;
             if (authToken) {
                 fetch('/api/camden', { headers: { 'X-Auth-Token': authToken } })
                     .then(r => {
@@ -670,7 +758,7 @@
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
-                            loadData();
+                            initStreetViewModeControls().finally(() => loadData());
                             checkCsvStatus();
                         }
                     });
@@ -679,18 +767,11 @@
             }
         }
 
-        function saveApiKey() {
-            const key = document.getElementById('googleApiKey').value.trim();
-            if (key) {
-                localStorage.setItem('googleMapsApiKey', key);
-                googleApiKey = key;
-                document.getElementById('apiKeyStatus').textContent = '✓ Key saved!';
-                document.getElementById('apiKeyStatus').style.color = 'var(--benoro-success)';
-                loadData();
-            }
-        }
-
         function saveStreetViewMode() {
+            if (!streetViewModeUnlocked) {
+                renderStreetViewModeControls();
+                return;
+            }
             const mode = document.getElementById('streetViewMode').value;
             streetViewMode = (mode === 'auto' || mode === 'open-only' || mode === 'on-demand') ? mode : 'open-only';
             localStorage.setItem('camdenStreetViewMode', streetViewMode);
@@ -752,7 +833,7 @@
                     localStorage.setItem('pipelineAuth', authToken);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
-                    loadData();
+                    initStreetViewModeControls().finally(() => loadData());
                     checkCsvStatus();
                 } else {
                     document.getElementById('loginError').style.display = 'block';
@@ -766,14 +847,14 @@
                 const data = await r.json();
                 const el = document.getElementById('csvStatus');
                 if (data.exists) {
-                    el.textContent = `✓ Data loaded: ${data.caseCount} cases (updated ${getTimeAgo(new Date(data.lastModified))})`;
+                    el.textContent = `Data loaded: ${data.caseCount} cases (updated ${getTimeAgo(new Date(data.lastModified))})`;
                     el.className = 'csv-status has-file';
                     if (data.enrichmentSummary) {
                         document.getElementById('enrichmentInfo').textContent =
                             `Enrichment: ${data.enrichmentSummary.addressesFound} addresses found (${data.enrichmentSummary.hitRate} hit rate)`;
                     }
                 } else {
-                    el.textContent = '⚠ No data uploaded — please upload a Camden County Lis Pendens CSV';
+                    el.textContent = 'No data uploaded - please upload a Camden County Lis Pendens CSV';
                     el.className = 'csv-status no-file';
                 }
             } catch (e) { console.error(e); }
@@ -783,7 +864,7 @@
             const file = event.target.files[0];
             if (!file) return;
             const el = document.getElementById('csvStatus');
-            el.textContent = '⏳ Uploading and parsing...';
+            el.textContent = 'Uploading and parsing...';
             try {
                 const csvData = await file.text();
                 const r = await fetch('/api/camden/upload-csv', {
@@ -793,15 +874,15 @@
                 });
                 const result = await r.json();
                 if (result.success) {
-                    el.textContent = `✓ Uploaded! ${result.uniqueCases} unique cases from ${result.totalRows} rows. Click "Resolve Addresses" to enrich.`;
+                    el.textContent = `Uploaded: ${result.uniqueCases} unique cases from ${result.totalRows} rows. Click "Resolve Addresses" to enrich.`;
                     el.className = 'csv-status has-file';
                     loadData();
                 } else {
-                    el.textContent = '❌ Error: ' + result.error;
+                    el.textContent = 'Error: ' + result.error;
                     el.className = 'csv-status no-file';
                 }
             } catch (e) {
-                el.textContent = '❌ Upload failed: ' + e.message;
+                el.textContent = 'Upload failed: ' + e.message;
                 el.className = 'csv-status no-file';
             }
         }
@@ -1134,30 +1215,29 @@
 
             const fullAddress = hasAddr ? `${address}, ${town}, NJ` : '';
             const encodedAddress = encodeURIComponent(fullAddress);
-            const hasApiKey = googleApiKey && googleApiKey.length > 10;
             const canLoadStreetView = hasAddr && authToken;
-            const keyParam = hasApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
 
             const streetViewUrl = canLoadStreetView
-                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x180&location=${encodedAddress}${keyParam}`
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x180&location=${encodedAddress}`
                 : '';
             const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
-            const autoLoadThisCard = streetViewMode === 'auto' || (streetViewMode === 'open-only' && c.courtStatus === 'OPEN');
+            const effectiveMode = getEffectiveStreetViewMode();
+            const autoLoadThisCard = effectiveMode === 'auto' || (effectiveMode === 'open-only' && c.courtStatus === 'OPEN');
 
             let streetViewHtml;
             if (!hasAddr) {
                 streetViewHtml = `<div class="no-image" style="cursor:pointer;flex-direction:column;gap:8px;" onclick="manualAddress('${c.instrumentNumber}')">
-                    📍 Address not yet resolved<br>
+                    Address not yet resolved<br>
                     <span style="font-size:0.7rem;color:var(--benoro-gold);">Click to enter manually</span>
                 </div>`;
             } else if (!canLoadStreetView) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
-                    <div style="text-align:center;">🗺️ Click for Maps<br><small>Sign in to load street photos</small></div>
+                    <div style="text-align:center;">Click for Maps<br><small>Sign in to load street photos</small></div>
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
                     <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Load Photo</button>
-                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">${streetViewMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
+                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">${effectiveMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
                 </div>`;
             } else {
                 streetViewHtml = renderStreetViewAnchor(streetViewUrl, mapsUrl, false);
@@ -1189,7 +1269,7 @@
                 courtHtml = `
                     <div style="margin-top:12px;padding:10px;background:${cs.bg};border-radius:6px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
-                            <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' — ' + c.courtDisposition : ''}</span>
+                            <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' - ' + c.courtDisposition : ''}</span>
                         </div>
                         ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
                         ${c.courtDispositionDate ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
@@ -1229,7 +1309,7 @@
                                 ${isRepeatAddress ? `<span class="repeat-flag" title="This address appears in ${repeatCount} cases"><span class="repeat-dot"></span>Repeat x${repeatCount}</span>` : ''}
                             </div>
                         </div>
-                        <div class="property-location">${town}, NJ — Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' — ' + c.buildingDesc : ''}</div>
+                        <div class="property-location">${town}, NJ - Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' - ' + c.buildingDesc : ''}</div>
 
                         ${valueRow}
 
@@ -1272,7 +1352,7 @@
         async function enrichData(testMode = false) {
             const enrichBtn = document.getElementById('enrichBtn');
             enrichBtn.disabled = true;
-            enrichBtn.innerHTML = testMode ? '⏳ Testing...' : '⏳ Resolving addresses... (~45 sec)';
+            enrichBtn.innerHTML = testMode ? 'Testing...' : 'Resolving addresses... (~45 sec)';
 
             try {
                 const r = await fetch('/api/camden/enrich', {
@@ -1330,7 +1410,7 @@ async function checkCourtStatus(testMode = false) {
     modal.innerHTML = `
         <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
             <div style="background:#1e293b;border-radius:12px;padding:24px;max-width:560px;width:90%;color:#e2e8f0;font-family:system-ui,sans-serif;border:1px solid #334155">
-                <h2 style="margin:0 0 12px;color:#38bdf8;font-size:1.2rem">⚖️ Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
+                <h2 style="margin:0 0 12px;color:#38bdf8;font-size:1.2rem">Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
                 <p style="color:#94a3b8;font-size:.9rem;margin:0 0 16px;line-height:1.5">
                     This runs directly in your browser to avoid CAPTCHA blocks. Three steps:
                 </p>
@@ -1340,7 +1420,7 @@ async function checkCourtStatus(testMode = false) {
                         <div>
                             <b style="color:#e2e8f0">Log into NJ Courts</b><br>
                             <a href="https://portal.njcourts.gov" target="_blank" style="color:#38bdf8;font-size:.85rem">portal.njcourts.gov</a>
-                            <span style="color:#64748b;font-size:.85rem"> → Find a Case → Search Civil and Foreclosure Cases</span>
+                            <span style="color:#64748b;font-size:.85rem"> -> Find a Case -> Search Civil and Foreclosure Cases</span>
                         </div>
                     </div>
                     <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
@@ -1359,7 +1439,7 @@ async function checkCourtStatus(testMode = false) {
                 </div>
                 <div style="position:relative">
                     <pre id="courtCmd" style="background:#0a0f1a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;color:#38bdf8;margin:0;white-space:pre-wrap;word-break:break-all;cursor:pointer" onclick="copyCourtCmd()" title="Click to copy">${command}</pre>
-                    <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">📋 Copy</button>
+                    <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">Copy</button>
                 </div>
                 <p style="color:#64748b;font-size:.78rem;margin:8px 0 0;text-align:center">
                     A progress panel will appear on the NJ Courts page. Results save automatically.
@@ -1377,7 +1457,7 @@ function copyCourtCmd() {
     const text = document.getElementById('courtCmd').textContent;
     navigator.clipboard.writeText(text).then(() => {
         const btn = document.querySelector('#courtStatusModal button[onclick="copyCourtCmd()"]');
-        if (btn) { btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy', 2000); }
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 2000); }
     });
 }
         function exportCSV() { window.open('/api/camden/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
@@ -1424,3 +1504,5 @@ async function manualAddress(instrumentNumber) {
     </script>
 </body>
 </html>
+
+
