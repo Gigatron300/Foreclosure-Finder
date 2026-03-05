@@ -1071,8 +1071,10 @@
             
             // Google Street View Static API URL
             const hasApiKey = googleApiKey && googleApiKey.length > 10;
-            const streetViewUrl = (c.propertyAddress && hasApiKey && authToken)
-                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}&key=${encodeURIComponent(googleApiKey)}`
+            const canLoadStreetView = c.propertyAddress && authToken;
+            const keyParam = hasApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
+            const streetViewUrl = canLoadStreetView
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}${keyParam}`
                 : '';
             const autoLoadThisCard = streetViewMode === 'auto';
             
@@ -1084,9 +1086,9 @@
             let streetViewHtml;
             if (!c.propertyAddress) {
                 streetViewHtml = '<div class="no-image">No address available</div>';
-            } else if (!hasApiKey) {
+            } else if (!canLoadStreetView) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
-                    <div style="text-align:center;">Click to view on Google Maps<br><small>Add API key above for street photos</small></div>
+                    <div style="text-align:center;">Click to view on Google Maps<br><small>Sign in to load street photos</small></div>
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">

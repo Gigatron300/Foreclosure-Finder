@@ -1135,9 +1135,11 @@
             const fullAddress = hasAddr ? `${address}, ${town}, NJ` : '';
             const encodedAddress = encodeURIComponent(fullAddress);
             const hasApiKey = googleApiKey && googleApiKey.length > 10;
+            const canLoadStreetView = hasAddr && authToken;
+            const keyParam = hasApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
 
-            const streetViewUrl = (hasAddr && hasApiKey && authToken)
-                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x180&location=${encodedAddress}&key=${encodeURIComponent(googleApiKey)}`
+            const streetViewUrl = canLoadStreetView
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x180&location=${encodedAddress}${keyParam}`
                 : '';
             const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
             const autoLoadThisCard = streetViewMode === 'auto' || (streetViewMode === 'open-only' && c.courtStatus === 'OPEN');
@@ -1148,9 +1150,9 @@
                     📍 Address not yet resolved<br>
                     <span style="font-size:0.7rem;color:var(--benoro-gold);">Click to enter manually</span>
                 </div>`;
-            } else if (!hasApiKey) {
+            } else if (!canLoadStreetView) {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
-                    <div style="text-align:center;">🗺️ Click for Maps<br><small>Add API key for photos</small></div>
+                    <div style="text-align:center;">🗺️ Click for Maps<br><small>Sign in to load street photos</small></div>
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
@@ -1160,7 +1162,7 @@
             } else {
                 streetViewHtml = renderStreetViewAnchor(streetViewUrl, mapsUrl, false);
             }
-            const retryButtonHtml = (hasAddr && hasApiKey)
+            const retryButtonHtml = canLoadStreetView
                 ? `<button class="retry-photo-btn" onclick="retryStreetViewFromCard(this, '${streetViewUrl}', '${mapsUrl}')">Retry</button>`
                 : '';
 

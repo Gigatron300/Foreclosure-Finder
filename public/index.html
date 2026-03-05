@@ -1523,9 +1523,10 @@
         }
 
         function getStreetViewUrl(address, city, state, zip) {
-            if (!googleApiKey || !address || !authToken) return null;
+            if (!address || !authToken) return null;
             const fullAddress = `${address}, ${city || ''}, ${state || ''} ${zip || ''}`;
-            return `/api/streetview?token=${encodeURIComponent(authToken)}&size=600x400&location=${encodeURIComponent(fullAddress)}&key=${encodeURIComponent(googleApiKey)}`;
+            const keyParam = googleApiKey ? `&key=${encodeURIComponent(googleApiKey)}` : '';
+            return `/api/streetview?token=${encodeURIComponent(authToken)}&size=600x400&location=${encodeURIComponent(fullAddress)}${keyParam}`;
         }
 
         function getZillowUrl(address, city, state, zip) {
