@@ -1071,8 +1071,8 @@
             
             // Google Street View Static API URL
             const hasApiKey = googleApiKey && googleApiKey.length > 10;
-            const streetViewUrl = (c.propertyAddress && hasApiKey)
-                ? `https://maps.googleapis.com/maps/api/streetview?size=400x200&location=${encodedAddress}&key=${googleApiKey}`
+            const streetViewUrl = (c.propertyAddress && hasApiKey && authToken)
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}&key=${encodeURIComponent(googleApiKey)}`
                 : '';
             const autoLoadThisCard = streetViewMode === 'auto';
             

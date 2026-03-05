@@ -1523,9 +1523,9 @@
         }
 
         function getStreetViewUrl(address, city, state, zip) {
-            if (!googleApiKey || !address) return null;
+            if (!googleApiKey || !address || !authToken) return null;
             const fullAddress = `${address}, ${city || ''}, ${state || ''} ${zip || ''}`;
-            return `https://maps.googleapis.com/maps/api/streetview?size=600x400&location=${encodeURIComponent(fullAddress)}&key=${googleApiKey}`;
+            return `/api/streetview?token=${encodeURIComponent(authToken)}&size=600x400&location=${encodeURIComponent(fullAddress)}&key=${encodeURIComponent(googleApiKey)}`;
         }
 
         function getZillowUrl(address, city, state, zip) {

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs').promises;
+const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { parseCamdenCSV, enrichCamdenCases, scoreCamdenCase } = require('./scrapers/camden-enrichment');
@@ -22,9 +23,16 @@ const PIPELINE_DATA_FILE = path.join(CONFIG.outputDir, PIPELINE_FILE);
 const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
 const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
 const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
+const STREETVIEW_CACHE_DIR = path.join(CONFIG.outputDir, 'streetview-cache');
+const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '4000', 10);
+const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(30 * 24 * 60 * 60 * 1000), 10);
 
 async function ensureDataDir() {
   try { await fs.mkdir(CONFIG.outputDir, { recursive: true }); } catch (e) {}
+}
+
+async function ensureStreetViewCacheDir() {
+  try { await fs.mkdir(STREETVIEW_CACHE_DIR, { recursive: true }); } catch (e) {}
 }
 
 app.post('/api/auth', (req, res) => {
@@ -38,6 +46,91 @@ const checkAuth = (req, res, next) => {
   if (authHeader === SITE_PASSWORD) next();
   else res.status(401).json({ error: 'Unauthorized' });
 };
+
+function isAuthorized(req) {
+  const authHeader = req.headers['x-auth-token'];
+  const tokenQuery = req.query.token;
+  return authHeader === SITE_PASSWORD || tokenQuery === SITE_PASSWORD;
+}
+
+async function trimStreetViewCache() {
+  try {
+    const files = await fs.readdir(STREETVIEW_CACHE_DIR);
+    if (files.length <= STREETVIEW_CACHE_MAX_FILES) return;
+
+    const stats = await Promise.all(files.map(async (name) => {
+      const filePath = path.join(STREETVIEW_CACHE_DIR, name);
+      const st = await fs.stat(filePath);
+      return { name, filePath, mtimeMs: st.mtimeMs };
+    }));
+
+    stats.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const toDelete = stats.slice(0, stats.length - STREETVIEW_CACHE_MAX_FILES);
+    await Promise.all(toDelete.map((f) => fs.unlink(f.filePath).catch(() => {})));
+  } catch (e) {
+    // best effort
+  }
+}
+
+app.get('/api/streetview', async (req, res) => {
+  try {
+    if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const location = (req.query.location || '').toString().trim();
+    const size = (req.query.size || '600x400').toString().trim();
+    const heading = (req.query.heading || '').toString().trim();
+    const pitch = (req.query.pitch || '').toString().trim();
+    const fov = (req.query.fov || '').toString().trim();
+    const key = (req.query.key || process.env.GOOGLE_MAPS_API_KEY || '').toString().trim();
+
+    if (!location) return res.status(400).json({ error: 'Missing location' });
+    if (!key) return res.status(400).json({ error: 'Missing Google Maps API key' });
+    if (!/^\d{2,4}x\d{2,4}$/.test(size)) return res.status(400).json({ error: 'Invalid size format' });
+
+    const params = new URLSearchParams({ size, location, key });
+    if (heading) params.set('heading', heading);
+    if (pitch) params.set('pitch', pitch);
+    if (fov) params.set('fov', fov);
+
+    const cacheIdentity = `${size}|${location}|${heading}|${pitch}|${fov}`;
+    const cacheKey = crypto.createHash('sha1').update(cacheIdentity).digest('hex');
+    const cacheFile = path.join(STREETVIEW_CACHE_DIR, `${cacheKey}.jpg`);
+
+    await ensureDataDir();
+    await ensureStreetViewCacheDir();
+
+    try {
+      const st = await fs.stat(cacheFile);
+      const ageMs = Date.now() - st.mtimeMs;
+      if (ageMs <= STREETVIEW_CACHE_TTL_MS) {
+        const bytes = await fs.readFile(cacheFile);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        return res.send(bytes);
+      }
+    } catch (e) {
+      // cache miss/expired
+    }
+
+    const googleUrl = `https://maps.googleapis.com/maps/api/streetview?${params.toString()}`;
+    const upstream = await fetch(googleUrl);
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => '');
+      return res.status(upstream.status).send(text || 'Street View request failed');
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    await fs.writeFile(cacheFile, buffer);
+    trimStreetViewCache();
+
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Street View proxy error:', error.message);
+    return res.status(500).json({ error: 'Street View proxy failed' });
+  }
+});
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

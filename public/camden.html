@@ -1136,8 +1136,8 @@
             const encodedAddress = encodeURIComponent(fullAddress);
             const hasApiKey = googleApiKey && googleApiKey.length > 10;
 
-            const streetViewUrl = (hasAddr && hasApiKey)
-                ? `https://maps.googleapis.com/maps/api/streetview?size=400x180&location=${encodedAddress}&key=${googleApiKey}`
+            const streetViewUrl = (hasAddr && hasApiKey && authToken)
+                ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x180&location=${encodedAddress}&key=${encodeURIComponent(googleApiKey)}`
                 : '';
             const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
             const autoLoadThisCard = streetViewMode === 'auto' || (streetViewMode === 'open-only' && c.courtStatus === 'OPEN');
