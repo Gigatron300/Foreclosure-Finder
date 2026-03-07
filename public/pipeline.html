@@ -256,11 +256,39 @@
         .property-info {
             padding: 20px;
         }
+        .address-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
         .property-address {
             font-size: 1.1rem;
             font-weight: 600;
             margin-bottom: 5px;
             color: #f3f4f6;
+        }
+        .repeat-flag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            margin-bottom: 4px;
+            border-radius: 999px;
+            border: 1px solid rgba(212,168,75,0.45);
+            background: rgba(212,168,75,0.12);
+            color: #f5d89b;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+        .repeat-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #e0bc6a;
+            box-shadow: 0 0 0 2px rgba(224,188,106,0.2);
         }
         .property-location {
             color: #9ca3af;
@@ -1143,6 +1171,7 @@
             const state = c.propertyState || 'PA';
             const zip = c.propertyZip || '';
             const location = [city, state, zip].filter(Boolean).join(', ');
+            const isRepeatDefendant = !!c.repeatDefendant && (c.priorCaseCount || 0) > 0;
             
             // Build Street View URL
             const fullAddress = `${address}, ${city}, ${state} ${zip}`;
@@ -1191,7 +1220,10 @@
                         <span class="days-badge ${sweetSpotClass}">${monthsOpen} mo${sweetSpotIcon}</span>
                     </div>
                     <div class="property-info">
-                        <div class="property-address">${address}</div>
+                        <div class="address-row">
+                            <div class="property-address">${address}</div>
+                            ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
+                        </div>
                         <div class="property-location">${location}</div>
                         
                         <div class="property-details">

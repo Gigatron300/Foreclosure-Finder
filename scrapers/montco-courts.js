@@ -2,6 +2,7 @@
 // Montgomery County Courts scraper - WAIT FOR FULL PAGE LOAD
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
+const path = require('path');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -38,7 +39,7 @@ const CONFIG = {
   sweetSpotMaxMonths: 18,
 
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
-  csvPath: './data/montco-cases.csv'
+  csvPath: path.join(process.env.DATA_DIR || './data', 'montco-cases.csv')
 };
 
 async function launchBrowser() {
@@ -96,6 +97,14 @@ function parseCSVLine(line) {
   }
   values.push(current.trim());
   return values;
+}
+
+function normalizeDefendantName(name) {
+  return (name || '')
+    .toUpperCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parseDate(dateStr) {
@@ -327,6 +336,19 @@ async function scrapeMontgomeryCourts(options = {}) {
   }
 
   const now = new Date();
+  const allCaseHistoryByDefendant = new Map();
+  for (const c of allCases) {
+    const key = normalizeDefendantName(c.defendant);
+    if (!key) continue;
+    const history = allCaseHistoryByDefendant.get(key) || [];
+    history.push({
+      caseNumber: c.caseNumber,
+      commencedDate: c.commencedDate || '',
+      status: c.status || '',
+      hasJudgement: !!c.hasJudgement
+    });
+    allCaseHistoryByDefendant.set(key, history);
+  }
 
   const minDaysOld = CONFIG.minMonthsOld * 30;
   const maxDaysOld = CONFIG.maxMonthsOld * 30;
@@ -612,6 +634,9 @@ async function scrapeMontgomeryCourts(options = {}) {
         inSweetSpot: c.inSweetSpot,
         plaintiff: c.plaintiff,
         defendant: c.defendant,
+        repeatDefendant: false,
+        priorCaseCount: 0,
+        priorCases: [],
         propertyAddress: c.propertyAddress,
         propertyCity: c.propertyCity,
         propertyState: c.propertyState,
@@ -651,6 +676,23 @@ async function scrapeMontgomeryCourts(options = {}) {
 
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${(err.message || '').slice(0, 60)})`);
+    }
+  }
+
+  for (const r of results) {
+    const key = normalizeDefendantName(r.defendant);
+    if (!key) continue;
+    const history = allCaseHistoryByDefendant.get(key) || [];
+    const priorCases = history.filter(h => h.caseNumber !== r.caseNumber);
+    if (priorCases.length > 0) {
+      priorCases.sort((a, b) => {
+        const ad = new Date(a.commencedDate || 0).getTime();
+        const bd = new Date(b.commencedDate || 0).getTime();
+        return bd - ad;
+      });
+      r.repeatDefendant = true;
+      r.priorCaseCount = priorCases.length;
+      r.priorCases = priorCases.slice(0, 5);
     }
   }
 

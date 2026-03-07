@@ -3,10 +3,11 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const APP_CONFIG = require('./config');
 const { scrapeMontgomeryCourts } = require('./scrapers/montco-courts');
 const { enrichCases, estimateEquity } = require('./scrapers/property-enrichment');
 
-const OUTPUT_DIR = './data';
+const OUTPUT_DIR = APP_CONFIG.outputDir;
 const OUTPUT_FILE = 'pipeline.json';
 
 // Configuration

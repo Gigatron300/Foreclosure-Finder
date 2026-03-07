@@ -1,7 +1,9 @@
 // Configuration for the foreclosure scraper
 
+const DATA_DIR = process.env.DATA_DIR || './data';
+
 const CONFIG = {
-  outputDir: './data',
+  outputDir: DATA_DIR,
   outputFile: 'properties.json',
   
   // Timing settings
