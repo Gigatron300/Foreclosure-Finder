@@ -5,7 +5,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
-const { parseCamdenCSV, enrichCamdenCases, scoreCamdenCase } = require('./scrapers/camden-enrichment');
+const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase } = require('./scrapers/camden-enrichment');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
 // Court status is now checked via browser-based bookmarklet (court-status-bookmarklet.js)
 
@@ -34,6 +34,11 @@ async function ensureDataDir() {
 
 async function ensureStreetViewCacheDir() {
   try { await fs.mkdir(STREETVIEW_CACHE_DIR, { recursive: true }); } catch (e) {}
+}
+
+function toCSVField(value) {
+  const str = value == null ? '' : String(value);
+  return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
 app.post('/api/auth', (req, res) => {
@@ -826,15 +831,23 @@ app.get('/api/camden/export/csv', (req, res, next) => {
       if (!line.trim()) continue;
 
       if (i === 0) {
-        const cols = line.split(',');
+        const cols = parseCSVLine(line);
         const baseCols = cols.slice(0, 15);
-        outputLines.push(baseCols.join(',') + ',Court Case Status,Docket Number');
+        outputLines.push(
+          [...baseCols, 'Court Case Status', 'Docket Number']
+            .map(toCSVField)
+            .join(',')
+        );
       } else {
-        const cols = line.split(',');
+        const cols = parseCSVLine(line);
         const instrNum = (cols[12] || '').trim();
         const baseCols = cols.slice(0, 15);
         const courtInfo = caseData[instrNum] || {};
-        outputLines.push(baseCols.join(',') + ',' + (courtInfo.status || '') + ',' + (courtInfo.docket || ''));
+        outputLines.push(
+          [...baseCols, courtInfo.status || '', courtInfo.docket || '']
+            .map(toCSVField)
+            .join(',')
+        );
       }
     }
 

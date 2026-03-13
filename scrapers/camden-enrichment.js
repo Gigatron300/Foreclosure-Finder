@@ -668,6 +668,7 @@ async function enrichCamdenCases(data, options = {}) {
 }
 
 module.exports = {
+  parseCSVLine,
   parseCamdenCSV,
   enrichCamdenCases,
   scoreCamdenCase,
