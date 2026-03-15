@@ -573,8 +573,14 @@ app.get('/api/camden', checkAuth, async (req, res) => {
     if (req.query.defendantType) {
       cases = cases.filter(c => c.defendantType === req.query.defendantType.toUpperCase());
     }
-    if (req.query.town) {
-      cases = cases.filter(c => (c.town || '').toLowerCase().includes(req.query.town.toLowerCase()));
+    const townFilters = []
+      .concat(req.query.town || [])
+      .flatMap(value => String(value).split(','))
+      .map(value => value.trim().toUpperCase())
+      .filter(Boolean);
+    if (townFilters.length) {
+      const townSet = new Set(townFilters);
+      cases = cases.filter(c => townSet.has(String(c.town || '').trim().toUpperCase()));
     }
     if (req.query.hasAddress === 'true') {
       cases = cases.filter(c => c.propertyAddress);

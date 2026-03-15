@@ -128,7 +128,14 @@
         .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .actions-bar { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; align-items: center; }
+        .actions-bar {
+            display: grid;
+            grid-template-columns: 220px 170px repeat(5, minmax(0, 1fr));
+            gap: 12px;
+            margin-bottom: 25px;
+            align-items: flex-end;
+            overflow: visible;
+        }
 
         .stats-summary {
             background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.1);
@@ -145,6 +152,109 @@
             background: var(--benoro-card); color: var(--benoro-text); font-size: 0.8rem;
         }
         .filter-row select:focus, .filter-row input:focus { outline: none; border-color: var(--benoro-gold); }
+        .filter-dropdown-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+            min-width: 0;
+        }
+        .filter-dropdown-label {
+            color: var(--benoro-text-muted);
+            font-size: 0.68rem;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+        }
+        .filter-dropdown-button {
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--benoro-border);
+            background: var(--benoro-card);
+            color: var(--benoro-text);
+            font-size: 0.8rem;
+            line-height: 1.2;
+            text-align: left;
+            cursor: pointer;
+            white-space: nowrap;
+            width: 100%;
+            height: 40px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .filter-dropdown-button:focus {
+            outline: none;
+            border-color: var(--benoro-gold);
+        }
+        .filter-dropdown-button::after {
+            content: '▼';
+            float: right;
+            font-size: 0.65rem;
+            color: var(--benoro-text-light);
+        }
+        .filter-dropdown-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            width: 280px;
+            max-height: 320px;
+            overflow: hidden;
+            border: 1px solid rgba(184,134,11,0.25);
+            border-radius: 8px;
+            background: #17364d;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+            z-index: 30;
+            display: none;
+        }
+        .filter-dropdown-panel.open {
+            display: block;
+        }
+        .filter-dropdown-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .filter-dropdown-action {
+            border: none;
+            background: transparent;
+            color: var(--benoro-gold);
+            font-size: 0.72rem;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            cursor: pointer;
+            padding: 0;
+        }
+        .filter-dropdown-options {
+            max-height: 240px;
+            overflow-y: auto;
+            padding: 6px 0;
+        }
+        .filter-dropdown-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            color: var(--benoro-text);
+            cursor: pointer;
+        }
+        .filter-dropdown-option:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        .filter-dropdown-option input {
+            accent-color: var(--benoro-gold);
+        }
+        .filter-dropdown-empty {
+            padding: 12px;
+            color: var(--benoro-text-light);
+            font-size: 0.8rem;
+        }
+        .filter-dropdown-help {
+            color: var(--benoro-text-light);
+            font-size: 0.72rem;
+            display: none;
+        }
 
         .results-header {
             display: flex; justify-content: space-between; align-items: center;
@@ -488,7 +598,17 @@
             background: rgba(30,41,59,0.9);
         }
 
+        @media (max-width: 1200px) {
+            .actions-bar {
+                grid-template-columns: repeat(2, minmax(180px, 1fr));
+                align-items: stretch;
+            }
+        }
+
         @media (max-width: 768px) {
+            .actions-bar {
+                grid-template-columns: 1fr;
+            }
             .cases-grid { grid-template-columns: 1fr; }
             .property-details { grid-template-columns: 1fr; }
         }
@@ -586,16 +706,16 @@
                     <div class="stat-label">With Address</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="individualCount">-</div>
-                    <div class="stat-label">Individual Defendants</div>
-                </div>
-                <div class="stat-item">
                     <div class="stat-value" id="openCount" style="color: var(--benoro-success);">-</div>
                     <div class="stat-label">Open Cases</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-value" id="closedCount" style="color: #f87171;">-</div>
                     <div class="stat-label">Closed/Dismissed</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="recheckCount" style="color: var(--benoro-warning);">-</div>
+                    <div class="stat-label">Recheck</div>
                 </div>
             </div>
 
@@ -604,36 +724,82 @@
                 <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
                 <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
-                <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
-                    <option value="sellerScoreDesc">Sort: Seller Score (High to Low)</option>
-                    <option value="sellerScoreAsc">Sort: Seller Score (Low to High)</option>
-                    <option value="daysSinceFiling">Sort: Days Since Filing</option>
-                    <option value="assessedValue">Sort: Assessed Value</option>
-                    <option value="town">Sort: Town</option>
-                </select>
+                <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="sortByButton">Sort</label>
+                    <input type="hidden" id="sortBy" value="sellerScoreDesc">
+                    <button type="button" id="sortByButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('sortByDropdown', event)">Seller Score (High to Low)</button>
+                    <div id="sortByDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="sellerScoreDesc" checked onchange="setSingleFilterValue('sortBy', 'Seller Score (High to Low)', true)"> <span>Seller Score (High to Low)</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="sellerScoreAsc" onchange="setSingleFilterValue('sortBy', 'Seller Score (Low to High)', true)"> <span>Seller Score (Low to High)</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="daysSinceFilingAsc" onchange="setSingleFilterValue('sortBy', 'Most Recent Filing', true)"> <span>Most Recent Filing</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="daysSinceFilingDesc" onchange="setSingleFilterValue('sortBy', 'Oldest Filing', true)"> <span>Oldest Filing</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="assessedValue" onchange="setSingleFilterValue('sortBy', 'Assessed Value', true)"> <span>Assessed Value</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="town" onchange="setSingleFilterValue('sortBy', 'Town', true)"> <span>Town</span></label>
+                        </div>
+                    </div>
+                </div>
 
-                <select id="typeFilter" onchange="loadData()">
-                    <option value="">All Types</option>
-                    <option value="MORTGAGE">Mortgage Only</option>
-                    <option value="TAX_LIEN">Tax Lien Only</option>
-                    <option value="GOVERNMENT">Government Only</option>
-                </select>
+                <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="typeFilterButton">Type</label>
+                    <button type="button" id="typeFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('typeFilterDropdown', event)">All Types</button>
+                    <div id="typeFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('typeFilterOptions', true, 'typeFilterButton', 'All Types', TYPE_FILTER_LABELS)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('typeFilterOptions', false, 'typeFilterButton', 'All Types', TYPE_FILTER_LABELS)">Clear</button>
+                        </div>
+                        <div id="typeFilterOptions" class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="checkbox" value="MORTGAGE" onchange="handleMultiFilterChange('typeFilterOptions', 'typeFilterButton', 'All Types', TYPE_FILTER_LABELS)"> <span>Mortgage Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="TAX_LIEN" onchange="handleMultiFilterChange('typeFilterOptions', 'typeFilterButton', 'All Types', TYPE_FILTER_LABELS)"> <span>Tax Lien Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="GOVERNMENT" onchange="handleMultiFilterChange('typeFilterOptions', 'typeFilterButton', 'All Types', TYPE_FILTER_LABELS)"> <span>Government Only</span></label>
+                        </div>
+                    </div>
+                </div>
 
-                <select id="courtStatusFilter" onchange="loadData()">
-                    <option value="">All Court Status</option>
-                    <option value="OPEN">Open Cases Only</option>
-                    <option value="CLOSED">Closed/Dismissed Only</option>
-                    <option value="RECHECK">Needs Recheck</option>
-                    <option value="NOT_CHECKED">Not Yet Checked</option>
-                </select>
+                <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="courtStatusFilterButton">Court Status</label>
+                    <button type="button" id="courtStatusFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('courtStatusFilterDropdown', event)">All Court Status</button>
+                    <div id="courtStatusFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('courtStatusFilterOptions', true, 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('courtStatusFilterOptions', false, 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)">Clear</button>
+                        </div>
+                        <div id="courtStatusFilterOptions" class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="checkbox" value="OPEN" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Open Cases Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="CLOSED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Closed/Dismissed Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="RECHECK" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Needs Recheck</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="NOT_CHECKED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Not Yet Checked</span></label>
+                        </div>
+                    </div>
+                </div>
 
-                <select id="addressFilter" onchange="loadData()">
-                    <option value="">All Cases</option>
-                    <option value="true">With Address</option>
-                    <option value="false">Missing Address</option>
-                </select>
+                <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="addressFilterButton">Address</label>
+                    <input type="hidden" id="addressFilter" value="">
+                    <button type="button" id="addressFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('addressFilterDropdown', event)">All Cases</button>
+                    <div id="addressFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="radio" name="addressFilterOption" value="" checked onchange="setSingleFilterValue('addressFilter', 'All Cases')"> <span>All Cases</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="addressFilterOption" value="true" onchange="setSingleFilterValue('addressFilter', 'With Address')"> <span>With Address</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="addressFilterOption" value="false" onchange="setSingleFilterValue('addressFilter', 'Missing Address')"> <span>Missing Address</span></label>
+                        </div>
+                    </div>
+                </div>
 
-                <input type="text" id="townFilter" placeholder="Filter by town..." onkeyup="loadData()" style="width: 150px;">
+                <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="townFilterButton">Town</label>
+                    <button type="button" id="townFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('townFilterDropdown', event)">All towns</button>
+                    <div id="townFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllTownFilters(true)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllTownFilters(false)">Clear</button>
+                        </div>
+                        <div id="townFilterOptions" class="filter-dropdown-options">
+                            <div class="filter-dropdown-empty">Loading towns...</div>
+                        </div>
+                    </div>
+                    <div class="filter-dropdown-help">Select one or more towns</div>
+                </div>
             </div>
 
             <div class="results-header">
@@ -655,6 +821,17 @@
         const streetViewCacheVersion = 'v2';
         let camdenSheriffAddressKeys = null;
         let camdenSheriffAddressKeysPromise = null;
+        const TYPE_FILTER_LABELS = {
+            MORTGAGE: 'Mortgage Only',
+            TAX_LIEN: 'Tax Lien Only',
+            GOVERNMENT: 'Government Only'
+        };
+        const COURT_STATUS_LABELS = {
+            OPEN: 'Open Cases Only',
+            CLOSED: 'Closed/Dismissed Only',
+            RECHECK: 'Needs Recheck',
+            NOT_CHECKED: 'Not Yet Checked'
+        };
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
@@ -784,6 +961,105 @@
             return `${streetViewUrl}${sep}cb=${Date.now()}`;
         }
 
+        function getSelectedCheckboxValues(containerId) {
+            return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`))
+                .map(input => input.value)
+                .filter(Boolean);
+        }
+
+        function getSelectedTownValues() {
+            return getSelectedCheckboxValues('townFilterOptions');
+        }
+
+        function toggleFilterDropdown(id, event) {
+            if (event) event.stopPropagation();
+            const dropdown = document.getElementById(id);
+            if (!dropdown) return;
+            const isOpen = dropdown.classList.contains('open');
+            closeAllFilterDropdowns();
+            if (!isOpen) {
+                dropdown.classList.add('open');
+            }
+        }
+
+        function closeAllFilterDropdowns() {
+            document.querySelectorAll('.filter-dropdown-panel.open').forEach(dropdown => {
+                dropdown.classList.remove('open');
+            });
+        }
+
+        function setSingleFilterValue(filterId, buttonLabel, closeAfter = true) {
+            const hiddenInput = document.getElementById(filterId);
+            const button = document.getElementById(`${filterId}Button`);
+            const selected = document.querySelector(`input[name="${filterId}Option"]:checked`);
+            if (!hiddenInput || !button || !selected) return;
+
+            hiddenInput.value = selected.value;
+            button.textContent = buttonLabel;
+
+            if (closeAfter) {
+                closeAllFilterDropdowns();
+            }
+            loadData();
+        }
+
+        function updateMultiFilterButtonText(buttonId, selectedValues = [], defaultLabel, labels = null) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+
+            if (!selectedValues.length) {
+                button.textContent = defaultLabel;
+            } else if (selectedValues.length === 1) {
+                button.textContent = labels?.[selectedValues[0]] || selectedValues[0];
+            } else {
+                button.textContent = `${selectedValues.length} selected`;
+            }
+        }
+
+        function setAllMultiFilterOptions(containerId, checked, buttonId, defaultLabel, labels = null) {
+            const inputs = document.querySelectorAll(`#${containerId} input[type="checkbox"]`);
+            inputs.forEach(input => {
+                input.checked = checked;
+            });
+            updateMultiFilterButtonText(buttonId, getSelectedCheckboxValues(containerId), defaultLabel, labels);
+            loadData();
+        }
+
+        function setAllTownFilters(checked) {
+            setAllMultiFilterOptions('townFilterOptions', checked, 'townFilterButton', 'All towns');
+        }
+
+        function handleMultiFilterChange(containerId, buttonId, defaultLabel, labels = null) {
+            updateMultiFilterButtonText(buttonId, getSelectedCheckboxValues(containerId), defaultLabel, labels);
+            loadData();
+        }
+
+        function populateTownFilter(summary, selectedTowns = []) {
+            const townFilterOptions = document.getElementById('townFilterOptions');
+            if (!townFilterOptions) return;
+
+            const byTown = summary && summary.byTown ? summary.byTown : {};
+            const towns = Object.keys(byTown).sort((a, b) => a.localeCompare(b));
+
+            if (!towns.length) {
+                townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
+                updateMultiFilterButtonText('townFilterButton', [], 'All towns');
+                return;
+            }
+
+            const selectedSet = new Set(selectedTowns.map(town => String(town).toUpperCase().trim()));
+            townFilterOptions.innerHTML = towns.map(town => {
+                const count = byTown[town];
+                const checked = selectedSet.has(String(town).toUpperCase().trim()) ? ' checked' : '';
+                return `<label class="filter-dropdown-option"><input type="checkbox" value="${town}"${checked} onchange="handleTownFilterChange()"><span>${town} (${count})</span></label>`;
+            }).join('');
+            updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns');
+        }
+
+        function handleTownFilterChange() {
+            handleMultiFilterChange('townFilterOptions', 'townFilterButton', 'All towns');
+        }
+
         function buildStreetViewErrorHtml(streetViewUrl, mapsUrl) {
             return `<div class="no-image" style="flex-direction:column;gap:8px;">
                 <button class="load-photo-btn" onclick="retryStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Retry Photo</button>
@@ -890,24 +1166,28 @@
         async function loadData() {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
-            const typeFilter = document.getElementById('typeFilter').value;
             const addressFilter = document.getElementById('addressFilter').value;
-            const townFilter = document.getElementById('townFilter').value.toLowerCase();
-            const courtStatusFilter = document.getElementById('courtStatusFilter').value;
+            const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
+            const selectedTowns = getSelectedTownValues();
+            const selectedCourtStatuses = getSelectedCheckboxValues('courtStatusFilterOptions');
 
             try {
                 let apiSortBy = sortBy;
                 let sortOrder = 'desc';
                 if (sortBy === 'sellerScoreDesc') apiSortBy = 'sellerScore';
                 else if (sortBy === 'sellerScoreAsc') { apiSortBy = 'sellerScore'; sortOrder = 'asc'; }
+                else if (sortBy === 'daysSinceFilingAsc') { apiSortBy = 'daysSinceFiling'; sortOrder = 'asc'; }
+                else if (sortBy === 'daysSinceFilingDesc') { apiSortBy = 'daysSinceFiling'; sortOrder = 'desc'; }
 
                 let url = `/api/camden?sortBy=${apiSortBy}&sortOrder=${sortOrder}`;
-                if (typeFilter) url += `&plaintiffType=${typeFilter}`;
                 if (addressFilter) url += `&hasAddress=${addressFilter}`;
-                if (townFilter) url += `&town=${encodeURIComponent(townFilter)}`;
+                selectedTowns.forEach(town => {
+                    url += `&town=${encodeURIComponent(town)}`;
+                });
 
                 const r = await fetch(url, { headers: { 'X-Auth-Token': authToken } });
                 const data = await r.json();
+                populateTownFilter(data.summary, selectedTowns);
 
                 if (data.lastUpdated) {
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
@@ -916,15 +1196,17 @@
                 const allCases = data.cases || [];
                 let cases = allCases;
 
-                // Court status filter (client-side since it's a new field)
-                if (courtStatusFilter === 'OPEN') {
-                    cases = cases.filter(c => c.courtStatus === 'OPEN');
-                } else if (courtStatusFilter === 'CLOSED') {
-                    cases = cases.filter(c => c.courtStatus === 'CLOSED');
-                } else if (courtStatusFilter === 'RECHECK') {
-                    cases = cases.filter(c => c.courtStatus === 'RECHECK');
-                } else if (courtStatusFilter === 'NOT_CHECKED') {
-                    cases = cases.filter(c => !c.courtStatus);
+                if (selectedTypes.length) {
+                    const typeSet = new Set(selectedTypes);
+                    cases = cases.filter(c => typeSet.has(c.plaintiffType));
+                }
+
+                if (selectedCourtStatuses.length) {
+                    const statusSet = new Set(selectedCourtStatuses);
+                    cases = cases.filter(c => {
+                        const normalizedStatus = c.courtStatus || 'NOT_CHECKED';
+                        return statusSet.has(normalizedStatus);
+                    });
                 }
 
                 // Stats (from unfiltered data for totals)
@@ -932,9 +1214,9 @@
                 document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
                 document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
-                document.getElementById('individualCount').textContent = cases.filter(c => c.defendantType === 'INDIVIDUAL').length;
                 document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
                 document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
+                document.getElementById('recheckCount').textContent = allCases.filter(c => c.courtStatus === 'RECHECK').length || '-';
                 document.getElementById('caseCount').textContent = `(${cases.length})`;
 
                 if (cases.length === 0) {
@@ -963,6 +1245,14 @@
                 grid.innerHTML = `<div class="no-results"><p>Error: ${e.message}</p></div>`;
             }
         }
+
+        document.addEventListener('click', (event) => {
+            const anyGroup = document.querySelector('.filter-dropdown-group');
+            if (!anyGroup) return;
+            if (!event.target.closest('.filter-dropdown-group')) {
+                closeAllFilterDropdowns();
+            }
+        });
         function formatSaleDate(d) {
             if (!d) return '';
             const s = String(d);
