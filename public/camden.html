@@ -1680,16 +1680,41 @@
             }
         }
 
-        function resetButtons() {
-            document.getElementById('enrichBtn').disabled = false;
-            document.getElementById('enrichBtn').innerHTML = 'Resolve Addresses';
+function resetButtons() {
+    document.getElementById('enrichBtn').disabled = false;
+    document.getElementById('enrichBtn').innerHTML = 'Resolve Addresses';
+}
+
+function buildCourtStatusCommand(testMode = false, mode = 'default', resume = false) {
+    const serverUrl = window.location.origin;
+    let scriptUrl = `${serverUrl}/api/camden/court-status-script?token=${encodeURIComponent(authToken)}${testMode ? '&test=true' : ''}`;
+    if (mode !== 'default') {
+        scriptUrl += `&mode=${encodeURIComponent(mode)}&resume=${resume ? 'true' : 'false'}`;
+    }
+    return `fetch('${scriptUrl}').then(r=>r.text()).then(eval)`;
+}
+
+function setCourtCmdMode(mode = 'default', resume = false, testMode = false) {
+    const cmdEl = document.getElementById('courtCmd');
+    const modeEl = document.getElementById('courtCmdMode');
+    if (!cmdEl) return;
+    cmdEl.textContent = buildCourtStatusCommand(testMode, mode, resume);
+    cmdEl.dataset.mode = mode;
+    cmdEl.dataset.resume = resume ? 'true' : 'false';
+
+    if (modeEl) {
+        if (mode === 'refresh' && resume) {
+            modeEl.textContent = 'Mode: Continue saved OPEN refresh batch';
+        } else if (mode === 'refresh') {
+            modeEl.textContent = 'Mode: Start new OPEN refresh batch';
+        } else {
+            modeEl.textContent = 'Mode: Standard full checker';
         }
+    }
+}
 
 async function checkCourtStatus(testMode = false) {
-    // Get the server URL for the script
-    const serverUrl = window.location.origin;
-    const scriptUrl = `${serverUrl}/api/camden/court-status-script?token=${encodeURIComponent(authToken)}${testMode ? '&test=true' : ''}`;
-    const command = `fetch('${scriptUrl}').then(r=>r.text()).then(eval)`;
+    const command = buildCourtStatusCommand(testMode, 'refresh', false);
 
     // Show instruction modal
     const existing = document.getElementById('courtStatusModal');
@@ -1702,8 +1727,14 @@ async function checkCourtStatus(testMode = false) {
             <div style="background:#1e293b;border-radius:12px;padding:24px;max-width:560px;width:90%;color:#e2e8f0;font-family:system-ui,sans-serif;border:1px solid #334155">
                 <h2 style="margin:0 0 12px;color:#38bdf8;font-size:1.2rem">Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
                 <p style="color:#94a3b8;font-size:.9rem;margin:0 0 16px;line-height:1.5">
-                    This runs directly in your browser to avoid CAPTCHA blocks. Three steps:
+                    This runs directly in your browser to avoid CAPTCHA blocks. Pick a batch mode, then follow the steps:
                 </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px">
+                    <button onclick="setCourtCmdMode('refresh', false, ${testMode ? 'true' : 'false'})" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">New Batch</button>
+                    <button onclick="setCourtCmdMode('refresh', true, ${testMode ? 'true' : 'false'})" style="background:#0f766e;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">Continue Batch</button>
+                    <button onclick="setCourtCmdMode('default', false, ${testMode ? 'true' : 'false'})" style="background:#334155;color:#cbd5e1;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">Standard Run</button>
+                </div>
+                <div id="courtCmdMode" style="color:#93c5fd;font-size:.8rem;margin:0 0 12px">Mode: Start new OPEN refresh batch</div>
                 <div style="margin-bottom:16px">
                     <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
                         <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">1</span>
@@ -1732,7 +1763,7 @@ async function checkCourtStatus(testMode = false) {
                     <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">Copy</button>
                 </div>
                 <p style="color:#64748b;font-size:.78rem;margin:8px 0 0;text-align:center">
-                    A progress panel will appear on the NJ Courts page. Results save automatically.
+                    A progress panel will appear on the NJ Courts page. Results save automatically, and refresh batches can be resumed later.
                 </p>
                 <div style="text-align:right;margin-top:12px">
                     <button onclick="this.closest('#courtStatusModal').remove()" style="background:#334155;color:#94a3b8;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:.85rem">Close</button>
@@ -1741,6 +1772,7 @@ async function checkCourtStatus(testMode = false) {
         </div>
     `;
     document.body.appendChild(modal);
+    setCourtCmdMode('refresh', false, testMode);
 }
 
 function copyCourtCmd() {

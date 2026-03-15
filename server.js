@@ -24,6 +24,7 @@ const PIPELINE_DATA_FILE = path.join(CONFIG.outputDir, PIPELINE_FILE);
 const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
 const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
 const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
+const CAMDEN_COURT_REFRESH_BATCH_FILE = path.join(CONFIG.outputDir, 'camden-court-refresh-batch.json');
 const STREETVIEW_CACHE_DIR = path.join(CONFIG.outputDir, 'streetview-cache');
 const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '4000', 10);
 const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(30 * 24 * 60 * 60 * 1000), 10);
@@ -39,6 +40,142 @@ async function ensureStreetViewCacheDir() {
 function toCSVField(value) {
   const str = value == null ? '' : String(value);
   return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+async function readJsonFileSafe(filePath, fallback = null) {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    return JSON.parse(content);
+  } catch (error) {
+    if (error.code === 'ENOENT') return fallback;
+    throw error;
+  }
+}
+
+function mapCaseForCourtStatus(c) {
+  return {
+    instrumentNumber: c.instrumentNumber,
+    defendant: c.primaryDefendant,
+    allDefendants: (c.allDefendants || []).filter(n => n),
+    plaintiff: c.primaryPlaintiff || '',
+    filingDate: c.filingDateISO || c.filingDate || '',
+    courtStatus: c.courtStatus || '',
+    courtDocketNumber: c.courtDocketNumber || ''
+  };
+}
+
+function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
+  let cases = (data.cases || []).filter(c => {
+    const existingStatus = (c.courtStatus || '').toUpperCase();
+    if (existingStatus === 'CLOSED') return false;
+    if (!c.primaryDefendant) return false;
+    return true;
+  }).map(mapCaseForCourtStatus);
+
+  if (testMode) {
+    cases = cases.slice(0, 10);
+  }
+  return cases;
+}
+
+function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
+  let cases = (data.cases || []).filter(c => {
+    const existingStatus = (c.courtStatus || '').toUpperCase();
+    if (existingStatus !== 'OPEN') return false;
+    if (!c.courtDocketNumber) return false;
+    return true;
+  }).map(mapCaseForCourtStatus);
+
+  if (testMode) {
+    cases = cases.slice(0, 10);
+  }
+  return cases;
+}
+
+function getRemainingBatchCases(batch) {
+  const completed = batch && batch.completed ? batch.completed : {};
+  return (batch?.queue || []).filter(c => !completed[c.instrumentNumber]);
+}
+
+function getNextBatchInstrumentNumber(batch) {
+  const nextCase = getRemainingBatchCases(batch)[0];
+  return nextCase ? nextCase.instrumentNumber : null;
+}
+
+function summarizeCourtRefreshBatch(batch) {
+  if (!batch) return null;
+  const remainingCases = getRemainingBatchCases(batch);
+  return {
+    batchId: batch.batchId,
+    status: batch.status,
+    mode: batch.mode,
+    testMode: !!batch.testMode,
+    total: batch.total || (batch.queue || []).length,
+    completedCount: Object.keys(batch.completed || {}).length,
+    remainingCount: remainingCases.length,
+    currentInstrumentNumber: batch.currentInstrumentNumber || getNextBatchInstrumentNumber(batch),
+    startedAt: batch.startedAt || null,
+    updatedAt: batch.updatedAt || null,
+    completedAt: batch.completedAt || null
+  };
+}
+
+async function loadCourtRefreshBatch() {
+  return readJsonFileSafe(CAMDEN_COURT_REFRESH_BATCH_FILE, null);
+}
+
+async function saveCourtRefreshBatch(batch) {
+  await ensureDataDir();
+  await fs.writeFile(CAMDEN_COURT_REFRESH_BATCH_FILE, JSON.stringify(batch, null, 2));
+}
+
+function buildCourtRefreshBatch(cases, { testMode = false } = {}) {
+  const now = new Date().toISOString();
+  return {
+    batchId: crypto.randomUUID(),
+    mode: 'open-refresh',
+    testMode,
+    status: 'running',
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+    total: cases.length,
+    queue: cases,
+    completed: {},
+    currentInstrumentNumber: cases[0] ? cases[0].instrumentNumber : null
+  };
+}
+
+async function markCourtRefreshBatchProgress(batchId, instrumentNumber, status = '') {
+  const batch = await loadCourtRefreshBatch();
+  if (!batch || batch.status !== 'running' || batch.batchId !== batchId) {
+    return null;
+  }
+
+  const hasCase = (batch.queue || []).some(c => c.instrumentNumber === instrumentNumber);
+  if (!hasCase) {
+    return batch;
+  }
+
+  const now = new Date().toISOString();
+  batch.completed = batch.completed || {};
+  batch.completed[instrumentNumber] = {
+    at: now,
+    status: status || ''
+  };
+  batch.updatedAt = now;
+
+  const remaining = getRemainingBatchCases(batch);
+  if (remaining.length === 0) {
+    batch.status = 'completed';
+    batch.completedAt = now;
+    batch.currentInstrumentNumber = null;
+  } else {
+    batch.currentInstrumentNumber = remaining[0].instrumentNumber;
+  }
+
+  await saveCourtRefreshBatch(batch);
+  return batch;
 }
 
 app.post('/api/auth', (req, res) => {
@@ -675,6 +812,79 @@ app.get('/api/camden/enrich/status', checkAuth, (req, res) => {
 // app.get('/api/camden/court-status-script' ...) endpoint
 // ============================================================
 
+// Refresh-mode batch loader for OPEN cases with docket numbers.
+app.get('/api/camden/court-status-cases', async (req, res, next) => {
+  const mode = (req.query.mode || 'default').toString().toLowerCase();
+  if (mode !== 'refresh') return next();
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const token = req.query.token || req.headers['x-auth-token'];
+  if (token !== SITE_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const testMode = req.query.test === 'true';
+    const resume = req.query.resume === 'true';
+
+    let batch;
+    if (resume) {
+      batch = await loadCourtRefreshBatch();
+      if (!batch || batch.status !== 'running') {
+        return res.json({
+          mode,
+          resume,
+          batch: null,
+          cases: [],
+          message: 'No active refresh batch to resume.'
+        });
+      }
+      if (!!batch.testMode !== testMode) {
+        return res.status(409).json({
+          error: `Active refresh batch mode mismatch. Existing batch is ${batch.testMode ? 'test' : 'full'} mode.`
+        });
+      }
+    } else {
+      batch = buildCourtRefreshBatch(getCamdenOpenRefreshCases(data, { testMode }), { testMode });
+      await saveCourtRefreshBatch(batch);
+    }
+
+    const cases = getRemainingBatchCases(batch);
+    console.log(`Serving ${cases.length} Camden refresh cases (${resume ? 'resume' : 'new batch'}${testMode ? ', test mode' : ''})`);
+    res.json({
+      mode,
+      resume,
+      batch: summarizeCourtRefreshBatch(batch),
+      cases
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      res.json({ mode, resume: req.query.resume === 'true', batch: null, cases: [] });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
+app.get('/api/camden/court-status-refresh/state', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const token = req.query.token || req.headers['x-auth-token'];
+  if (token !== SITE_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const batch = await loadCourtRefreshBatch();
+    res.json({ batch: summarizeCourtRefreshBatch(batch) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Serve cases that need court status lookup
 app.get('/api/camden/court-status-cases', async (req, res) => {
   // Allow CORS for bookmarklet running on NJ Courts domain
@@ -730,6 +940,8 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
 app.get('/api/camden/court-status-script', (req, res) => {
   const token = req.query.token || '';
   const testMode = req.query.test === 'true';
+  const runMode = (req.query.mode || 'default').toString().toLowerCase();
+  const resumeMode = req.query.resume === 'true';
   const serverUrl = `https://${req.get('host')}`;
 
   const fs2 = require('fs');
@@ -743,6 +955,8 @@ app.get('/api/camden/court-status-script', (req, res) => {
   script = script.replace(/__SERVER_URL__/g, serverUrl);
   script = script.replace(/__AUTH_TOKEN__/g, token);
   script = script.replace(/__TEST_MODE__/g, testMode.toString());
+  script = script.replace(/__RUN_MODE__/g, JSON.stringify(runMode));
+  script = script.replace(/__RESUME_MODE__/g, resumeMode ? 'true' : 'false');
 
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -802,6 +1016,33 @@ app.post('/api/camden/court-status-update', cors({
 });
 
 // Export Camden CSV — preserves original format, adds court status columns
+app.options('/api/camden/court-status-refresh/advance', cors());
+app.post('/api/camden/court-status-refresh/advance', cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'X-Auth-Token']
+}), (req, res, next) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token === SITE_PASSWORD) next();
+  else res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
+  try {
+    const { batchId, instrumentNumber, status } = req.body || {};
+    if (!batchId || !instrumentNumber) {
+      return res.status(400).json({ error: 'batchId and instrumentNumber required' });
+    }
+
+    const batch = await markCourtRefreshBatchProgress(batchId, instrumentNumber, status);
+    if (!batch) {
+      return res.status(404).json({ error: 'Active batch not found or already completed' });
+    }
+
+    res.json({ success: true, batch: summarizeCourtRefreshBatch(batch) });
+  } catch (error) {
+    console.error('Court refresh advance error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/camden/export/csv', (req, res, next) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token === SITE_PASSWORD) next();

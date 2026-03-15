@@ -26,6 +26,8 @@
   const SERVER = '__SERVER_URL__';
   const TOKEN  = '__AUTH_TOKEN__';
   const TEST   = __TEST_MODE__;
+  const RUN_MODE = __RUN_MODE__;
+  const RESUME_MODE = __RESUME_MODE__;
   const STORAGE_KEY = 'csc_state_v2';
 
   // ── Helpers ──────────────────────────────────────────────────
@@ -139,6 +141,36 @@
         body: JSON.stringify({ instrumentNumber, courtData })
       });
     } catch (e) { console.error('Save failed:', e); }
+  }
+
+  async function advanceRefreshBatch(instrumentNumber, status) {
+    if (RUN_MODE !== 'refresh') return null;
+    const currentState = getState();
+    const batchId = currentState && currentState.batch ? currentState.batch.batchId : '';
+    if (!batchId) return null;
+
+    try {
+      const resp = await fetch(SERVER + '/api/camden/court-status-refresh/advance', {
+        method: 'POST',
+        headers: { 'X-Auth-Token': TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId, instrumentNumber, status })
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      return data && data.batch ? data.batch : null;
+    } catch (e) {
+      console.error('Advance batch failed:', e);
+      return null;
+    }
+  }
+
+  async function saveAndAdvance(instrumentNumber, courtData, currentState) {
+    await saveToServer(instrumentNumber, courtData);
+    const batch = await advanceRefreshBatch(instrumentNumber, courtData && courtData.courtStatus ? courtData.courtStatus : '');
+    if (batch && currentState) {
+      currentState.batch = batch;
+      setState(currentState);
+    }
   }
 
   // ── Detect current page ──────────────────────────────────────
@@ -267,23 +299,31 @@
     showPanel({ done:0, total:0, open:0, closed:0, notFound:0, errors:0, cases:[], currentIndex:0 });
     setStatus('📡 Fetching cases from server...');
 
-    let cases;
+    let payload;
     try {
-      const url = SERVER + '/api/camden/court-status-cases?token=' + TOKEN + (TEST ? '&test=true' : '');
+      let url = SERVER + '/api/camden/court-status-cases?token=' + TOKEN + (TEST ? '&test=true' : '');
+      if (RUN_MODE === 'refresh') {
+        url += '&mode=refresh&resume=' + (RESUME_MODE ? 'true' : 'false');
+      }
       const resp = await fetch(url);
-      cases = await resp.json();
+      payload = await resp.json();
     } catch (e) {
       setStatus('❌ Failed to fetch cases: ' + e.message);
       return;
     }
 
+    const cases = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.cases) ? payload.cases : []);
+    const batch = payload && !Array.isArray(payload) ? payload.batch || null : null;
+
     if (!cases || !cases.length) {
-      setStatus('✅ No cases need court status lookup.');
+      const msg = payload && payload.message ? payload.message : '✅ No cases need court status lookup.';
+      setStatus(msg);
       return;
     }
 
     state = {
       cases: cases,
+      batch,
       currentIndex: 0,
       step: 'FILL_AND_WAIT',
       done: 0, total: cases.length,
@@ -307,7 +347,7 @@
     const parsed = parseName(c.defendant);
 
     if (!parsed || !parsed.last) {
-      await saveToServer(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse name' });
+      await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse name' }, state);
       state.errors++; state.done++; state.currentIndex++;
       if (state.currentIndex < state.cases.length) {
         state.step = 'FILL_AND_WAIT';
@@ -357,10 +397,10 @@
     if (page === 'SEARCH') {
       // No results returned (search came back empty)
       setStatus('No results found for this name');
-      await saveToServer(c.instrumentNumber, {
+      await saveAndAdvance(c.instrumentNumber, {
         courtStatus: 'NOT_FOUND',
         courtStatusNote: buildStatusNote('RECHECK_REASON:NO_RESULTS', 'name search returned no rows')
-      });
+      }, state);
       state.notFound++; state.done++; state.currentIndex++;
       await wait(500);
 
@@ -388,10 +428,10 @@
       const match = findBestMatch(rows, c.plaintiff, c.filingDate);
 
       if (!match) {
-        await saveToServer(c.instrumentNumber, {
+        await saveAndAdvance(c.instrumentNumber, {
           courtStatus: 'NOT_FOUND',
           courtStatusNote: buildStatusNote('RECHECK_REASON:NO_CONFIDENT_MATCH', `${rows.length} results scanned`)
-        });
+        }, state);
         state.notFound++; state.done++; state.currentIndex++;
 
         if (state.currentIndex < state.cases.length) {
@@ -436,7 +476,7 @@
 
       if (!clicked) {
         // Couldn't click - mark error and move on
-        await saveToServer(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not click docket link' });
+        await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not click docket link' }, state);
         state.errors++; state.done++; state.currentIndex++;
         state.step = state.currentIndex < state.cases.length ? 'FILL_AND_WAIT' : 'DONE';
         setState(state);
@@ -465,7 +505,7 @@
         if (detectPage() !== 'JACKET') {
           // Give up on this one
           const c = state.cases[state.currentIndex];
-          await saveToServer(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Jacket page did not load' });
+          await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Jacket page did not load' }, state);
           state.errors++; state.done++; state.currentIndex++;
           state.step = state.currentIndex < state.cases.length ? 'FILL_AND_WAIT' : 'DONE';
           setState(state);
@@ -482,7 +522,7 @@
 
     setStatus(`${status === 'OPEN' ? '🟢' : status === 'CLOSED' ? '🔴' : '⚪'} ${jacket.docketNumber}: ${jacket.caseStatus} / ${jacket.caseDisposition}`);
 
-    await saveToServer(c.instrumentNumber, {
+    await saveAndAdvance(c.instrumentNumber, {
       courtStatus: status,
       courtStatusRaw: jacket.caseStatus,
       courtDisposition: jacket.caseDisposition,
@@ -493,7 +533,7 @@
       courtDispositionDate: jacket.dispositionDate,
       courtMatchScore: match.matchScore || 0,
       courtStatusNote: buildStatusNote('MATCHED', `score ${match.matchScore || 0}`)
-    });
+    }, state);
 
     if (status === 'OPEN') state.open++;
     else if (status === 'CLOSED') state.closed++;
