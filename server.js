@@ -184,6 +184,17 @@ app.post('/api/auth', (req, res) => {
   else res.status(401).json({ success: false, error: 'Invalid password' });
 });
 
+// Serve NJ Courts credentials for Tampermonkey auto-login after CAPTCHA recovery
+app.get('/api/nj-courts-creds', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const token = req.query.token || req.headers['x-auth-token'];
+  if (token !== SITE_PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
+  const user = process.env.NJ_COURTS_USER;
+  const pass = process.env.NJ_COURTS_PASS;
+  if (!user || !pass) return res.status(500).json({ error: 'NJ_COURTS_USER and NJ_COURTS_PASS env vars not set' });
+  res.json({ user, pass });
+});
+
 const checkAuth = (req, res, next) => {
   const authHeader = req.headers['x-auth-token'];
   if (authHeader === SITE_PASSWORD) next();
