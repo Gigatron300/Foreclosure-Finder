@@ -130,13 +130,23 @@
 
         .actions-bar {
             display: grid;
-            grid-template-columns: 220px 170px repeat(5, minmax(0, 1fr));
+            grid-template-columns: 170px 170px repeat(5, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 25px;
             align-items: flex-end;
             overflow: visible;
         }
-
+        .actions-secondary {
+            display: flex;
+            justify-content: flex-start;
+            margin-top: -13px;
+            margin-bottom: 25px;
+        }
+        .actions-bar > .btn {
+            width: 100%;
+            justify-content: center;
+            white-space: nowrap;
+        }
         .stats-summary {
             background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.1);
             border-radius: 2px; padding: 25px 35px; margin-bottom: 30px;
@@ -721,7 +731,7 @@
 
             <!-- Actions -->
             <div class="actions-bar">
-                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
+                <button class="btn btn-outline" onclick="exportOpenAddresses()">Export Addresses</button>
                 <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
                 <div class="filter-dropdown-group">
@@ -798,8 +808,11 @@
                             <div class="filter-dropdown-empty">Loading towns...</div>
                         </div>
                     </div>
-                    <div class="filter-dropdown-help">Select one or more towns</div>
                 </div>
+            </div>
+
+            <div class="actions-secondary">
+                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
             </div>
 
             <div class="results-header">
@@ -1702,15 +1715,15 @@ function setCourtCmdMode(mode = 'default', resume = false, testMode = false) {
     cmdEl.dataset.mode = mode;
     cmdEl.dataset.resume = resume ? 'true' : 'false';
 
-    if (modeEl) {
-        if (mode === 'refresh' && resume) {
-            modeEl.textContent = 'Mode: Continue saved OPEN refresh batch';
-        } else if (mode === 'refresh') {
-            modeEl.textContent = 'Mode: Start new OPEN refresh batch';
-        } else {
-            modeEl.textContent = 'Mode: Standard full checker';
+        if (modeEl) {
+            if (mode === 'refresh' && resume) {
+                modeEl.textContent = 'Mode: Continue saved OPEN refresh batch';
+            } else if (mode === 'refresh') {
+                modeEl.textContent = 'Mode: Start new OPEN refresh batch';
+            } else {
+                modeEl.textContent = 'Mode: New cases with no saved status';
+            }
         }
-    }
 }
 
 async function checkCourtStatus(testMode = false) {
@@ -1732,7 +1745,7 @@ async function checkCourtStatus(testMode = false) {
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px">
                     <button onclick="setCourtCmdMode('refresh', false, ${testMode ? 'true' : 'false'})" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">New Batch</button>
                     <button onclick="setCourtCmdMode('refresh', true, ${testMode ? 'true' : 'false'})" style="background:#0f766e;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">Continue Batch</button>
-                    <button onclick="setCourtCmdMode('default', false, ${testMode ? 'true' : 'false'})" style="background:#334155;color:#cbd5e1;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">Standard Run</button>
+                    <button onclick="setCourtCmdMode('default', false, ${testMode ? 'true' : 'false'})" style="background:#334155;color:#cbd5e1;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">New Cases</button>
                 </div>
                 <div id="courtCmdMode" style="color:#93c5fd;font-size:.8rem;margin:0 0 12px">Mode: Start new OPEN refresh batch</div>
                 <div style="margin-bottom:16px">
@@ -1783,6 +1796,7 @@ function copyCourtCmd() {
     });
 }
         function exportCSV() { window.open('/api/camden/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
+        function exportOpenAddresses() { window.open('/api/camden/export/open-addresses?token=' + encodeURIComponent(authToken), '_blank'); }
 
         function truncate(str, len) {
             if (!str) return '';

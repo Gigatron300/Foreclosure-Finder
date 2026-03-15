@@ -66,8 +66,8 @@ function mapCaseForCourtStatus(c) {
 
 function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
   let cases = (data.cases || []).filter(c => {
-    const existingStatus = (c.courtStatus || '').toUpperCase();
-    if (existingStatus === 'CLOSED') return false;
+    const existingStatus = (c.courtStatus || '').trim().toUpperCase();
+    if (existingStatus) return false;
     if (!c.primaryDefendant) return false;
     return true;
   }).map(mapCaseForCourtStatus);
@@ -1101,6 +1101,37 @@ app.get('/api/camden/export/csv', (req, res, next) => {
     const csv = outputLines.join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=camden-lis-pendens.csv');
+    res.send(csv);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/camden/export/open-addresses', (req, res, next) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token === SITE_PASSWORD) next();
+  else res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const cases = (data.cases || [])
+      .map(scoreCamdenCase)
+      .filter(c => (c.courtStatus || '').toUpperCase() === 'OPEN' && c.propertyAddress);
+
+    const headers = ['Instrument Number', 'Address', 'Town', 'Docket Number', 'Plaintiff', 'Defendant'];
+    const rows = cases.map(c => ([
+      c.instrumentNumber || '',
+      c.propertyAddress || '',
+      c.town || '',
+      c.courtDocketNumber || '',
+      c.primaryPlaintiff || '',
+      c.primaryDefendant || ''
+    ]).map(toCSVField).join(','));
+
+    const csv = [headers.map(toCSVField).join(','), ...rows].join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=camden-open-addresses.csv');
     res.send(csv);
   } catch (error) {
     res.status(500).json({ error: error.message });
