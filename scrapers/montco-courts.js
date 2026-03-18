@@ -32,9 +32,7 @@ const CONFIG = {
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
-  // Date ranges in MONTHS (calculated dynamically from today)
-  minMonthsOld: 6,
-  maxMonthsOld: 24,
+  // Sweet spot remains a scoring/labeling concept, not a hard filter
   sweetSpotMinMonths: 9,
   sweetSpotMaxMonths: 18,
 
@@ -350,12 +348,9 @@ async function scrapeMontgomeryCourts(options = {}) {
     allCaseHistoryByDefendant.set(key, history);
   }
 
-  const minDaysOld = CONFIG.minMonthsOld * 30;
-  const maxDaysOld = CONFIG.maxMonthsOld * 30;
   const sweetSpotMinDays = CONFIG.sweetSpotMinMonths * 30;
   const sweetSpotMaxDays = CONFIG.sweetSpotMaxMonths * 30;
 
-  console.log(`   Date range: ${CONFIG.minMonthsOld}-${CONFIG.maxMonthsOld} months old`);
   console.log(`   Sweet spot: ${CONFIG.sweetSpotMinMonths}-${CONFIG.sweetSpotMaxMonths} months old`);
 
   let targets = allCases
@@ -366,17 +361,12 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.monthsOpen = Math.round(c.daysOpen / 30);
       c.inSweetSpot = c.daysOpen >= sweetSpotMinDays && c.daysOpen <= sweetSpotMaxDays;
       return c;
-    })
-    .filter(c => c.daysOpen >= minDaysOld && c.daysOpen <= maxDaysOld);
+    });
 
   const sweetSpotCount = targets.filter(c => c.inSweetSpot).length;
-  console.log(`   ${targets.length} OPEN cases in range (${sweetSpotCount} in sweet spot 🎯)`);
+  console.log(`   ${targets.length} OPEN cases (${sweetSpotCount} in sweet spot 🎯)`);
 
-  targets.sort((a, b) => {
-    if (a.inSweetSpot && !b.inSweetSpot) return -1;
-    if (!a.inSweetSpot && b.inSweetSpot) return 1;
-    return b.daysOpen - a.daysOpen;
-  });
+  targets.sort((a, b) => b.daysOpen - a.daysOpen);
 
   if (testMode) {
     targets = targets.slice(0, CONFIG.testModeLimit);
