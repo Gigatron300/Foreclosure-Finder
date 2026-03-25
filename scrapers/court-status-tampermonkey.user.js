@@ -94,8 +94,9 @@
 
   function classify(status, disposition) {
     const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
+    if (/BANKRUPTCY STAY|AUTOMATIC STAY|STAYED|CASE STAYED|\bSTAY\b/.test(combined)) return 'STAY';
     if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
-    if (/OPEN|ACTIVE|PENDING|DEFAULTED|STAY|STAYED/.test(combined)) return 'OPEN';
+    if (/OPEN|ACTIVE|PENDING|DEFAULTED/.test(combined)) return 'OPEN';
     return 'UNKNOWN';
   }
 
@@ -648,6 +649,7 @@
         Done ${state.done}/${state.total} |
         <span style="color:#4ade80">Open ${state.open}</span> |
         <span style="color:#f87171">Closed ${state.closed}</span> |
+        <span style="color:#f87171">Stay ${state.stay || 0}</span> |
         <span style="color:#fbbf24">Recheck ${state.notFound}</span> |
         <span style="color:#fb923c">Err ${state.errors}</span>
       </div>
@@ -721,7 +723,7 @@
     const launcher = document.getElementById('csc-launcher');
     if (launcher) launcher.remove();
 
-    const loadingState = { done: 0, total: 0, open: 0, closed: 0, notFound: 0, errors: 0, cases: [], currentIndex: 0, mode, batch: null };
+    const loadingState = { done: 0, total: 0, open: 0, closed: 0, stay: 0, notFound: 0, errors: 0, cases: [], currentIndex: 0, mode, batch: null };
     showPanel(loadingState);
     setStatus('Fetching cases from server...');
 
@@ -757,6 +759,7 @@
       total: cases.length,
       open: 0,
       closed: 0,
+      stay: 0,
       notFound: 0,
       errors: 0,
       lastMatch: null,
@@ -1155,11 +1158,13 @@
 
       const label = status === 'OPEN' ? 'OPEN'
         : status === 'CLOSED' ? 'CLOSED'
+        : status === 'STAY' ? 'STAY'
         : status === 'RECHECK' ? 'RECHECK'
         : 'UNKNOWN';
 
       const tone = status === 'OPEN' ? 'open'
         : status === 'CLOSED' ? 'closed'
+        : status === 'STAY' ? 'closed'
         : status === 'RECHECK' ? 'recheck'
         : 'info';
 
@@ -1188,6 +1193,7 @@
 
       if (status === 'OPEN') state.open++;
       else if (status === 'CLOSED') state.closed++;
+      else if (status === 'STAY') state.stay++;
       else if (status === 'RECHECK') state.notFound++;
 
       state.done++; state.currentIndex++; state.nameIndex = 0;
@@ -1213,7 +1219,7 @@
     state.step = 'DONE';
     setState(state);
     showPanel(state);
-    setStatusByType('info', `Done. Open: ${state.open} | Closed: ${state.closed} | Recheck: ${state.notFound} | Errors: ${state.errors}`);
+    setStatusByType('info', `Done. Open: ${state.open} | Closed: ${state.closed} | Stay: ${state.stay || 0} | Recheck: ${state.notFound} | Errors: ${state.errors}`);
     clearState();
     clearRecoveryFlag();
     clearBackupState();

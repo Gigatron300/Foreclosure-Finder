@@ -218,6 +218,7 @@
     await saveAndAdvance(c.instrumentNumber, update, state);
     if (counterKey === 'open') state.open++;
     else if (counterKey === 'closed') state.closed++;
+    else if (counterKey === 'stay') state.stay++;
     else if (counterKey === 'notFound') state.notFound++;
     else if (counterKey === 'errors') state.errors++;
     state.done++;
@@ -299,6 +300,7 @@
         <div class="csc-stat"><b>${state.done}</b>of ${state.total}</div>
         <div class="csc-stat" style="color:#4ade80"><b>${state.open}</b>Open</div>
         <div class="csc-stat" style="color:#f87171"><b>${state.closed}</b>Closed</div>
+        <div class="csc-stat" style="color:#f87171"><b>${state.stay || 0}</b>Stay</div>
         <div class="csc-stat" style="color:#fbbf24"><b>${state.notFound}</b>N/F</div>
         <div class="csc-stat" style="color:#fb923c"><b>${state.errors}</b>Err</div>
       </div>
@@ -327,7 +329,7 @@
       return;
     }
 
-    showPanel({ done:0, total:0, open:0, closed:0, notFound:0, errors:0, cases:[], currentIndex:0 });
+    showPanel({ done:0, total:0, open:0, closed:0, stay:0, notFound:0, errors:0, cases:[], currentIndex:0 });
     setStatus('📡 Fetching cases from server...');
 
     let payload;
@@ -360,7 +362,7 @@
       nameAttempts: [],
       step: 'FILL_AND_WAIT',
       done: 0, total: cases.length,
-      open: 0, closed: 0, notFound: 0, errors: 0,
+      open: 0, closed: 0, stay: 0, notFound: 0, errors: 0,
       lastResult: null
     };
     setState(state);
@@ -575,7 +577,7 @@
       if (handled) return;
     }
 
-    setStatus(`${status === 'OPEN' ? '🟢' : status === 'CLOSED' ? '🔴' : '⚪'} ${jacket.docketNumber}: ${jacket.caseStatus} / ${jacket.caseDisposition}`);
+    setStatus(`${status === 'OPEN' ? '🟢' : status === 'CLOSED' || status === 'STAY' ? '🔴' : '⚪'} ${jacket.docketNumber}: ${jacket.caseStatus} / ${jacket.caseDisposition}`);
 
     await finalizeCaseAndMoveNext(state, {
       courtStatus: status,
@@ -588,7 +590,7 @@
       courtDispositionDate: jacket.dispositionDate,
       courtMatchScore: match.matchScore || 0,
       courtStatusNote: buildStatusNote('MATCHED', `${getCurrentSearchName(state)} | score ${match.matchScore || 0}`)
-    }, status === 'OPEN' ? 'open' : status === 'CLOSED' ? 'closed' : null);
+    }, status === 'OPEN' ? 'open' : status === 'CLOSED' ? 'closed' : status === 'STAY' ? 'stay' : null);
 
     setState(state);
     showPanel(state);
@@ -616,7 +618,7 @@
         <div style="text-align:center;padding:8px">
           <div style="font-size:18px;margin-bottom:8px">🎉 All Done!</div>
           <div>✅ ${state.done} cases checked</div>
-          <div>🟢 Open: ${state.open} | 🔴 Closed: ${state.closed}</div>
+          <div>🟢 Open: ${state.open} | 🔴 Closed: ${state.closed} | 🔴 Stay: ${state.stay || 0}</div>
           <div>❌ Not Found: ${state.notFound} | ⚠️ Errors: ${state.errors}</div>
         </div>
       `);

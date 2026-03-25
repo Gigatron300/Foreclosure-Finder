@@ -94,8 +94,9 @@
 
   function classify(status, disposition) {
     const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
+    if (/BANKRUPTCY STAY|AUTOMATIC STAY|STAYED|CASE STAYED|\bSTAY\b/.test(combined)) return 'STAY';
     if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
-    if (/OPEN|ACTIVE|PENDING|DEFAULTED|STAY|STAYED/.test(combined)) return 'OPEN';
+    if (/OPEN|ACTIVE|PENDING|DEFAULTED/.test(combined)) return 'OPEN';
     return 'UNKNOWN';
   }
 

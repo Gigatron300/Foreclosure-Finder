@@ -302,7 +302,7 @@ function parseCamdenCSV(csvText) {
   const caseMap = new Map();
   const statusPriority = (s) => {
     const u = (s || '').toUpperCase().trim();
-    if (u === 'OPEN' || u === 'CLOSED') return 3;
+    if (u === 'OPEN' || u === 'CLOSED' || u === 'STAY') return 3;
     if (u === 'RECHECK') return 2;
     if (u) return 1;
     return 0;

@@ -724,6 +724,10 @@
                     <div class="stat-label">Closed/Dismissed</div>
                 </div>
                 <div class="stat-item">
+                    <div class="stat-value" id="stayCount" style="color: #f87171;">-</div>
+                    <div class="stat-label">Bankruptcy Stay</div>
+                </div>
+                <div class="stat-item">
                     <div class="stat-value" id="recheckCount" style="color: var(--benoro-warning);">-</div>
                     <div class="stat-label">Recheck</div>
                 </div>
@@ -777,6 +781,7 @@
                         <div id="courtStatusFilterOptions" class="filter-dropdown-options">
                             <label class="filter-dropdown-option"><input type="checkbox" value="OPEN" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Open Cases Only</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="CLOSED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Closed/Dismissed Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="STAY" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Bankruptcy Stay Only</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="RECHECK" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Needs Recheck</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="NOT_CHECKED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Not Yet Checked</span></label>
                         </div>
@@ -842,6 +847,7 @@
         const COURT_STATUS_LABELS = {
             OPEN: 'Open Cases Only',
             CLOSED: 'Closed/Dismissed Only',
+            STAY: 'Bankruptcy Stay Only',
             RECHECK: 'Needs Recheck',
             NOT_CHECKED: 'Not Yet Checked'
         };
@@ -1229,6 +1235,7 @@
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
                 document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
                 document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
+                document.getElementById('stayCount').textContent = allCases.filter(c => c.courtStatus === 'STAY').length || '-';
                 document.getElementById('recheckCount').textContent = allCases.filter(c => c.courtStatus === 'RECHECK').length || '-';
                 document.getElementById('caseCount').textContent = `(${cases.length})`;
 
@@ -1564,6 +1571,7 @@
                 const colors = {
                     'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '●' },
                     'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '○' },
+                    'STAY': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '◉' },
                     'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '◐' }
                 };
                 const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '○' };

@@ -89,7 +89,7 @@ function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
 function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
   let cases = (data.cases || []).filter(c => {
     const existingStatus = (c.courtStatus || '').toUpperCase();
-    if (existingStatus !== 'OPEN') return false;
+    if (existingStatus !== 'OPEN' && existingStatus !== 'STAY') return false;
     if (!c.courtDocketNumber) return false;
     return true;
   }).map(mapCaseForCourtStatus);
@@ -1004,8 +1004,8 @@ app.post('/api/camden/court-status-update', cors({
     const existingStatus = (data.cases[caseIdx].courtStatus || '').toUpperCase();
     const incomingStatus = (courtData.courtStatus || '').toUpperCase();
 
-    // Preserve manual/final overrides: don't downgrade OPEN/CLOSED to uncertain statuses.
-    const isFinalStatus = existingStatus === 'OPEN' || existingStatus === 'CLOSED';
+    // Preserve manual/final overrides: don't downgrade OPEN/CLOSED/STAY to uncertain statuses.
+    const isFinalStatus = existingStatus === 'OPEN' || existingStatus === 'CLOSED' || existingStatus === 'STAY';
     const isDowngrade = incomingStatus === 'RECHECK' || incomingStatus === 'NOT_FOUND' || incomingStatus === 'UNKNOWN';
     const mergedCourtData = { ...courtData };
 
