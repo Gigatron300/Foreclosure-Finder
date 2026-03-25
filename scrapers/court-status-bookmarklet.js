@@ -29,6 +29,7 @@
   const RUN_MODE = __RUN_MODE__;
   const RESUME_MODE = __RESUME_MODE__;
   const STORAGE_KEY = 'csc_state_v2';
+  const SEARCH_WINDOW_DAYS = 90;
 
   // ── Helpers ──────────────────────────────────────────────────
   const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -65,8 +66,8 @@
   }
 
   // ── Date proximity scorer ────────────────────────────────────
-  function dateProximity(csvDate, courtDate) {
-    if (!csvDate || !courtDate) return 0;
+  function dateDistanceDays(csvDate, courtDate) {
+    if (!csvDate || !courtDate) return null;
     try {
       const parse = d => {
         // Handle both MM/DD/YYYY and YYYY-MM-DD
@@ -77,14 +78,24 @@
         return null;
       };
       const d1 = parse(csvDate), d2 = parse(courtDate);
-      if (!d1 || !d2) return 0;
-      const days = Math.abs(d1 - d2) / 86400000;
-      if (days <= 30) return 1.0;
-      if (days <= 90) return 0.7;
-      if (days <= 180) return 0.4;
-      if (days <= 365) return 0.2;
-      return 0;
-    } catch { return 0; }
+      if (!d1 || !d2) return null;
+      return Math.abs(d1 - d2) / 86400000;
+    } catch { return null; }
+  }
+
+  function dateProximity(csvDate, courtDate) {
+    const days = dateDistanceDays(csvDate, courtDate);
+    if (days == null) return 0;
+    if (days <= 30) return 1.0;
+    if (days <= SEARCH_WINDOW_DAYS) return 0.7;
+    if (days <= 180) return 0.4;
+    if (days <= 365) return 0.2;
+    return 0;
+  }
+
+  function isWithinDateWindow(csvDate, courtDate) {
+    const days = dateDistanceDays(csvDate, courtDate);
+    return days != null && days <= SEARCH_WINDOW_DAYS;
   }
 
   // ── Find best match from results table ───────────────────────
@@ -101,6 +112,9 @@
 
       // Plaintiff name appears in case caption
       if (pKey && (r.caption || '').toUpperCase().includes(pKey)) score += 2;
+
+      // Only rows within the configured filing-date window are eligible.
+      if (!isWithinDateWindow(csvDate, r.date)) continue;
 
       // Date proximity
       score += dateProximity(csvDate, r.date) * 2;
@@ -122,7 +136,7 @@
   function classify(status, disposition) {
     const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
     if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
-    if (/OPEN|ACTIVE|PENDING|DEFAULTED/.test(combined)) return 'OPEN';
+    if (/OPEN|ACTIVE|PENDING|DEFAULTED|STAY|STAYED/.test(combined)) return 'OPEN';
     return 'UNKNOWN';
   }
 
@@ -231,6 +245,111 @@
     };
   }
 
+  function uniqueNames(names) {
+    return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
+  }
+
+  function getSearchNames(c) {
+    return uniqueNames([
+      ...(Array.isArray(c && c.searchNames) ? c.searchNames : []),
+      ...(Array.isArray(c && c.allDefendants) ? c.allDefendants : []),
+      c && c.defendant ? c.defendant : ''
+    ]);
+  }
+
+  function ensureCaseSearchState(state) {
+    const c = state && state.cases ? state.cases[state.currentIndex] : null;
+    if (!c) return [];
+    const names = getSearchNames(c);
+    c.searchNames = names;
+    if (typeof state.nameIndex !== 'number' || state.nameIndex < 0) state.nameIndex = 0;
+    if (!Array.isArray(state.nameAttempts)) state.nameAttempts = [];
+    return names;
+  }
+
+  function getCurrentSearchName(state) {
+    const c = state && state.cases ? state.cases[state.currentIndex] : null;
+    const names = ensureCaseSearchState(state);
+    return names[state.nameIndex] || (c ? c.defendant : '') || '';
+  }
+
+  function recordAttempt(state, reason) {
+    const name = getCurrentSearchName(state);
+    if (!name) return;
+    if (!Array.isArray(state.nameAttempts)) state.nameAttempts = [];
+    state.nameAttempts.push({ name, reason });
+  }
+
+  function moveToNextSearchName(state, reason) {
+    const names = ensureCaseSearchState(state);
+    recordAttempt(state, reason);
+    state.nameIndex += 1;
+    state.lastMatch = null;
+    return state.nameIndex < names.length;
+  }
+
+  function summarizeAttempts(state) {
+    return (state.nameAttempts || [])
+      .map(a => `${a.name}: ${a.reason}`)
+      .join(' ; ')
+      .slice(0, 500);
+  }
+
+  function resetCaseSearchState(state) {
+    state.nameIndex = 0;
+    state.nameAttempts = [];
+    state.lastMatch = null;
+  }
+
+  async function finalizeCaseAndMoveNext(state, update, counterKey) {
+    const c = state.cases[state.currentIndex];
+    await saveAndAdvance(c.instrumentNumber, update, state);
+    if (counterKey === 'open') state.open++;
+    else if (counterKey === 'closed') state.closed++;
+    else if (counterKey === 'notFound') state.notFound++;
+    else if (counterKey === 'errors') state.errors++;
+    state.done++;
+    state.currentIndex++;
+    resetCaseSearchState(state);
+  }
+
+  async function finalizeExhaustedSearch(state, fallbackReason) {
+    const details = summarizeAttempts(state) || fallbackReason;
+    await finalizeCaseAndMoveNext(state, {
+      courtStatus: 'RECHECK',
+      courtStatusNote: buildStatusNote('RECHECK_REASON:ALL_NAMES_EXHAUSTED', details)
+    }, 'notFound');
+  }
+
+  async function handleDateMismatch(state, filingDate, courtDate, dayDiff) {
+    const reason = `filing=${filingDate} court=${courtDate} diffDays=${Math.round(dayDiff)}`;
+    if (moveToNextSearchName(state, `date mismatch ${reason}`)) {
+      state.step = 'FILL_AND_WAIT';
+      setState(state);
+      showPanel(state);
+      setStatus(`Date mismatch for current name, trying next receiving party...`);
+      await wait(500);
+      window.location.href = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
+      return true;
+    }
+
+    await finalizeExhaustedSearch(state, reason);
+    if (state.currentIndex < state.cases.length) {
+      state.step = 'FILL_AND_WAIT';
+      setState(state);
+      showPanel(state);
+      await wait(500);
+      window.location.href = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
+    } else {
+      state.step = 'DONE';
+      setState(state);
+      showPanel(state);
+      setStatus('🎉 All done!');
+      clearState();
+    }
+    return true;
+  }
+
   // ── UI Panel ─────────────────────────────────────────────────
   function showPanel(state) {
     let panel = document.getElementById('csc-panel');
@@ -241,7 +360,7 @@
     }
     const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
     const current = state.cases[state.currentIndex];
-    const nameDisplay = current ? current.defendant : '—';
+    const nameDisplay = current ? getCurrentSearchName(state) : '—';
     
     panel.innerHTML = `
       <style>
@@ -325,6 +444,8 @@
       cases: cases,
       batch,
       currentIndex: 0,
+      nameIndex: 0,
+      nameAttempts: [],
       step: 'FILL_AND_WAIT',
       done: 0, total: cases.length,
       open: 0, closed: 0, notFound: 0, errors: 0,
@@ -344,19 +465,19 @@
     }
 
     const c = state.cases[state.currentIndex];
-    const parsed = parseName(c.defendant);
+    ensureCaseSearchState(state);
+    const currentName = getCurrentSearchName(state);
+    const parsed = parseName(currentName);
 
     if (!parsed || !parsed.last) {
-      await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not parse name' }, state);
-      state.errors++; state.done++; state.currentIndex++;
-      if (state.currentIndex < state.cases.length) {
+      if (moveToNextSearchName(state, 'could not parse name')) {
         state.step = 'FILL_AND_WAIT';
       } else {
-        state.step = 'DONE';
+        await finalizeExhaustedSearch(state, 'all receiving-party names failed to parse');
+        state.step = state.currentIndex < state.cases.length ? 'FILL_AND_WAIT' : 'DONE';
       }
       setState(state);
       showPanel(state);
-      // Small delay then re-run to process next
       await wait(300);
       location.reload();
       return;
@@ -393,15 +514,22 @@
   // Page reloaded after search - read results and click into match
   if (state.step === 'READ_RESULTS') {
     const c = state.cases[state.currentIndex];
+    ensureCaseSearchState(state);
+    const currentName = getCurrentSearchName(state);
 
     if (page === 'SEARCH') {
       // No results returned (search came back empty)
-      setStatus('No results found for this name');
-      await saveAndAdvance(c.instrumentNumber, {
-        courtStatus: 'NOT_FOUND',
-        courtStatusNote: buildStatusNote('RECHECK_REASON:NO_RESULTS', 'name search returned no rows')
-      }, state);
-      state.notFound++; state.done++; state.currentIndex++;
+      setStatus(`No results found for ${currentName}`);
+      if (moveToNextSearchName(state, 'no rows returned')) {
+        state.step = 'FILL_AND_WAIT';
+        setState(state);
+        showPanel(state);
+        await wait(500);
+        location.reload();
+        return;
+      }
+
+      await finalizeExhaustedSearch(state, 'no receiving-party searches returned results');
       await wait(500);
 
       if (state.currentIndex < state.cases.length) {
@@ -428,11 +556,15 @@
       const match = findBestMatch(rows, c.plaintiff, c.filingDate);
 
       if (!match) {
-        await saveAndAdvance(c.instrumentNumber, {
-          courtStatus: 'NOT_FOUND',
-          courtStatusNote: buildStatusNote('RECHECK_REASON:NO_CONFIDENT_MATCH', `${rows.length} results scanned`)
-        }, state);
-        state.notFound++; state.done++; state.currentIndex++;
+        const reason = `${rows.length} results scanned, none within ${SEARCH_WINDOW_DAYS} days`;
+        if (moveToNextSearchName(state, reason)) {
+          state.step = 'FILL_AND_WAIT';
+          setState(state);
+          window.location.href = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
+          return;
+        }
+
+        await finalizeExhaustedSearch(state, reason);
 
         if (state.currentIndex < state.cases.length) {
           state.step = 'FILL_AND_WAIT';
@@ -476,8 +608,7 @@
 
       if (!clicked) {
         // Couldn't click - mark error and move on
-        await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not click docket link' }, state);
-        state.errors++; state.done++; state.currentIndex++;
+        await finalizeCaseAndMoveNext(state, { courtStatus: 'ERROR', courtStatusNote: 'Could not click docket link' }, 'errors');
         state.step = state.currentIndex < state.cases.length ? 'FILL_AND_WAIT' : 'DONE';
         setState(state);
         window.location.href = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
@@ -505,8 +636,7 @@
         if (detectPage() !== 'JACKET') {
           // Give up on this one
           const c = state.cases[state.currentIndex];
-          await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Jacket page did not load' }, state);
-          state.errors++; state.done++; state.currentIndex++;
+          await finalizeCaseAndMoveNext(state, { courtStatus: 'ERROR', courtStatusNote: 'Jacket page did not load' }, 'errors');
           state.step = state.currentIndex < state.cases.length ? 'FILL_AND_WAIT' : 'DONE';
           setState(state);
           window.location.href = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
@@ -519,10 +649,23 @@
     const c = state.cases[state.currentIndex];
     const status = classify(jacket.caseStatus, jacket.caseDisposition);
     const match = state.lastMatch || {};
+    let dateMismatchDays = null;
+
+    if (c.filingDate && jacket.caseInitDate) {
+      const days = dateDistanceDays(c.filingDate, jacket.caseInitDate);
+      if (days != null && days > SEARCH_WINDOW_DAYS) {
+        dateMismatchDays = days;
+      }
+    }
+
+    if (dateMismatchDays != null) {
+      const handled = await handleDateMismatch(state, c.filingDate, jacket.caseInitDate, dateMismatchDays);
+      if (handled) return;
+    }
 
     setStatus(`${status === 'OPEN' ? '🟢' : status === 'CLOSED' ? '🔴' : '⚪'} ${jacket.docketNumber}: ${jacket.caseStatus} / ${jacket.caseDisposition}`);
 
-    await saveAndAdvance(c.instrumentNumber, {
+    await finalizeCaseAndMoveNext(state, {
       courtStatus: status,
       courtStatusRaw: jacket.caseStatus,
       courtDisposition: jacket.caseDisposition,
@@ -532,12 +675,8 @@
       courtDocketNumber: jacket.docketNumber,
       courtDispositionDate: jacket.dispositionDate,
       courtMatchScore: match.matchScore || 0,
-      courtStatusNote: buildStatusNote('MATCHED', `score ${match.matchScore || 0}`)
-    }, state);
-
-    if (status === 'OPEN') state.open++;
-    else if (status === 'CLOSED') state.closed++;
-    state.done++; state.currentIndex++;
+      courtStatusNote: buildStatusNote('MATCHED', `${getCurrentSearchName(state)} | score ${match.matchScore || 0}`)
+    }, status === 'OPEN' ? 'open' : status === 'CLOSED' ? 'closed' : null);
 
     setState(state);
     showPanel(state);

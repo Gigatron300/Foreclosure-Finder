@@ -53,9 +53,16 @@ async function readJsonFileSafe(filePath, fallback = null) {
 }
 
 function mapCaseForCourtStatus(c) {
+  const searchNames = Array.from(new Set(
+    ((Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants) || [])
+      .map(name => (name || '').trim())
+      .filter(Boolean)
+  ));
+
   return {
     instrumentNumber: c.instrumentNumber,
     defendant: c.primaryDefendant,
+    searchNames,
     allDefendants: (c.allDefendants || []).filter(n => n),
     plaintiff: c.primaryPlaintiff || '',
     filingDate: c.filingDateISO || c.filingDate || '',
@@ -68,7 +75,8 @@ function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
   let cases = (data.cases || []).filter(c => {
     const existingStatus = (c.courtStatus || '').trim().toUpperCase();
     if (existingStatus) return false;
-    if (!c.primaryDefendant) return false;
+    const searchNames = Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants;
+    if (!Array.isArray(searchNames) || !searchNames.some(name => (name || '').trim())) return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
@@ -916,21 +924,13 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       // Skip if already closed; OPEN cases can be re-scanned for richer docket/action data.
       const existingStatus = (c.courtStatus || '').toUpperCase();
       if (existingStatus === 'CLOSED') return false;
-      // Skip if defendant can't be parsed
-      if (!c.primaryDefendant) return false;
+      const searchNames = Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants;
+      if (!Array.isArray(searchNames) || !searchNames.some(name => (name || '').trim())) return false;
       return true;
     });
 
     // Map to just the fields the bookmarklet needs
-    cases = cases.map(c => ({
-      instrumentNumber: c.instrumentNumber,
-      defendant: c.primaryDefendant,
-      allDefendants: (c.allDefendants || []).filter(n => n),
-      plaintiff: c.primaryPlaintiff || '',
-      filingDate: c.filingDateISO || c.filingDate || '',
-      courtStatus: c.courtStatus || '',
-      courtDocketNumber: c.courtDocketNumber || ''
-    }));
+    cases = cases.map(mapCaseForCourtStatus);
 
     if (testMode) {
       cases = cases.slice(0, 10);
