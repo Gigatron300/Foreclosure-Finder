@@ -1084,8 +1084,11 @@ app.get('/api/camden/export/csv', (req, res, next) => {
       });
     } catch (e) {}
 
-    const lines = originalCsv.split('\n');
+    const lines = originalCsv.split(/\r?\n/);
     const outputLines = [];
+    let instrNumIdx = 12;
+    let existingCourtStatusIdx = 15;
+    let existingCourtDocketIdx = 16;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1093,7 +1096,15 @@ app.get('/api/camden/export/csv', (req, res, next) => {
 
       if (i === 0) {
         const cols = parseCSVLine(line);
+        const normalizedHeader = cols.map(h => (h || '').toLowerCase().replace(/\s+/g, ''));
+        const detectedInstrNumIdx = normalizedHeader.findIndex(h => h.includes('instr'));
+        const detectedCourtStatusIdx = normalizedHeader.findIndex(h => h.includes('courtcasestatus'));
+        const detectedCourtDocketIdx = normalizedHeader.findIndex(h => h.includes('docketnumber') || h.includes('docket'));
+        if (detectedInstrNumIdx >= 0) instrNumIdx = detectedInstrNumIdx;
+        if (detectedCourtStatusIdx >= 0) existingCourtStatusIdx = detectedCourtStatusIdx;
+        if (detectedCourtDocketIdx >= 0) existingCourtDocketIdx = detectedCourtDocketIdx;
         const baseCols = cols.slice(0, 15);
+        if (baseCols.length) baseCols[0] = '';
         outputLines.push(
           [...baseCols, 'Court Case Status', 'Docket Number']
             .map(toCSVField)
@@ -1101,11 +1112,14 @@ app.get('/api/camden/export/csv', (req, res, next) => {
         );
       } else {
         const cols = parseCSVLine(line);
-        const instrNum = (cols[12] || '').trim();
+        const instrNum = (cols[instrNumIdx] || '').trim();
         const baseCols = cols.slice(0, 15);
+        if (baseCols.length) baseCols[0] = '';
         const courtInfo = caseData[instrNum] || {};
+        const existingStatus = existingCourtStatusIdx >= 0 ? (cols[existingCourtStatusIdx] || '').trim() : '';
+        const existingDocket = existingCourtDocketIdx >= 0 ? (cols[existingCourtDocketIdx] || '').trim() : '';
         outputLines.push(
-          [...baseCols, courtInfo.status || '', courtInfo.docket || '']
+          [...baseCols, courtInfo.status || existingStatus || '', courtInfo.docket || existingDocket || '']
             .map(toCSVField)
             .join(',')
         );
