@@ -30,6 +30,8 @@
   const RESUME_MODE = __RESUME_MODE__;
   const STORAGE_KEY = 'csc_state_v2';
   const SEARCH_WINDOW_DAYS = 90;
+  const Core = globalThis.CourtStatusCore;
+  if (!Core) throw new Error('CourtStatusCore not loaded');
 
   // ── Helpers ──────────────────────────────────────────────────
   const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -40,20 +42,7 @@
   const clearState = () => sessionStorage.removeItem(STORAGE_KEY);
 
   // ── Name parser ──────────────────────────────────────────────
-  function parseName(full) {
-    if (!full) return null;
-    let n = full.toUpperCase().trim()
-      .replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '').trim()
-      .replace(/\s+/g, ' ');
-    const p = n.split(' ').filter(x => x);
-    if (!p.length) return null;
-    // CSV format is "LAST FIRST MIDDLE" (defendants from Camden Clerk)
-    return {
-      last: p[0] || '',
-      first: (p[1] || '').slice(0, 9),
-      mid: p[2] || ''
-    };
-  }
+  const parseName = Core.parseName;
 
   // ── Plaintiff keyword for matching ───────────────────────────
   function plaintiffKeyword(name) {
@@ -66,85 +55,16 @@
   }
 
   // ── Date proximity scorer ────────────────────────────────────
-  function dateDistanceDays(csvDate, courtDate) {
-    if (!csvDate || !courtDate) return null;
-    try {
-      const parse = d => {
-        // Handle both MM/DD/YYYY and YYYY-MM-DD
-        let m = d.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (m) return new Date(+m[3], +m[1]-1, +m[2]);
-        m = d.match(/(\d{4})-(\d{2})-(\d{2})/);
-        if (m) return new Date(+m[1], +m[2]-1, +m[3]);
-        return null;
-      };
-      const d1 = parse(csvDate), d2 = parse(courtDate);
-      if (!d1 || !d2) return null;
-      return Math.abs(d1 - d2) / 86400000;
-    } catch { return null; }
-  }
-
-  function dateProximity(csvDate, courtDate) {
-    const days = dateDistanceDays(csvDate, courtDate);
-    if (days == null) return 0;
-    if (days <= 30) return 1.0;
-    if (days <= SEARCH_WINDOW_DAYS) return 0.7;
-    if (days <= 180) return 0.4;
-    if (days <= 365) return 0.2;
-    return 0;
-  }
-
-  function isWithinDateWindow(csvDate, courtDate) {
-    const days = dateDistanceDays(csvDate, courtDate);
-    return days != null && days <= SEARCH_WINDOW_DAYS;
-  }
+  const dateDistanceDays = Core.dateDistanceDays;
 
   // ── Find best match from results table ───────────────────────
   function findBestMatch(rows, plaintiffName, csvDate) {
-    const pKey = plaintiffKeyword(plaintiffName).toUpperCase();
-    let best = null, bestScore = 0;
-
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      let score = 0;
-
-      // Venue = CAMDEN is a strong signal
-      if ((r.venue || '').toUpperCase().includes('CAMDEN')) score += 3;
-
-      // Plaintiff name appears in case caption
-      if (pKey && (r.caption || '').toUpperCase().includes(pKey)) score += 2;
-
-      // Only rows within the configured filing-date window are eligible.
-      if (!isWithinDateWindow(csvDate, r.date)) continue;
-
-      // Date proximity
-      score += dateProximity(csvDate, r.date) * 2;
-
-      // Foreclosure docket (F-) preferred
-      if ((r.docket || '').startsWith('F-')) score += 1;
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = { ...r, rowIndex: i, matchScore: score };
-      }
-    }
-
-    // Require minimum score of 3 for confidence
-    return bestScore >= 3 ? best : null;
+    return Core.findBestMatch(rows, plaintiffName, csvDate, SEARCH_WINDOW_DAYS);
   }
 
   // ── Classify status ──────────────────────────────────────────
-  function classify(status, disposition) {
-    const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
-    if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
-    if (/OPEN|ACTIVE|PENDING|DEFAULTED|STAY|STAYED/.test(combined)) return 'OPEN';
-    return 'UNKNOWN';
-  }
-
-  function buildStatusNote(reason, extra = '') {
-    const parts = [reason];
-    if (extra) parts.push(extra);
-    return parts.join(' | ');
-  }
+  const classify = Core.classify;
+  const buildStatusNote = Core.buildStatusNote;
 
   // ── Save result to server ────────────────────────────────────
   async function saveToServer(instrumentNumber, courtData) {
@@ -245,16 +165,8 @@
     };
   }
 
-  function uniqueNames(names) {
-    return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
-  }
-
   function getSearchNames(c) {
-    return uniqueNames([
-      ...(Array.isArray(c && c.searchNames) ? c.searchNames : []),
-      ...(Array.isArray(c && c.allDefendants) ? c.allDefendants : []),
-      c && c.defendant ? c.defendant : ''
-    ]);
+    return Core.getSearchNames(c);
   }
 
   function ensureCaseSearchState(state) {
@@ -649,17 +561,17 @@
     const c = state.cases[state.currentIndex];
     const status = classify(jacket.caseStatus, jacket.caseDisposition);
     const match = state.lastMatch || {};
-    let dateMismatchDays = null;
+    const jacketDecision = Core.evaluateJacketMatch({
+      filingDate: c.filingDate,
+      jacketDate: jacket.caseInitDate,
+      currentNameIndex: state.nameIndex,
+      names: getSearchNames(c),
+      windowDays: SEARCH_WINDOW_DAYS,
+      hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK')
+    });
 
-    if (c.filingDate && jacket.caseInitDate) {
-      const days = dateDistanceDays(c.filingDate, jacket.caseInitDate);
-      if (days != null && days > SEARCH_WINDOW_DAYS) {
-        dateMismatchDays = days;
-      }
-    }
-
-    if (dateMismatchDays != null) {
-      const handled = await handleDateMismatch(state, c.filingDate, jacket.caseInitDate, dateMismatchDays);
+    if (jacketDecision.action !== 'accept') {
+      const handled = await handleDateMismatch(state, c.filingDate, jacket.caseInitDate, jacketDecision.daysDiff || 0);
       if (handled) return;
     }
 

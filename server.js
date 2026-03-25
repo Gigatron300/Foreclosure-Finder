@@ -956,11 +956,13 @@ app.get('/api/camden/court-status-script', (req, res) => {
   const serverUrl = `https://${req.get('host')}`;
 
   const fs2 = require('fs');
+  let coreScript;
   let script;
   try {
+    coreScript = fs2.readFileSync(path.join(__dirname, 'scrapers', 'court-status-core.js'), 'utf8');
     script = fs2.readFileSync(path.join(__dirname, 'scrapers', 'court-status-bookmarklet.js'), 'utf8');
   } catch (e) {
-    return res.status(500).send('// Error: court-status-bookmarklet.js not found');
+    return res.status(500).send('// Error: court-status script files not found');
   }
 
   script = script.replace(/__SERVER_URL__/g, serverUrl);
@@ -968,6 +970,7 @@ app.get('/api/camden/court-status-script', (req, res) => {
   script = script.replace(/__TEST_MODE__/g, testMode.toString());
   script = script.replace(/__RUN_MODE__/g, JSON.stringify(runMode));
   script = script.replace(/__RESUME_MODE__/g, resumeMode ? 'true' : 'false');
+  script = `${coreScript}\n\n${script}`;
 
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Access-Control-Allow-Origin', '*');
