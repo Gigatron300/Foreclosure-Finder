@@ -1089,6 +1089,16 @@ app.get('/api/camden/export/csv', (req, res, next) => {
     let instrNumIdx = 12;
     let existingCourtStatusIdx = 15;
     let existingCourtDocketIdx = 16;
+    let exportColumnMap = null;
+
+    function findHeaderIndex(normalizedHeader, patterns) {
+      return normalizedHeader.findIndex(h => patterns.some(pattern => h === pattern || h.includes(pattern)));
+    }
+
+    function buildExportColumns(cols) {
+      if (!exportColumnMap) return [];
+      return exportColumnMap.map(col => (col.idx >= 0 ? (cols[col.idx] || '').trim() : ''));
+    }
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1097,24 +1107,38 @@ app.get('/api/camden/export/csv', (req, res, next) => {
       if (i === 0) {
         const cols = parseCSVLine(line);
         const normalizedHeader = cols.map(h => (h || '').toLowerCase().replace(/\s+/g, ''));
+        exportColumnMap = [
+          { label: '', idx: -1 },
+          { label: 'Party Code', idx: findHeaderIndex(normalizedHeader, ['partycode']) },
+          { label: 'Name', idx: findHeaderIndex(normalizedHeader, ['name']) },
+          { label: 'Cross Name', idx: findHeaderIndex(normalizedHeader, ['crossname']) },
+          { label: 'Date', idx: findHeaderIndex(normalizedHeader, ['date']) },
+          { label: 'Type', idx: findHeaderIndex(normalizedHeader, ['type']) },
+          { label: 'Book Type', idx: findHeaderIndex(normalizedHeader, ['booktype']) },
+          { label: 'Book', idx: findHeaderIndex(normalizedHeader, ['book']) },
+          { label: 'Page', idx: findHeaderIndex(normalizedHeader, ['page']) },
+          { label: 'Town', idx: findHeaderIndex(normalizedHeader, ['town']) },
+          { label: 'Lot', idx: findHeaderIndex(normalizedHeader, ['lot']) },
+          { label: 'Block', idx: findHeaderIndex(normalizedHeader, ['block']) },
+          { label: 'Instr#', idx: findHeaderIndex(normalizedHeader, ['instr']) },
+          { label: 'Status', idx: findHeaderIndex(normalizedHeader, ['status']) },
+          { label: 'Flag', idx: findHeaderIndex(normalizedHeader, ['flag']) }
+        ];
         const detectedInstrNumIdx = normalizedHeader.findIndex(h => h.includes('instr'));
         const detectedCourtStatusIdx = normalizedHeader.findIndex(h => h.includes('courtcasestatus'));
         const detectedCourtDocketIdx = normalizedHeader.findIndex(h => h.includes('docketnumber') || h.includes('docket'));
         if (detectedInstrNumIdx >= 0) instrNumIdx = detectedInstrNumIdx;
         if (detectedCourtStatusIdx >= 0) existingCourtStatusIdx = detectedCourtStatusIdx;
         if (detectedCourtDocketIdx >= 0) existingCourtDocketIdx = detectedCourtDocketIdx;
-        const baseCols = cols.slice(0, 15);
-        if (baseCols.length) baseCols[0] = '';
         outputLines.push(
-          [...baseCols, 'Court Case Status', 'Docket Number']
+          [...exportColumnMap.map(col => col.label), 'Court Case Status', 'Docket Number']
             .map(toCSVField)
             .join(',')
         );
       } else {
         const cols = parseCSVLine(line);
         const instrNum = (cols[instrNumIdx] || '').trim();
-        const baseCols = cols.slice(0, 15);
-        if (baseCols.length) baseCols[0] = '';
+        const baseCols = buildExportColumns(cols);
         const courtInfo = caseData[instrNum] || {};
         const existingStatus = existingCourtStatusIdx >= 0 ? (cols[existingCourtStatusIdx] || '').trim() : '';
         const existingDocket = existingCourtDocketIdx >= 0 ? (cols[existingCourtDocketIdx] || '').trim() : '';
