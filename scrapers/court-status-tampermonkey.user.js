@@ -17,18 +17,69 @@
   }
 
   function parseName(full) {
-    if (!full) return null;
-    let normalized = full.toUpperCase().trim()
-      .replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '')
-      .trim()
-      .replace(/\s+/g, ' ');
-    const parts = normalized.split(' ').filter(Boolean);
+    const parts = normalizeNameParts(full);
     if (!parts.length) return null;
     return {
       last: parts[0] || '',
       first: (parts[1] || '').slice(0, 9),
-      mid: parts[2] || ''
+      mid: (parts[2] || '').slice(0, 1)
     };
+  }
+
+  function normalizeNameParts(full) {
+    if (!full) return [];
+    return full.toUpperCase().trim()
+      .replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .split(' ')
+      .filter(Boolean);
+  }
+
+  function isSkippableBridgeToken(token) {
+    return ['DA', 'DE', 'DEL', 'DELA', 'DI', 'DO', 'DOS', 'DU', 'LA', 'LE', 'VAN', 'VON'].includes((token || '').toUpperCase());
+  }
+
+  function buildSearchName(last, first, mid) {
+    return [last, first, mid].filter(Boolean).join(' ').trim();
+  }
+
+  function expandSearchName(name) {
+    const parts = normalizeNameParts(name);
+    if (parts.length < 2) return [];
+
+    const variants = [];
+    const add = (last, first, mid) => {
+      const full = buildSearchName(last, first, mid);
+      if (full) variants.push(full);
+    };
+
+    const last = parts[0];
+    const first = parts[1];
+    const middle = parts[2] || '';
+
+    add(last, first, middle);
+    if (middle) add(last, first, middle.slice(0, 1));
+    add(last, first, '');
+
+    if (parts.length >= 4 && isSkippableBridgeToken(parts[1])) {
+      const altFirst = parts[2];
+      const altMiddle = parts[3] || '';
+      add(last, altFirst, altMiddle);
+      if (altMiddle) add(last, altFirst, altMiddle.slice(0, 1));
+      add(last, altFirst, '');
+    }
+
+    return uniqueNames(variants);
+  }
+
+  function expandAmbiguousThreePartReverse(name) {
+    const parts = normalizeNameParts(name);
+    if (parts.length !== 3) return [];
+    return uniqueNames([
+      buildSearchName(parts[2], parts[1], ''),
+      buildSearchName(parts[2], parts[1], parts[0].slice(0, 1))
+    ]);
   }
 
   function plaintiffKeyword(name) {
@@ -111,11 +162,77 @@
   }
 
   function getSearchNames(c) {
-    return uniqueNames([
+    return getSearchCandidates(c).map(candidate => candidate.name);
+  }
+
+  function uniqueCandidateKey(candidate) {
+    return [
+      candidate && candidate.name ? candidate.name : '',
+      candidate && candidate.mode ? candidate.mode : '',
+      candidate && candidate.partyCode ? candidate.partyCode : '',
+      candidate && candidate.dateWindowDays ? candidate.dateWindowDays : ''
+    ].join('|');
+  }
+
+  function uniqueCandidates(candidates) {
+    const seen = new Set();
+    const out = [];
+    (candidates || []).forEach(candidate => {
+      if (!candidate || !candidate.name) return;
+      const key = uniqueCandidateKey(candidate);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(candidate);
+    });
+    return out;
+  }
+
+  function getSearchCandidates(c) {
+    if (Array.isArray(c && c.searchCandidates) && c.searchCandidates.length) {
+      const standard = [];
+      const reversed = [];
+      c.searchCandidates.forEach(candidate => {
+        const baseName = candidate && candidate.name ? candidate.name : '';
+        if (!baseName) return;
+        expandSearchName(baseName).forEach(name => {
+          standard.push({
+            name,
+            partyCode: candidate.partyCode || '',
+            mode: 'standard',
+            dateWindowDays: 90
+          });
+        });
+        if ((candidate.partyCode || '').toUpperCase() === 'R') {
+          expandAmbiguousThreePartReverse(baseName).forEach(name => {
+            reversed.push({
+              name,
+              partyCode: 'R',
+              mode: 'ambiguous-r-reversed',
+              dateWindowDays: 30
+            });
+          });
+        }
+      });
+      return uniqueCandidates([...standard, ...reversed]);
+    }
+
+    const sourceNames = uniqueNames([
       ...(Array.isArray(c && c.searchNames) ? c.searchNames : []),
       ...(Array.isArray(c && c.allDefendants) ? c.allDefendants : []),
       c && c.defendant ? c.defendant : ''
     ]);
+    const expanded = [];
+    sourceNames.forEach(name => {
+      expandSearchName(name).forEach(variant => {
+        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90 });
+      });
+    });
+    return uniqueCandidates(expanded.length ? expanded : sourceNames.map(name => ({
+      name,
+      partyCode: '',
+      mode: 'standard',
+      dateWindowDays: 90
+    })));
   }
 
   function evaluateJacketMatch(params) {
@@ -159,6 +276,7 @@
     classify,
     buildStatusNote,
     uniqueNames,
+    getSearchCandidates,
     getSearchNames,
     evaluateJacketMatch
   };
@@ -468,12 +586,19 @@
 
   const dateDistanceDays = Core.dateDistanceDays;
 
-  function findBestMatch(rows, plaintiffName, csvDate) {
-    return Core.findBestMatch(rows, plaintiffName, csvDate, SEARCH_WINDOW_DAYS);
+  function findBestMatch(rows, plaintiffName, csvDate, windowDays) {
+    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS);
   }
 
   const classify = Core.classify;
   const buildStatusNote = Core.buildStatusNote;
+  const getSearchCandidates = Core.getSearchCandidates;
+
+  function getCurrentSearchCandidate(state) {
+    const c = state && state.cases ? state.cases[state.currentIndex] : null;
+    const candidates = ensureCaseSearchState(state);
+    return candidates[state.nameIndex] || (c ? { name: c.defendant || '', mode: 'standard', dateWindowDays: SEARCH_WINDOW_DAYS } : null);
+  }
 
   async function saveToServer(instrumentNumber, courtData) {
     try {
@@ -613,6 +738,16 @@
     };
   }
 
+  function ensureCaseSearchState(state) {
+    const c = state && state.cases ? state.cases[state.currentIndex] : null;
+    if (!c) return [];
+    const candidates = getSearchCandidates(c);
+    c.searchNames = candidates.map(candidate => candidate.name);
+    if (typeof state.nameIndex !== 'number' || state.nameIndex < 0) state.nameIndex = 0;
+    if (!Array.isArray(state.nameAttempts)) state.nameAttempts = [];
+    return candidates;
+  }
+
   function showPanel(state) {
     let panel = document.getElementById('csc-panel');
     if (!panel) {
@@ -623,8 +758,9 @@
 
     const pct = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
     const current = state.cases ? state.cases[state.currentIndex] : null;
-    const searchNames = current ? Core.getSearchNames(current) : [];
-    const activeName = current ? (searchNames[state.nameIndex || 0] || current.defendant) : '';
+    const searchCandidates = current ? getSearchCandidates(current) : [];
+    const activeCandidate = current ? (searchCandidates[state.nameIndex || 0] || { name: current.defendant || '' }) : null;
+    const activeName = activeCandidate ? activeCandidate.name : '';
     const nameDisplay = activeName || '-';
     const modeText = state.mode === 'refresh'
       ? ((state.batch && state.batch.batchId) ? 'Refresh batch' : 'Refresh mode')
@@ -906,9 +1042,8 @@
         return;
       }
 
-      const nameIndex = state.nameIndex || 0;
-      const names = Core.getSearchNames(c);
-      const currentName = names[nameIndex] || c.defendant;
+      const candidate = getCurrentSearchCandidate(state);
+      const currentName = candidate && candidate.name ? candidate.name : (c.defendant || '');
       const parsed = parseName(currentName);
 
       if (!parsed || !parsed.last) {
@@ -953,7 +1088,8 @@
 
       state.step = 'READ_RESULTS';
       setState(state);
-      setStatusByType('info', `Searching ${parsed.last}, ${(parsed.first || '').slice(0, 9)}`);
+      const candidateLabel = candidate && candidate.mode === 'ambiguous-r-reversed' ? ' [R reverse / 30d]' : '';
+      setStatusByType('info', `Searching ${parsed.last}, ${(parsed.first || '').slice(0, 9)}${candidateLabel}`);
       clickSearchButton();
       return;
     }
@@ -964,7 +1100,7 @@
 
       if (bodyText.includes('Party Name is invalid')) {
         const nameIndex = state.nameIndex || 0;
-        const names = Core.getSearchNames(c);
+        const names = ensureCaseSearchState(state);
         const nextNameIndex = nameIndex + 1;
 
         if (nextNameIndex < names.length) {
@@ -993,7 +1129,7 @@
 
       if (page === 'SEARCH') {
           const nameIndex = state.nameIndex || 0;
-          const names = Core.getSearchNames(c);
+          const names = ensureCaseSearchState(state);
         const nextNameIndex = nameIndex + 1;
 
         if (nextNameIndex < names.length) {
@@ -1032,11 +1168,12 @@
 
       if (page === 'RESULTS') {
         const rows = parseResultsTable();
-        const match = findBestMatch(rows, c.plaintiff, c.filingDate);
+        const candidate = getCurrentSearchCandidate(state);
+        const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays);
 
         if (!match) {
           const nameIndex = state.nameIndex || 0;
-          const names = Core.getSearchNames(c);
+          const names = ensureCaseSearchState(state);
           const nextNameIndex = nameIndex + 1;
 
           if (nextNameIndex < names.length) {
@@ -1131,12 +1268,13 @@
       let dateOk = true;
 
       if (c.filingDate && jacket.caseInitDate) {
+        const candidate = getCurrentSearchCandidate(state);
         const jacketDecision = Core.evaluateJacketMatch({
           filingDate: c.filingDate,
           jacketDate: jacket.caseInitDate,
           currentNameIndex: state.nameIndex || 0,
-          names: Core.getSearchNames(c),
-          windowDays: SEARCH_WINDOW_DAYS,
+          names: ensureCaseSearchState(state).map(item => item.name),
+          windowDays: candidate && candidate.dateWindowDays ? candidate.dateWindowDays : SEARCH_WINDOW_DAYS,
           hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK')
         });
         if (jacketDecision.action === 'next-name') {
@@ -1144,7 +1282,7 @@
           state.step = 'FILL_AND_SEARCH';
           setState(state);
           showPanel(state);
-          setStatusByType('recheck', `DATE MISMATCH | trying next name (${jacketDecision.nextNameIndex + 1}/${Core.getSearchNames(c).length})`);
+          setStatusByType('recheck', `DATE MISMATCH | trying next name (${jacketDecision.nextNameIndex + 1}/${ensureCaseSearchState(state).length})`);
           await wait(600);
           window.location.href = SEARCH_URL;
           return;

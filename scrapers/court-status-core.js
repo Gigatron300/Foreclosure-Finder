@@ -17,18 +17,70 @@
   }
 
   function parseName(full) {
-    if (!full) return null;
-    let normalized = full.toUpperCase().trim()
-      .replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '')
-      .trim()
-      .replace(/\s+/g, ' ');
-    const parts = normalized.split(' ').filter(Boolean);
+    const parts = normalizeNameParts(full);
     if (!parts.length) return null;
     return {
       last: parts[0] || '',
       first: (parts[1] || '').slice(0, 9),
-      mid: parts[2] || ''
+      mid: (parts[2] || '').slice(0, 1)
     };
+  }
+
+  function normalizeNameParts(full) {
+    if (!full) return [];
+    return full.toUpperCase().trim()
+      .replace(/\b(JR|SR|II|III|IV|ESQ|MD|PHD)\b\.?/g, '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .split(' ')
+      .filter(Boolean);
+  }
+
+  function isSkippableBridgeToken(token) {
+    return ['DA', 'DE', 'DEL', 'DELA', 'DI', 'DO', 'DOS', 'DU', 'LA', 'LE', 'VAN', 'VON'].includes((token || '').toUpperCase());
+  }
+
+  function buildSearchName(last, first, mid) {
+    return [last, first, mid].filter(Boolean).join(' ').trim();
+  }
+
+  function expandSearchName(name) {
+    const parts = normalizeNameParts(name);
+    if (parts.length < 2) return [];
+
+    const variants = [];
+    const add = (last, first, mid) => {
+      const full = buildSearchName(last, first, mid);
+      if (full) variants.push(full);
+    };
+
+    const last = parts[0];
+    const first = parts[1];
+    const middle = parts[2] || '';
+
+    add(last, first, middle);
+    if (middle) add(last, first, middle.slice(0, 1));
+    add(last, first, '');
+
+    // Some clerk rows inject a bridging token before the true first name, e.g. "HAENEL DO LOUIS C".
+    if (parts.length >= 4 && isSkippableBridgeToken(parts[1])) {
+      const altFirst = parts[2];
+      const altMiddle = parts[3] || '';
+      add(last, altFirst, altMiddle);
+      if (altMiddle) add(last, altFirst, altMiddle.slice(0, 1));
+      add(last, altFirst, '');
+    }
+
+    return uniqueNames(variants);
+  }
+
+  function expandAmbiguousThreePartReverse(name) {
+    const parts = normalizeNameParts(name);
+    if (parts.length !== 3) return [];
+    return uniqueNames([
+      buildSearchName(parts[2], parts[1], ''),
+      buildSearchName(parts[2], parts[1], parts[0].slice(0, 1))
+    ]);
   }
 
   function plaintiffKeyword(name) {
@@ -111,11 +163,77 @@
   }
 
   function getSearchNames(c) {
-    return uniqueNames([
+    return getSearchCandidates(c).map(candidate => candidate.name);
+  }
+
+  function uniqueCandidateKey(candidate) {
+    return [
+      candidate && candidate.name ? candidate.name : '',
+      candidate && candidate.mode ? candidate.mode : '',
+      candidate && candidate.partyCode ? candidate.partyCode : '',
+      candidate && candidate.dateWindowDays ? candidate.dateWindowDays : ''
+    ].join('|');
+  }
+
+  function uniqueCandidates(candidates) {
+    const seen = new Set();
+    const out = [];
+    (candidates || []).forEach(candidate => {
+      if (!candidate || !candidate.name) return;
+      const key = uniqueCandidateKey(candidate);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(candidate);
+    });
+    return out;
+  }
+
+  function getSearchCandidates(c) {
+    if (Array.isArray(c && c.searchCandidates) && c.searchCandidates.length) {
+      const standard = [];
+      const reversed = [];
+      c.searchCandidates.forEach(candidate => {
+        const baseName = candidate && candidate.name ? candidate.name : '';
+        if (!baseName) return;
+        expandSearchName(baseName).forEach(name => {
+          standard.push({
+            name,
+            partyCode: candidate.partyCode || '',
+            mode: 'standard',
+            dateWindowDays: 90
+          });
+        });
+        if ((candidate.partyCode || '').toUpperCase() === 'R') {
+          expandAmbiguousThreePartReverse(baseName).forEach(name => {
+            reversed.push({
+              name,
+              partyCode: 'R',
+              mode: 'ambiguous-r-reversed',
+              dateWindowDays: 30
+            });
+          });
+        }
+      });
+      return uniqueCandidates([...standard, ...reversed]);
+    }
+
+    const sourceNames = uniqueNames([
       ...(Array.isArray(c && c.searchNames) ? c.searchNames : []),
       ...(Array.isArray(c && c.allDefendants) ? c.allDefendants : []),
       c && c.defendant ? c.defendant : ''
     ]);
+    const expanded = [];
+    sourceNames.forEach(name => {
+      expandSearchName(name).forEach(variant => {
+        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90 });
+      });
+    });
+    return uniqueCandidates(expanded.length ? expanded : sourceNames.map(name => ({
+      name,
+      partyCode: '',
+      mode: 'standard',
+      dateWindowDays: 90
+    })));
   }
 
   function evaluateJacketMatch(params) {
@@ -158,7 +276,10 @@
     findBestMatch,
     classify,
     buildStatusNote,
+    expandSearchName,
+    expandAmbiguousThreePartReverse,
     uniqueNames,
+    getSearchCandidates,
     getSearchNames,
     evaluateJacketMatch
   };

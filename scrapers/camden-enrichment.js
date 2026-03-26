@@ -4,6 +4,7 @@
 
 const https = require('https');
 const fs = require('fs').promises;
+const { shouldSkipCourtSearchName } = require('./search-skip-rules');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -102,6 +103,10 @@ function classifyDefendant(name) {
     if (upper.includes(kw)) return 'ENTITY';
   }
   return 'INDIVIDUAL';
+}
+
+function uniqueNames(names) {
+  return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
 }
 
 function clamp(n, min, max) {
@@ -368,6 +373,14 @@ function parseCamdenCSV(csvText) {
       if (classifyDefendant(name) === 'ENTITY') entityCoDefendants.push(name);
       else personDefendants.push(name);
     }
+    const personPlaintiffFallbacks = raw.plaintiffNames
+      .filter(name => classifyDefendant(name) !== 'ENTITY')
+      .filter(name => !shouldSkipCourtSearchName(name));
+    const searchablePersonDefendants = personDefendants.filter(name => !shouldSkipCourtSearchName(name));
+    const searchCandidates = [
+      ...searchablePersonDefendants.map(name => ({ name, partyCode: 'R' })),
+      ...personPlaintiffFallbacks.map(name => ({ name, partyCode: 'D' }))
+    ];
 
     // Calculate days since filing
     let daysSinceFiling = 0;
@@ -403,6 +416,8 @@ function parseCamdenCSV(csvText) {
       defendantType: classifyDefendant(primaryDefendant),
       entityCoDefendants,
       allDefendants: raw.defendantNames,
+      searchNames: uniqueNames([...searchablePersonDefendants, ...personPlaintiffFallbacks]),
+      searchCandidates,
       county: 'Camden',
       state: 'NJ',
       courtStatus: raw.courtStatus || '',

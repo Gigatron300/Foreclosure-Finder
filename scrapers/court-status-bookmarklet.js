@@ -58,8 +58,8 @@
   const dateDistanceDays = Core.dateDistanceDays;
 
   // ── Find best match from results table ───────────────────────
-  function findBestMatch(rows, plaintiffName, csvDate) {
-    return Core.findBestMatch(rows, plaintiffName, csvDate, SEARCH_WINDOW_DAYS);
+  function findBestMatch(rows, plaintiffName, csvDate, windowDays) {
+    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS);
   }
 
   // ── Classify status ──────────────────────────────────────────
@@ -165,24 +165,27 @@
     };
   }
 
-  function getSearchNames(c) {
-    return Core.getSearchNames(c);
-  }
+  const getSearchCandidates = Core.getSearchCandidates;
 
   function ensureCaseSearchState(state) {
     const c = state && state.cases ? state.cases[state.currentIndex] : null;
     if (!c) return [];
-    const names = getSearchNames(c);
-    c.searchNames = names;
+    const candidates = getSearchCandidates(c);
+    c.searchNames = candidates.map(candidate => candidate.name);
     if (typeof state.nameIndex !== 'number' || state.nameIndex < 0) state.nameIndex = 0;
     if (!Array.isArray(state.nameAttempts)) state.nameAttempts = [];
-    return names;
+    return candidates;
+  }
+
+  function getCurrentSearchCandidate(state) {
+    const c = state && state.cases ? state.cases[state.currentIndex] : null;
+    const candidates = ensureCaseSearchState(state);
+    return candidates[state.nameIndex] || (c ? { name: c.defendant || '', mode: 'standard', dateWindowDays: SEARCH_WINDOW_DAYS } : null);
   }
 
   function getCurrentSearchName(state) {
-    const c = state && state.cases ? state.cases[state.currentIndex] : null;
-    const names = ensureCaseSearchState(state);
-    return names[state.nameIndex] || (c ? c.defendant : '') || '';
+    const candidate = getCurrentSearchCandidate(state);
+    return candidate && candidate.name ? candidate.name : '';
   }
 
   function recordAttempt(state, reason) {
@@ -380,7 +383,8 @@
 
     const c = state.cases[state.currentIndex];
     ensureCaseSearchState(state);
-    const currentName = getCurrentSearchName(state);
+    const candidate = getCurrentSearchCandidate(state);
+    const currentName = candidate && candidate.name ? candidate.name : '';
     const parsed = parseName(currentName);
 
     if (!parsed || !parsed.last) {
@@ -413,7 +417,7 @@
     setStatus(`
       <div style="text-align:center">
         <div style="font-size:14px;margin-bottom:8px">
-          Searching: <b>${parsed.last}, ${parsed.first}</b>
+          Searching: <b>${parsed.last}, ${parsed.first}</b>${candidate && candidate.mode === 'ambiguous-r-reversed' ? ' <span style="color:#fbbf24">[R reverse / 30d]</span>' : ''}
         </div>
         <div style="font-size:20px;padding:12px;background:#1d4ed8;border-radius:8px;color:#fff;font-weight:700;cursor:default;animation:pulse 1.5s infinite">
           👆 CLICK THE SEARCH BUTTON 👆
@@ -467,7 +471,8 @@
       setStatus(`Found ${rows.length} results, matching...`);
       await wait(500);
 
-      const match = findBestMatch(rows, c.plaintiff, c.filingDate);
+      const candidate = getCurrentSearchCandidate(state);
+      const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays);
 
       if (!match) {
         const reason = `${rows.length} results scanned, none within ${SEARCH_WINDOW_DAYS} days`;
@@ -567,8 +572,8 @@
       filingDate: c.filingDate,
       jacketDate: jacket.caseInitDate,
       currentNameIndex: state.nameIndex,
-      names: getSearchNames(c),
-      windowDays: SEARCH_WINDOW_DAYS,
+      names: ensureCaseSearchState(state).map(item => item.name),
+      windowDays: (getCurrentSearchCandidate(state) && getCurrentSearchCandidate(state).dateWindowDays) || SEARCH_WINDOW_DAYS,
       hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK')
     });
 
