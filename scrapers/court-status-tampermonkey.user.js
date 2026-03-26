@@ -161,6 +161,37 @@
     return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
   }
 
+  const SEARCH_SKIP_WHOLE_WORDS = [
+    'LLC', 'MORTGAGE', 'TRUST', 'FUND', 'CORP', 'EQUITY', 'LOAN', 'CONSULTING',
+    'PROPERTIES', 'INVESTMENTS', 'COUNTY', 'HOUSING', 'BANK', 'PARTNERSHIP',
+    'FINANCIAL', 'DEVELOPMENT', 'STATE', 'UNITED STATES', 'COMMISSION', 'SERVICES',
+    'NEW JERSEY', 'INC', 'INSURANCE', 'CREDIT UNION', 'SOCIETY', 'CAMDEN COUNTY',
+    'URBAN DEVELOPMENT', 'FUNDING'
+  ];
+
+  function escapeRegex(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function normalizeNameForSkipMatch(name) {
+    return String(name || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  function shouldSkipCourtSearchName(name) {
+    const normalizedName = normalizeNameForSkipMatch(name);
+    if (!normalizedName) return true;
+    return SEARCH_SKIP_WHOLE_WORDS.some(phrase => {
+      const normalizedPhrase = normalizeNameForSkipMatch(phrase);
+      if (!normalizedPhrase) return false;
+      const re = new RegExp(`(?:^|\\s)${escapeRegex(normalizedPhrase)}(?:\\s|$)`);
+      return re.test(normalizedName);
+    });
+  }
+
   function getSearchNames(c) {
     return getSearchCandidates(c).map(candidate => candidate.name);
   }
@@ -178,7 +209,7 @@
     const seen = new Set();
     const out = [];
     (candidates || []).forEach(candidate => {
-      if (!candidate || !candidate.name) return;
+      if (!candidate || !candidate.name || shouldSkipCourtSearchName(candidate.name)) return;
       const key = uniqueCandidateKey(candidate);
       if (seen.has(key)) return;
       seen.add(key);
@@ -222,12 +253,12 @@
       c && c.defendant ? c.defendant : ''
     ]);
     const expanded = [];
-    sourceNames.forEach(name => {
+    sourceNames.filter(name => !shouldSkipCourtSearchName(name)).forEach(name => {
       expandSearchName(name).forEach(variant => {
         expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90 });
       });
     });
-    return uniqueCandidates(expanded.length ? expanded : sourceNames.map(name => ({
+    return uniqueCandidates(expanded.length ? expanded : sourceNames.filter(name => !shouldSkipCourtSearchName(name)).map(name => ({
       name,
       partyCode: '',
       mode: 'standard',

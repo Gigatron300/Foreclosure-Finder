@@ -5,7 +5,8 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
-const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase } = require('./scrapers/camden-enrichment');
+const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
+const { shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
 // Court status is now checked via browser-based bookmarklet (court-status-bookmarklet.js)
 
@@ -53,15 +54,13 @@ async function readJsonFileSafe(filePath, fallback = null) {
 }
 
 function mapCaseForCourtStatus(c) {
-  const searchNames = Array.from(new Set(
-    ((Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants) || [])
-      .map(name => (name || '').trim())
-      .filter(Boolean)
-  ));
+  const searchCandidates = getCourtSearchCandidates(c);
+  const searchNames = Array.from(new Set(searchCandidates.map(candidate => candidate.name).filter(Boolean)));
 
   return {
     instrumentNumber: c.instrumentNumber,
     defendant: c.primaryDefendant,
+    searchCandidates,
     searchNames,
     allDefendants: (c.allDefendants || []).filter(n => n),
     plaintiff: c.primaryPlaintiff || '',
@@ -71,12 +70,36 @@ function mapCaseForCourtStatus(c) {
   };
 }
 
+function getCourtSearchCandidates(c) {
+  if (Array.isArray(c?.searchCandidates) && c.searchCandidates.length) {
+    return c.searchCandidates
+      .map(candidate => ({
+        name: (candidate?.name || '').trim(),
+        partyCode: (candidate?.partyCode || '').trim()
+      }))
+      .filter(candidate => candidate.name)
+      .filter(candidate => !shouldSkipCourtSearchName(candidate.name));
+  }
+
+  const receivingParties = (Array.isArray(c?.searchNames) && c.searchNames.length ? c.searchNames : (Array.isArray(c?.defendants) && c.defendants.length ? c.defendants : c?.allDefendants)) || [];
+  const deliveryFallbacks = Array.isArray(c?.plaintiffs) ? c.plaintiffs.filter(name => classifyDefendant(name) !== 'ENTITY') : [];
+
+  return Array.from(new Set(
+    [
+      ...receivingParties.map(name => JSON.stringify({ name: (name || '').trim(), partyCode: 'R' })),
+      ...deliveryFallbacks.map(name => JSON.stringify({ name: (name || '').trim(), partyCode: 'D' }))
+    ]
+  ))
+    .map(value => JSON.parse(value))
+    .filter(candidate => candidate.name)
+    .filter(candidate => !shouldSkipCourtSearchName(candidate.name));
+}
+
 function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
   let cases = (data.cases || []).filter(c => {
     const existingStatus = (c.courtStatus || '').trim().toUpperCase();
     if (existingStatus) return false;
-    const searchNames = Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants;
-    if (!Array.isArray(searchNames) || !searchNames.some(name => (name || '').trim())) return false;
+    if (!getCourtSearchCandidates(c).length) return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
@@ -91,6 +114,7 @@ function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
     const existingStatus = (c.courtStatus || '').toUpperCase();
     if (existingStatus !== 'OPEN' && existingStatus !== 'STAY') return false;
     if (!c.courtDocketNumber) return false;
+    if (!getCourtSearchCandidates(c).length) return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
