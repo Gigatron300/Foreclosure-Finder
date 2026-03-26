@@ -161,13 +161,11 @@
     return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
   }
 
-  const SEARCH_SKIP_WHOLE_WORDS = [
-    'LLC', 'MORTGAGE', 'TRUST', 'FUND', 'CORP', 'EQUITY', 'LOAN', 'CONSULTING',
-    'PROPERTIES', 'INVESTMENTS', 'COUNTY', 'HOUSING', 'BANK', 'PARTNERSHIP',
-    'FINANCIAL', 'DEVELOPMENT', 'STATE', 'UNITED STATES', 'COMMISSION', 'SERVICES',
-    'NEW JERSEY', 'INC', 'INSURANCE', 'CREDIT UNION', 'SOCIETY', 'CAMDEN COUNTY',
-    'URBAN DEVELOPMENT', 'FUNDING'
-  ];
+  function getSearchSkipWholeWords() {
+    return Array.isArray(globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__)
+      ? globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__
+      : [];
+  }
 
   function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -184,7 +182,7 @@
   function shouldSkipCourtSearchName(name) {
     const normalizedName = normalizeNameForSkipMatch(name);
     if (!normalizedName) return true;
-    return SEARCH_SKIP_WHOLE_WORDS.some(phrase => {
+    return getSearchSkipWholeWords().some(phrase => {
       const normalizedPhrase = normalizeNameForSkipMatch(phrase);
       if (!normalizedPhrase) return false;
       const re = new RegExp(`(?:^|\\s)${escapeRegex(normalizedPhrase)}(?:\\s|$)`);
@@ -352,6 +350,22 @@
   const GM_STATE_BACKUP_KEY = 'csc_state_backup';
 
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let searchConfigLoaded = false;
+
+  async function loadSearchConfig() {
+    if (searchConfigLoaded) return;
+    try {
+      const resp = await fetch(SERVER + '/api/camden/court-search-config?token=' + encodeURIComponent(TOKEN));
+      if (!resp.ok) throw new Error('Server returned ' + resp.status);
+      const data = await resp.json();
+      globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__ = Array.isArray(data && data.containsWholeWords) ? data.containsWholeWords : [];
+      searchConfigLoaded = true;
+    } catch (e) {
+      console.error('CSC config load failed:', e);
+      globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__ = Array.isArray(globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__) ? globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__ : [];
+      searchConfigLoaded = true;
+    }
+  }
 
   // ============================================================
   // Cross-domain state helpers (GM_setValue works across all @match domains)
@@ -1396,6 +1410,7 @@
 
   try {
     await wait(1000);
+    await loadSearchConfig();
     const state = getState();
     if (state && state.step !== 'DONE') {
       showPanel(state);

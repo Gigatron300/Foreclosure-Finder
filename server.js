@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
-const { shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
+const { containsWholeWords, shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
 // Court status is now checked via browser-based bookmarklet (court-status-bookmarklet.js)
 
@@ -928,6 +928,19 @@ app.get('/api/camden/court-status-refresh/state', async (req, res) => {
   }
 });
 
+app.get('/api/camden/court-search-config', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const token = req.query.token || req.headers['x-auth-token'];
+  if (token !== SITE_PASSWORD) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  res.json({
+    containsWholeWords
+  });
+});
+
 // Serve cases that need court status lookup
 app.get('/api/camden/court-status-cases', async (req, res) => {
   // Allow CORS for bookmarklet running on NJ Courts domain
@@ -994,7 +1007,7 @@ app.get('/api/camden/court-status-script', (req, res) => {
   script = script.replace(/__TEST_MODE__/g, testMode.toString());
   script = script.replace(/__RUN_MODE__/g, JSON.stringify(runMode));
   script = script.replace(/__RESUME_MODE__/g, resumeMode ? 'true' : 'false');
-  script = `${coreScript}\n\n${script}`;
+  script = `globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__ = ${JSON.stringify(containsWholeWords)};\n\n${coreScript}\n\n${script}`;
 
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Access-Control-Allow-Origin', '*');

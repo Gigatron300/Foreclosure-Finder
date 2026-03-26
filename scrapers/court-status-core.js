@@ -162,13 +162,11 @@
     return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
   }
 
-  const SEARCH_SKIP_WHOLE_WORDS = [
-    'LLC', 'MORTGAGE', 'TRUST', 'FUND', 'CORP', 'EQUITY', 'LOAN', 'CONSULTING',
-    'PROPERTIES', 'INVESTMENTS', 'COUNTY', 'HOUSING', 'BANK', 'PARTNERSHIP',
-    'FINANCIAL', 'DEVELOPMENT', 'STATE', 'UNITED STATES', 'COMMISSION', 'SERVICES',
-    'NEW JERSEY', 'INC', 'INSURANCE', 'CREDIT UNION', 'SOCIETY', 'CAMDEN COUNTY',
-    'URBAN DEVELOPMENT', 'FUNDING'
-  ];
+  function getSearchSkipWholeWords() {
+    return Array.isArray(globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__)
+      ? globalThis.__CSC_SEARCH_SKIP_WHOLE_WORDS__
+      : [];
+  }
 
   function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -185,7 +183,7 @@
   function shouldSkipCourtSearchName(name) {
     const normalizedName = normalizeNameForSkipMatch(name);
     if (!normalizedName) return true;
-    return SEARCH_SKIP_WHOLE_WORDS.some(phrase => {
+    return getSearchSkipWholeWords().some(phrase => {
       const normalizedPhrase = normalizeNameForSkipMatch(phrase);
       if (!normalizedPhrase) return false;
       const re = new RegExp(`(?:^|\\s)${escapeRegex(normalizedPhrase)}(?:\\s|$)`);

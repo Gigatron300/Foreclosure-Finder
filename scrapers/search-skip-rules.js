@@ -27,6 +27,7 @@ const containsWholeWords = [
   'CAMDEN COUNTY',
   'URBAN DEVELOPMENT',
   'FUNDING'
+  'CAMDEN CITY'
 ];
 
 function escapeRegex(value) {
