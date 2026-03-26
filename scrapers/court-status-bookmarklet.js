@@ -58,8 +58,8 @@
   const dateDistanceDays = Core.dateDistanceDays;
 
   // ── Find best match from results table ───────────────────────
-  function findBestMatch(rows, plaintiffName, csvDate, windowDays) {
-    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS);
+  function findBestMatch(rows, plaintiffName, csvDate, windowDays, searchCandidate) {
+    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS, searchCandidate);
   }
 
   // ── Classify status ──────────────────────────────────────────
@@ -472,7 +472,7 @@
       await wait(500);
 
       const candidate = getCurrentSearchCandidate(state);
-      const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays);
+        const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays, candidate);
 
       if (!match) {
         const reason = `${rows.length} results scanned, none within ${SEARCH_WINDOW_DAYS} days`;

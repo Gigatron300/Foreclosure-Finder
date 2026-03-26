@@ -73,6 +73,14 @@
     return uniqueNames(variants);
   }
 
+  function expandThreePartTailFirst(name) {
+    const parts = normalizeNameParts(name);
+    if (parts.length !== 3) return [];
+    return uniqueNames([
+      buildSearchName(parts[0], parts[2], '')
+    ]);
+  }
+
   function plaintiffKeyword(name) {
     if (!name) return '';
     const upper = name.toUpperCase().trim();
@@ -110,8 +118,19 @@
     return days != null && days <= windowDays;
   }
 
-  function findBestMatch(rows, plaintiffName, csvDate, windowDays) {
+  function rowContainsAllNameTokens(rowName, expectedName) {
+    const rowParts = normalizeNameParts(rowName);
+    const expectedParts = normalizeNameParts(expectedName);
+    if (!rowParts.length || expectedParts.length < 3) return false;
+    return expectedParts.every(part => rowParts.includes(part));
+  }
+
+  function findBestMatch(rows, plaintiffName, csvDate, windowDays, searchCandidate) {
     const pKey = plaintiffKeyword(plaintiffName).toUpperCase();
+    const candidateMode = searchCandidate && searchCandidate.mode ? searchCandidate.mode : '';
+    const candidateSourceName = searchCandidate && searchCandidate.sourceFullName
+      ? searchCandidate.sourceFullName
+      : (searchCandidate && searchCandidate.name ? searchCandidate.name : '');
     let best = null;
     let bestScore = 0;
 
@@ -124,6 +143,9 @@
       if (!isWithinDateWindow(csvDate, row.date, windowDays)) continue;
       score += dateProximity(csvDate, row.date, windowDays) * 2;
       if ((row.docket || '').startsWith('F-')) score += 1;
+      if (candidateMode === 'three-part-tail-first' && rowContainsAllNameTokens(row.name, candidateSourceName)) {
+        score += 4;
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -218,7 +240,17 @@
             name,
             partyCode: candidate.partyCode || '',
             mode: 'standard',
-            dateWindowDays: 90
+            dateWindowDays: 90,
+            sourceFullName: baseName
+          });
+        });
+        expandThreePartTailFirst(baseName).forEach(name => {
+          standard.push({
+            name,
+            partyCode: candidate.partyCode || '',
+            mode: 'three-part-tail-first',
+            dateWindowDays: 90,
+            sourceFullName: baseName
           });
         });
       });
@@ -233,14 +265,18 @@
     const expanded = [];
     sourceNames.filter(name => !shouldSkipCourtSearchName(name)).forEach(name => {
       expandSearchName(name).forEach(variant => {
-        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90 });
+        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90, sourceFullName: name });
+      });
+      expandThreePartTailFirst(name).forEach(variant => {
+        expanded.push({ name: variant, partyCode: '', mode: 'three-part-tail-first', dateWindowDays: 90, sourceFullName: name });
       });
     });
     return uniqueCandidates(expanded.length ? expanded : sourceNames.filter(name => !shouldSkipCourtSearchName(name)).map(name => ({
       name,
       partyCode: '',
       mode: 'standard',
-      dateWindowDays: 90
+      dateWindowDays: 90,
+      sourceFullName: name
     })));
   }
 
@@ -277,6 +313,7 @@
   return {
     parseFlexibleDate,
     parseName,
+    expandThreePartTailFirst,
     plaintiffKeyword,
     dateDistanceDays,
     dateProximity,
@@ -648,8 +685,8 @@
 
   const dateDistanceDays = Core.dateDistanceDays;
 
-  function findBestMatch(rows, plaintiffName, csvDate, windowDays) {
-    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS);
+  function findBestMatch(rows, plaintiffName, csvDate, windowDays, searchCandidate) {
+    return Core.findBestMatch(rows, plaintiffName, csvDate, windowDays || SEARCH_WINDOW_DAYS, searchCandidate);
   }
 
   const classify = Core.classify;
@@ -1239,7 +1276,7 @@
       if (page === 'RESULTS') {
         const rows = parseResultsTable();
         const candidate = getCurrentSearchCandidate(state);
-        const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays);
+        const match = findBestMatch(rows, c.plaintiff, c.filingDate, candidate && candidate.dateWindowDays, candidate);
 
         if (!match) {
           const nameIndex = state.nameIndex || 0;
