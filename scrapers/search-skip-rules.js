@@ -26,7 +26,7 @@ const containsWholeWords = [
   'SOCIETY',
   'CAMDEN COUNTY',
   'URBAN DEVELOPMENT',
-  'FUNDING'
+  'FUNDING',
   'CAMDEN CITY'
 ];
 
