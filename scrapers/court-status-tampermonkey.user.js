@@ -299,6 +299,7 @@
 // @description  Auto-checks court case statuses from Camden pipeline data with auto-login CAPTCHA recovery
 // @match        https://portal.njcourts.gov/*
 // @match        https://portal-cloud.njcourts.gov/*
+// @match        https://www.njcourts.gov/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -318,6 +319,7 @@
   const STORAGE_KEY = 'csc_state_v2';
   const SEARCH_URL = 'https://portal.njcourts.gov/webcivilcj/CIVILCaseJacketWeb/pages/civilCaseSearch.faces';
   const LOGIN_URL = 'https://portal-cloud.njcourts.gov/prweb/PRAuth/CloudSAMLAuth?AppName=ESSO';
+  const PUBLIC_ACCESS_URL = 'https://www.njcourts.gov/public/find-a-case/civil-and-foreclosure-public-access';
   const PORTAL_DASHBOARD_URL = 'https://portal-cloud.njcourts.gov/prweb/PRAuth/app/ESSOPortal/';
   const BREAK_EVERY = 0; // Disabled - cookie clearing handles CAPTCHA recovery
   const BREAK_MS = 0;
@@ -376,6 +378,12 @@
   const currentHost = window.location.hostname;
   const isLoginPage = currentHost === 'portal-cloud.njcourts.gov';
   const isSearchSite = currentHost === 'portal.njcourts.gov';
+  const isPublicAccessSite = currentHost === 'www.njcourts.gov';
+
+  function isRuxitInterstitialPage() {
+    const bodyText = document.body && document.body.innerText ? document.body.innerText : '';
+    return bodyText.includes('OK(OA)|name=ruxitagentjs') || bodyText.includes('name=ruxitagentjs|featureHash=');
+  }
 
   // ============================================================
   // CAPTCHA RECOVERY: Handle login page (portal-cloud.njcourts.gov)
@@ -391,6 +399,15 @@
     const bodyText = document.body.innerText || '';
     const hasLoginForm = document.getElementById('userid') && document.getElementById('passwd');
     const isDashboard = bodyText.includes('Find a Case') || bodyText.includes('Portal Home Page') || bodyText.includes('Enterprise Portal');
+    const isRuxitInterstitial = isRuxitInterstitialPage();
+
+    if (isRuxitInterstitial) {
+      console.log('CSC: Detected ruxit interstitial during recovery, redirecting to public access entry page...');
+      setRecoveryFlag('public_access_reentry');
+      await wait(1500);
+      window.location.href = PUBLIC_ACCESS_URL;
+      return;
+    }
 
     if (isDashboard) {
       // We're on the dashboard after successful login - go to search page
@@ -466,6 +483,26 @@
     console.log('CSC: On intermediate page during recovery, waiting...');
     await wait(3000);
     // If we're still not on login or dashboard, the redirect might still be happening
+    return;
+  }
+
+  if (isPublicAccessSite) {
+    await wait(1500);
+    const recovery = getRecoveryFlag();
+    if (!recovery) return;
+
+    const bodyText = document.body.innerText || '';
+    if (!/civil and foreclosure public access/i.test(bodyText) && !/returning users/i.test(bodyText)) return;
+
+    const links = Array.from(document.querySelectorAll('a, button'));
+    const returningUsers = links.find(el => /returning users/i.test((el.textContent || '').trim()));
+    if (returningUsers) {
+      console.log('CSC: Public access page detected, clicking Returning Users...');
+      returningUsers.click();
+      return;
+    }
+
+    console.log('CSC: Public access page detected but Returning Users button was not found automatically.');
     return;
   }
 
@@ -1029,10 +1066,19 @@
     const c = state.cases[state.currentIndex];
 
     // ============================================================
-    // CAPTCHA RECOVERY (replaces old wait-and-retry)
-    // ============================================================
-    if (hasCaptchaBlock()) {
+  // CAPTCHA RECOVERY (replaces old wait-and-retry)
+  // ============================================================
+  if (hasCaptchaBlock()) {
       await startCaptchaRecovery(state);
+      return;
+    }
+
+    if (isRuxitInterstitialPage()) {
+      console.log('CSC: Detected ruxit interstitial on search site, redirecting to public access entry page...');
+      backupState(state);
+      setRecoveryFlag('public_access_reentry');
+      await wait(1500);
+      window.location.href = PUBLIC_ACCESS_URL;
       return;
     }
 
