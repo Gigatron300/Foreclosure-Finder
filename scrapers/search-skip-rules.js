@@ -30,7 +30,9 @@ const containsWholeWords = [
   'CAMDEN CITY',
   'ASSOCIATES',
   'INVESTMENT',
-  'WSFS'
+  'WSFS',
+  'SERVICES',
+  'FUNDING'
 ];
 
 function escapeRegex(value) {
