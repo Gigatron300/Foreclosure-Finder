@@ -74,15 +74,6 @@
     return uniqueNames(variants);
   }
 
-  function expandAmbiguousThreePartReverse(name) {
-    const parts = normalizeNameParts(name);
-    if (parts.length !== 3) return [];
-    return uniqueNames([
-      buildSearchName(parts[2], parts[1], ''),
-      buildSearchName(parts[2], parts[1], parts[0].slice(0, 1))
-    ]);
-  }
-
   function plaintiffKeyword(name) {
     if (!name) return '';
     const upper = name.toUpperCase().trim();
@@ -220,7 +211,6 @@
   function getSearchCandidates(c) {
     if (Array.isArray(c && c.searchCandidates) && c.searchCandidates.length) {
       const standard = [];
-      const reversed = [];
       c.searchCandidates.forEach(candidate => {
         const baseName = candidate && candidate.name ? candidate.name : '';
         if (!baseName) return;
@@ -232,18 +222,8 @@
             dateWindowDays: 90
           });
         });
-        if ((candidate.partyCode || '').toUpperCase() === 'R') {
-          expandAmbiguousThreePartReverse(baseName).forEach(name => {
-            reversed.push({
-              name,
-              partyCode: 'R',
-              mode: 'ambiguous-r-reversed',
-              dateWindowDays: 30
-            });
-          });
-        }
       });
-      return uniqueCandidates([...standard, ...reversed]);
+      return uniqueCandidates(standard);
     }
 
     const sourceNames = uniqueNames([
@@ -306,7 +286,6 @@
     classify,
     buildStatusNote,
     expandSearchName,
-    expandAmbiguousThreePartReverse,
     uniqueNames,
     getSearchCandidates,
     getSearchNames,

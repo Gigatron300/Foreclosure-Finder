@@ -417,7 +417,7 @@
     setStatus(`
       <div style="text-align:center">
         <div style="font-size:14px;margin-bottom:8px">
-          Searching: <b>${parsed.last}, ${parsed.first}</b>${candidate && candidate.mode === 'ambiguous-r-reversed' ? ' <span style="color:#fbbf24">[R reverse / 30d]</span>' : ''}
+          Searching: <b>${parsed.last}, ${parsed.first}</b>
         </div>
         <div style="font-size:20px;padding:12px;background:#1d4ed8;border-radius:8px;color:#fff;font-weight:700;cursor:default;animation:pulse 1.5s infinite">
           👆 CLICK THE SEARCH BUTTON 👆

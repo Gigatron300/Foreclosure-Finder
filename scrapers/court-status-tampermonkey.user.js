@@ -73,15 +73,6 @@
     return uniqueNames(variants);
   }
 
-  function expandAmbiguousThreePartReverse(name) {
-    const parts = normalizeNameParts(name);
-    if (parts.length !== 3) return [];
-    return uniqueNames([
-      buildSearchName(parts[2], parts[1], ''),
-      buildSearchName(parts[2], parts[1], parts[0].slice(0, 1))
-    ]);
-  }
-
   function plaintiffKeyword(name) {
     if (!name) return '';
     const upper = name.toUpperCase().trim();
@@ -219,7 +210,6 @@
   function getSearchCandidates(c) {
     if (Array.isArray(c && c.searchCandidates) && c.searchCandidates.length) {
       const standard = [];
-      const reversed = [];
       c.searchCandidates.forEach(candidate => {
         const baseName = candidate && candidate.name ? candidate.name : '';
         if (!baseName) return;
@@ -231,18 +221,8 @@
             dateWindowDays: 90
           });
         });
-        if ((candidate.partyCode || '').toUpperCase() === 'R') {
-          expandAmbiguousThreePartReverse(baseName).forEach(name => {
-            reversed.push({
-              name,
-              partyCode: 'R',
-              mode: 'ambiguous-r-reversed',
-              dateWindowDays: 30
-            });
-          });
-        }
       });
-      return uniqueCandidates([...standard, ...reversed]);
+      return uniqueCandidates(standard);
     }
 
     const sourceNames = uniqueNames([
@@ -1133,8 +1113,7 @@
 
       state.step = 'READ_RESULTS';
       setState(state);
-      const candidateLabel = candidate && candidate.mode === 'ambiguous-r-reversed' ? ' [R reverse / 30d]' : '';
-      setStatusByType('info', `Searching ${parsed.last}, ${(parsed.first || '').slice(0, 9)}${candidateLabel}`);
+      setStatusByType('info', `Searching ${parsed.last}, ${(parsed.first || '').slice(0, 9)}`);
       clickSearchButton();
       return;
     }
