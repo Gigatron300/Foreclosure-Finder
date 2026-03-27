@@ -32,7 +32,13 @@ const containsWholeWords = [
   'INVESTMENT',
   'WSFS',
   'SERVICES',
-  'FUNDING'
+  'FUNDING',
+  'HOSPITAL',
+  'CHURCH OF',
+  'MEMORIAL',
+  'CONSTRUCTION',
+  'PARTNERS',
+  'COMMUNITY'
 ];
 
 function escapeRegex(value) {
