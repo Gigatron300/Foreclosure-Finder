@@ -1051,6 +1051,25 @@
     if (state) state.captchaRetries = 0;
   }
 
+  async function continueWithNextCase(state, pageHint) {
+    if (!state || state.currentIndex >= state.cases.length) {
+      finishRun(state);
+      return;
+    }
+
+    state.step = 'FILL_AND_SEARCH';
+    setState(state);
+
+    const page = pageHint || detectPage();
+    if (page === 'SEARCH' || page === 'RESULTS') {
+      await wait(300);
+      await processState(state);
+      return;
+    }
+
+    window.location.href = SEARCH_URL;
+  }
+
   async function skipCurrentCase(state, reason) {
     if (!state || state.step === 'DONE') return;
     const c = state.cases && state.cases[state.currentIndex];
@@ -1075,11 +1094,8 @@
     clearBackupState();
 
     if (state.currentIndex < state.cases.length) {
-      state.step = 'FILL_AND_SEARCH';
-      setState(state);
       showPanel(state);
-      await wait(300);
-      window.location.href = SEARCH_URL;
+      await continueWithNextCase(state);
       return;
     }
 
@@ -1662,7 +1678,8 @@
           state.nameIndex = nextNameIndex;
           state.step = 'FILL_AND_SEARCH';
           setState(state);
-          window.location.href = SEARCH_URL;
+          await wait(300);
+          await processState(state);
         } else {
           await saveAndAdvance(c.instrumentNumber, {
             courtStatus: 'RECHECK',
@@ -1673,9 +1690,7 @@
           await maybeTakeBreak(state);
           showPanel(state);
           if (state.currentIndex < state.cases.length) {
-            state.step = 'FILL_AND_SEARCH';
-            setState(state);
-            window.location.href = SEARCH_URL;
+            await continueWithNextCase(state, page);
           } else {
             finishRun(state);
           }
@@ -1704,9 +1719,7 @@
           await maybeTakeBreak(state);
           showPanel(state);
           if (state.currentIndex < state.cases.length) {
-            state.step = 'FILL_AND_SEARCH';
-            setState(state);
-            window.location.href = SEARCH_URL;
+            await continueWithNextCase(state, page);
           } else {
             finishRun(state);
           }
@@ -1737,7 +1750,8 @@
             state.nameIndex = nextNameIndex;
             state.step = 'FILL_AND_SEARCH';
             setState(state);
-            window.location.href = SEARCH_URL;
+            await wait(300);
+            await processState(state);
           } else {
           await saveAndAdvance(c.instrumentNumber, {
             courtStatus: 'RECHECK',
@@ -1748,9 +1762,7 @@
             await maybeTakeBreak(state);
             showPanel(state);
             if (state.currentIndex < state.cases.length) {
-              state.step = 'FILL_AND_SEARCH';
-              setState(state);
-              window.location.href = SEARCH_URL;
+              await continueWithNextCase(state, page);
             } else {
               finishRun(state);
             }
@@ -1786,10 +1798,13 @@
           resetCaptchaRetries(state);
           state.errors++; state.done++; state.currentIndex++;
           await maybeTakeBreak(state);
-          state.step = state.currentIndex < state.cases.length ? 'FILL_AND_SEARCH' : 'DONE';
           setState(state);
           showPanel(state);
-          window.location.href = SEARCH_URL;
+          if (state.currentIndex < state.cases.length) {
+            await continueWithNextCase(state, page);
+          } else {
+            finishRun(state);
+          }
         }
         return;
       }
