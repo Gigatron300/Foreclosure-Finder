@@ -950,11 +950,11 @@
 
     document.getElementById('csc-btn-new').addEventListener('click', () => startRun({ testMode: false, mode: 'refresh', resume: false }));
     document.getElementById('csc-btn-resume').addEventListener('click', () => startRun({ testMode: false, mode: 'refresh', resume: true }));
-    document.getElementById('csc-btn-standard').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false }));
+    document.getElementById('csc-btn-standard').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, blankOnly: true }));
     document.getElementById('csc-btn-test').addEventListener('click', () => startRun({ testMode: true, mode: 'refresh', resume: false }));
   }
 
-  async function startRun({ testMode = false, mode = 'default', resume = false }) {
+  async function startRun({ testMode = false, mode = 'default', resume = false, blankOnly = false }) {
     const launcher = document.getElementById('csc-launcher');
     if (launcher) launcher.remove();
 
@@ -965,6 +965,9 @@
     let payload;
     try {
       let url = SERVER + '/api/camden/court-status-cases?token=' + encodeURIComponent(TOKEN) + (testMode ? '&test=true' : '');
+      if (blankOnly) {
+        url += '&blankOnly=true';
+      }
       if (mode === 'refresh') {
         url += `&mode=refresh&resume=${resume ? 'true' : 'false'}`;
       }

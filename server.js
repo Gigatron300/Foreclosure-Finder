@@ -955,12 +955,18 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
     const data = JSON.parse(content);
     const testMode = req.query.test === 'true';
+    const blankOnly = req.query.blankOnly === 'true';
 
     // Filter to cases that need court status
     let cases = (data.cases || []).filter(c => {
-      // Skip if already closed; OPEN cases can be re-scanned for richer docket/action data.
-      const existingStatus = (c.courtStatus || '').toUpperCase();
-      if (existingStatus === 'CLOSED') return false;
+      const existingStatusRaw = (c.courtStatus || '').trim();
+      const existingStatus = existingStatusRaw.toUpperCase();
+      if (blankOnly) {
+        if (existingStatusRaw) return false;
+      } else {
+        // Skip if already closed; OPEN cases can be re-scanned for richer docket/action data.
+        if (existingStatus === 'CLOSED') return false;
+      }
       const searchNames = Array.isArray(c.defendants) && c.defendants.length ? c.defendants : c.allDefendants;
       if (!Array.isArray(searchNames) || !searchNames.some(name => (name || '').trim())) return false;
       return true;
@@ -973,7 +979,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       cases = cases.slice(0, 10);
     }
 
-    console.log(`📋 Serving ${cases.length} cases for court status lookup${testMode ? ' (TEST MODE)' : ''}`);
+    console.log(`📋 Serving ${cases.length} cases for court status lookup${blankOnly ? ' (blank court status only)' : ''}${testMode ? ' (TEST MODE)' : ''}`);
     res.json(cases);
   } catch (error) {
     if (error.code === 'ENOENT') {
