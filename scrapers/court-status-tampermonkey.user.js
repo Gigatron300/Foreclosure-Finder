@@ -76,6 +76,7 @@
   function expandThreePartTailFirst(name) {
     const parts = normalizeNameParts(name);
     if (parts.length !== 3) return [];
+    if ((parts[2] || '').length < 2) return [];
     return uniqueNames([
       buildSearchName(parts[0], parts[2], '')
     ]);
@@ -362,6 +363,7 @@
   const BREAK_MS = 0;
   const WATCHDOG_MS = 300001;
   const SEARCH_WINDOW_DAYS = 90;
+  const CAPTCHA_RETRY_LIMIT = 2;
   const Core = globalThis.CourtStatusCore;
   if (!Core) throw new Error('CourtStatusCore not loaded');
   // GM storage keys (cross-domain, shared across all @match domains)
@@ -370,6 +372,29 @@
 
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let searchConfigLoaded = false;
+
+  function randomBetween(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  async function humanPause(min, max) {
+    await wait(randomBetween(min, max));
+  }
+
+  async function clearClientSideStorageBestEffort() {
+    try { sessionStorage.clear(); } catch {}
+    try { localStorage.clear(); } catch {}
+    try {
+      if (window.indexedDB && typeof window.indexedDB.databases === 'function') {
+        const dbs = await window.indexedDB.databases();
+        for (const db of dbs || []) {
+          if (db && db.name) {
+            try { window.indexedDB.deleteDatabase(db.name); } catch {}
+          }
+        }
+      }
+    } catch {}
+  }
 
   async function loadSearchConfig() {
     if (searchConfigLoaded) return;
@@ -422,10 +447,113 @@
     return bodyText.includes('OK(OA)|name=ruxitagentjs') || bodyText.includes('name=ruxitagentjs|featureHash=');
   }
 
+  function isElementVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (style && (style.display === 'none' || style.visibility === 'hidden' || style.pointerEvents === 'none')) return false;
+    const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+    return !!(rect && rect.width > 0 && rect.height > 0);
+  }
+
+  function getElementActionText(el) {
+    if (!el) return '';
+    return [
+      el.textContent || '',
+      el.value || '',
+      el.getAttribute && el.getAttribute('aria-label'),
+      el.getAttribute && el.getAttribute('title')
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function findClickableAncestor(el) {
+    let target = el;
+    while (target && target !== document.body) {
+      const tag = (target.tagName || '').toUpperCase();
+      const role = (target.getAttribute && target.getAttribute('role')) || '';
+      const href = target.getAttribute && target.getAttribute('href');
+      if (tag === 'A' || tag === 'BUTTON' || role === 'button' || href || (tag === 'INPUT' && /^(BUTTON|SUBMIT)$/i.test(target.type || ''))) {
+        return target;
+      }
+      target = target.parentElement;
+    }
+    return el || null;
+  }
+
+  function findClickableReturningUsersControl() {
+    const selectors = [
+      'a',
+      'button',
+      '[role="button"]',
+      'input[type="button"]',
+      'input[type="submit"]',
+      'div',
+      'span'
+    ];
+    const nodes = Array.from(document.querySelectorAll(selectors.join(',')));
+    const exactMatches = [];
+    const looseMatches = [];
+
+    for (const el of nodes) {
+      const text = getElementActionText(el);
+      if (!text) continue;
+      const target = findClickableAncestor(el);
+      if (!target || !isElementVisible(target)) continue;
+      if (/^returning users$/i.test(text)) {
+        exactMatches.push(target);
+        continue;
+      }
+      if (/returning users/i.test(text)) {
+        looseMatches.push(target);
+      }
+    }
+
+    return exactMatches[0] || looseMatches[0] || null;
+  }
+
+  function activateReturningUsersControl(el) {
+    if (!el) return false;
+
+    const target = findClickableAncestor(el);
+    if (!target) return false;
+
+    const href = target.getAttribute && target.getAttribute('href');
+    const tagName = (target.tagName || '').toUpperCase();
+
+    console.log('CSC: Activating Returning Users control:', {
+      tag: tagName,
+      id: target.id || '',
+      classes: target.className || '',
+      href: href || '',
+      text: getElementActionText(target)
+    });
+
+    try {
+      if (tagName === 'A' && href && !/^#|^javascript:/i.test(href)) {
+        target.setAttribute('target', '_self');
+        window.location.href = target.href || href;
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (tagName === 'BUTTON') {
+        const form = target.closest('form');
+        if (form) {
+          if (typeof form.requestSubmit === 'function') form.requestSubmit(target);
+          else form.submit();
+          return true;
+        }
+      }
+    } catch {}
+
+    return fireHumanClick(target);
+  }
+
   // ============================================================
   // CAPTCHA RECOVERY: Handle login page (portal-cloud.njcourts.gov)
   // ============================================================
   if (isLoginPage) {
+    await clearClientSideStorageBestEffort();
     await wait(2000);
     const recovery = getRecoveryFlag();
     if (!recovery) return; // Not in recovery mode, do nothing on login page
@@ -524,19 +652,24 @@
   }
 
   if (isPublicAccessSite) {
+    await clearClientSideStorageBestEffort();
     await wait(1500);
     const recovery = getRecoveryFlag();
     if (!recovery) return;
+    if (recovery === 'public_access_click_started') return;
 
     const bodyText = document.body.innerText || '';
     if (!/civil and foreclosure public access/i.test(bodyText) && !/returning users/i.test(bodyText)) return;
 
-    const links = Array.from(document.querySelectorAll('a, button'));
-    const returningUsers = links.find(el => /returning users/i.test((el.textContent || '').trim()));
-    if (returningUsers) {
-      console.log('CSC: Public access page detected, clicking Returning Users...');
-      returningUsers.click();
-      return;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const returningUsers = findClickableReturningUsersControl();
+      if (returningUsers) {
+        console.log('CSC: Public access page detected, activating Returning Users...');
+        setRecoveryFlag('public_access_click_started');
+        activateReturningUsersControl(returningUsers);
+        return;
+      }
+      await wait(1000);
     }
 
     console.log('CSC: Public access page detected but Returning Users button was not found automatically.');
@@ -608,79 +741,247 @@
     return true;
   }
 
-  async function ensurePartyNameTab() {
-    const lnameField = document.getElementById('searchByPartyNameForm:partyLName');
-    if (lnameField && lnameField.offsetParent !== null) return true;
+  function isFieldReady(id) {
+    const el = document.getElementById(id);
+    return !!(el && isElementVisible(el) && !el.disabled);
+  }
 
-    const tabs = document.querySelectorAll('a, li');
-    for (const t of tabs) {
-      const text = (t.textContent || '').trim();
-      if (text === 'Search By Party Name') {
-        t.click();
-        await wait(800);
+  function normalizeActionText(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  }
+
+  function findSearchTabControls(mode) {
+    const isParty = mode === 'party';
+    const exactLabel = isParty ? 'SEARCH BY PARTY NAME' : 'SEARCH BY DOCKET NUMBER';
+    const partialLabel = isParty ? 'PARTY NAME' : 'DOCKET NUMBER';
+    const hrefTarget = isParty ? '#tabs-2' : '#tabs-1';
+    const controls = [];
+    const seen = new Set();
+
+    const add = (el) => {
+      if (!el || seen.has(el)) return;
+      seen.add(el);
+      controls.push(el);
+    };
+
+    add(document.querySelector(`a[href="${hrefTarget}"]`));
+
+    const tabAnchors = document.querySelectorAll('.ui-tabs-anchor, [role="tab"] a, .ui-tabs-nav a, a, button, [role="tab"], [role="button"], li.ui-tabs-header, .ui-tabs-nav li');
+    tabAnchors.forEach(el => {
+      const text = normalizeActionText(el.textContent || el.value || '');
+      if (!text) return;
+      if (text === exactLabel || text.includes(partialLabel)) add(el);
+    });
+
+    return controls;
+  }
+
+  function activateSearchTabViaLibrary(mode) {
+    const tabIndex = mode === 'party' ? 1 : 0;
+    try {
+      if (typeof window.jQuery !== 'undefined' && window.jQuery('#tabs').length && typeof window.jQuery('#tabs').tabs === 'function') {
+        window.jQuery('#tabs').tabs('option', 'active', tabIndex);
         return true;
       }
-    }
+    } catch {}
     return false;
+  }
+
+  async function ensureSearchTab(mode) {
+    const isParty = mode === 'party';
+    const fieldId = isParty
+      ? 'searchByPartyNameForm:partyLName'
+      : 'searchByDocForm:idCivilDocketNum';
+
+    if (isFieldReady(fieldId)) return true;
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt === 0) activateSearchTabViaLibrary(mode);
+
+      const tabs = findSearchTabControls(mode);
+      if (!tabs.length && attempt > 0) break;
+
+      for (const tab of tabs) {
+        await humanPause(140, 320);
+        fireHumanClick(tab);
+        await humanPause(500, 950);
+        if (isFieldReady(fieldId)) return true;
+      }
+
+      if (activateSearchTabViaLibrary(mode)) {
+        await humanPause(180, 420);
+        if (isFieldReady(fieldId)) return true;
+      }
+
+      const tabHeaders = document.querySelectorAll('.ui-tabs-anchor, [role="tab"] a, .ui-tabs-nav a');
+      const fallbackHeader = tabHeaders[isParty ? 1 : 0];
+      if (fallbackHeader) {
+        await humanPause(140, 320);
+        fireHumanClick(fallbackHeader);
+        await humanPause(500, 950);
+        if (isFieldReady(fieldId)) return true;
+      }
+    }
+
+    return isFieldReady(fieldId);
+  }
+
+  async function ensurePartyNameTab() {
+    return ensureSearchTab('party');
   }
 
   async function ensureDocketTab() {
-    const docketField = document.getElementById('searchByDocForm:idCivilDocketNum');
-    if (docketField && docketField.offsetParent !== null) return true;
-
-    const tabs = document.querySelectorAll('a, li');
-    for (const t of tabs) {
-      const text = (t.textContent || '').trim();
-      if (text === 'Search By Docket Number') {
-        t.click();
-        await wait(800);
-        return true;
-      }
-    }
-    return false;
+    return ensureSearchTab('docket');
   }
 
-  function clickSearchButton() {
-    const btn = document.getElementById('searchByPartyNameForm:searchBtnDummy');
-    if (btn) {
-      btn.click();
-      return true;
+  function getPartyNameFields() {
+    return {
+      lastField: document.getElementById('searchByPartyNameForm:partyLName'),
+      firstField: document.getElementById('searchByPartyNameForm:partyFName'),
+      midField: document.getElementById('searchByPartyNameForm:partyMName')
+    };
+  }
+
+  function populatePartyNameFields(parsed) {
+    const { lastField, firstField, midField } = getPartyNameFields();
+    if (!lastField || !firstField || !parsed || !parsed.last) return false;
+
+    setField('searchByPartyNameForm:partyLName', parsed.last);
+    setField('searchByPartyNameForm:partyFName', (parsed.first || '').slice(0, 9));
+    if (midField) setField('searchByPartyNameForm:partyMName', parsed.mid);
+
+    if (lastField.value !== parsed.last || firstField.value !== (parsed.first || '').slice(0, 9)) {
+      lastField.value = parsed.last;
+      firstField.value = (parsed.first || '').slice(0, 9);
     }
 
-    const allBtns = document.querySelectorAll('input[type="submit"], button');
-    for (const b of allBtns) {
-      if ((b.value || '').trim() === 'Search' && b.offsetParent !== null) {
-        b.click();
-        return true;
-      }
+    return true;
+  }
+
+  function fireHumanClick(el) {
+    if (!el) return false;
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+    try { el.focus(); } catch {}
+
+    try {
+      const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+      const base = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: rect ? rect.left + Math.max(2, Math.min(rect.width - 2, rect.width * 0.35 + Math.random() * rect.width * 0.3)) : 0,
+        clientY: rect ? rect.top + Math.max(2, Math.min(rect.height - 2, rect.height * 0.35 + Math.random() * rect.height * 0.3)) : 0
+      };
+      try { el.dispatchEvent(new MouseEvent('pointerover', base)); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mouseover', base)); } catch {}
+      try { el.dispatchEvent(new MouseEvent('pointerenter', base)); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mouseenter', base)); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mousemove', base)); } catch {}
+      try { el.dispatchEvent(new MouseEvent('pointerdown', { ...base, button: 0, buttons: 1 })); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mousedown', { ...base, button: 0, buttons: 1 })); } catch {}
+      try { el.dispatchEvent(new MouseEvent('pointerup', { ...base, button: 0, buttons: 0 })); } catch {}
+      try { el.dispatchEvent(new MouseEvent('mouseup', { ...base, button: 0, buttons: 0 })); } catch {}
+      try { el.dispatchEvent(new MouseEvent('click', { ...base, button: 0, buttons: 0, detail: 1 })); } catch {}
+      if (typeof el.click === 'function') el.click();
+    } catch {}
+    return true;
+  }
+
+  function findVisibleSearchTrigger(formId) {
+    const form = formId ? document.getElementById(formId) : null;
+    const scope = form || document;
+    const candidates = Array.from(scope.querySelectorAll('input[type="submit"], button, a'));
+    return candidates.find(el => {
+      if (!el || el.offsetParent === null) return false;
+      const value = (el.value || '').trim();
+      const text = (el.textContent || '').trim();
+      return value === 'Search' || text === 'Search';
+    }) || null;
+  }
+
+  function findAnySearchTrigger(formId) {
+    const form = formId ? document.getElementById(formId) : null;
+    if (!form) return null;
+    const candidates = Array.from(form.querySelectorAll('input[type="submit"], button, a'));
+    return candidates.find(el => {
+      if (!el) return false;
+      const value = (el.value || '').trim();
+      const text = (el.textContent || '').trim();
+      return value === 'Search' || text === 'Search';
+    }) || null;
+  }
+
+  async function clickSearchButton() {
+    const visibleBtn = findVisibleSearchTrigger('searchByPartyNameForm');
+    if (visibleBtn) {
+      await humanPause(350, 900);
+      return fireHumanClick(visibleBtn);
+    }
+
+    const btn = document.getElementById('searchByPartyNameForm:searchBtnDummy');
+    if (btn && btn.offsetParent !== null) {
+      await humanPause(350, 900);
+      return fireHumanClick(btn);
     }
 
     // Last resort: submit the form directly
     const form = document.getElementById('searchByPartyNameForm');
-    if (form) { form.submit(); return true; }
+    if (form) {
+      await humanPause(450, 1100);
+      form.submit();
+      return true;
+    }
     return false;
   }
 
-  function clickDocketSearchButton() {
-    const btn = document.getElementById('searchByDocForm:searchBtnDummy');
-    if (btn) {
-      btn.click();
+  async function clickPartySearchButtonPassive() {
+    const anyBtn = findAnySearchTrigger('searchByPartyNameForm');
+    if (anyBtn) {
+      await humanPause(350, 900);
+      return fireHumanClick(anyBtn);
+    }
+
+    const form = document.getElementById('searchByPartyNameForm');
+    if (form) {
+      await humanPause(450, 1100);
+      if (typeof form.requestSubmit === 'function') {
+        form.requestSubmit();
+      } else {
+        form.submit();
+      }
       return true;
     }
 
-    // Fallback: find any visible Search button
-    const allBtns = document.querySelectorAll('input[type="submit"], button');
-    for (const b of allBtns) {
-      if ((b.value || '').trim() === 'Search' && b.offsetParent !== null) {
-        b.click();
-        return true;
-      }
+    return false;
+  }
+
+  async function clickDocketSearchButton() {
+    const visibleBtn = findVisibleSearchTrigger('searchByDocForm');
+    if (visibleBtn) {
+      await humanPause(350, 900);
+      return fireHumanClick(visibleBtn);
+    }
+
+    const btn = document.getElementById('searchByDocForm:searchBtnDummy');
+    if (btn && btn.offsetParent !== null) {
+      await humanPause(350, 900);
+      return fireHumanClick(btn);
     }
 
     // Last resort: submit the form directly
     const form = document.getElementById('searchByDocForm');
-    if (form) { form.submit(); return true; }
+    if (form) {
+      await humanPause(450, 1100);
+      form.submit();
+      return true;
+    }
     return false;
+  }
+
+  async function clickResultLinkHuman(link) {
+    if (!link) return false;
+    await humanPause(400, 1050);
+    return fireHumanClick(link);
   }
 
   const dateDistanceDays = Core.dateDistanceDays;
@@ -694,9 +995,8 @@
   const getSearchCandidates = Core.getSearchCandidates;
 
   function getCurrentSearchCandidate(state) {
-    const c = state && state.cases ? state.cases[state.currentIndex] : null;
     const candidates = ensureCaseSearchState(state);
-    return candidates[state.nameIndex] || (c ? { name: c.defendant || '', mode: 'standard', dateWindowDays: SEARCH_WINDOW_DAYS } : null);
+    return candidates[state.nameIndex] || null;
   }
 
   async function saveToServer(instrumentNumber, courtData) {
@@ -747,12 +1047,76 @@
     return;
   }
 
+  function resetCaptchaRetries(state) {
+    if (state) state.captchaRetries = 0;
+  }
+
+  async function skipCurrentCase(state, reason) {
+    if (!state || state.step === 'DONE') return;
+    const c = state.cases && state.cases[state.currentIndex];
+    if (!c) return;
+
+    const note = buildStatusNote('RECHECK_REASON:MANUAL_SKIP', reason || 'Manual skip');
+    setStatusByType('recheck', 'Skipping current case...');
+
+    await saveAndAdvance(c.instrumentNumber, {
+      courtStatus: 'RECHECK',
+      courtStatusNote: note
+    }, state);
+
+    resetCaptchaRetries(state);
+    state.notFound++;
+    state.done++;
+    state.currentIndex++;
+    state.nameIndex = 0;
+    state.isOnBreak = false;
+
+    clearRecoveryFlag();
+    clearBackupState();
+
+    if (state.currentIndex < state.cases.length) {
+      state.step = 'FILL_AND_SEARCH';
+      setState(state);
+      showPanel(state);
+      await wait(300);
+      window.location.href = SEARCH_URL;
+      return;
+    }
+
+    finishRun(state);
+  }
+
   function hasCaptchaBlock() {
     const bodyText = document.body.innerText || '';
     return (
       bodyText.includes('Captcha verification has failed') ||
       bodyText.includes('Please try again in a few minutes')
     );
+  }
+
+  async function retryCurrentSearchBeforeRecovery(state) {
+    if (!state || state.step !== 'READ_RESULTS') return false;
+
+    const retries = typeof state.captchaRetries === 'number' ? state.captchaRetries : 0;
+    if (retries >= CAPTCHA_RETRY_LIMIT) return false;
+
+    state.captchaRetries = retries + 1;
+    setState(state);
+    showPanel(state);
+    setStatusByType('recheck', `CAPTCHA detected. Retrying search (${state.captchaRetries}/${CAPTCHA_RETRY_LIMIT})...`);
+
+    await humanPause(250, 500);
+
+    if (state.activeSearchMode === 'docket') {
+      await ensureDocketTab();
+      await clickDocketSearchButton();
+      return true;
+    }
+
+    if (await clickPartySearchButtonPassive()) return true;
+
+    await ensurePartyNameTab();
+    return clickSearchButton();
   }
 
   function detectPage() {
@@ -890,8 +1254,29 @@
       </div>
       <div style="margin-top:6px;color:#94a3b8">Current: <b>${nameDisplay}</b></div>
       <div id="csc-status" style="margin-top:8px;padding:8px;background:#1e293b;border-radius:6px;min-height:40px">Loading...</div>
+      <button id="csc-skip-btn" style="margin-top:8px;margin-right:8px;border:none;padding:6px 14px;border-radius:6px;background:#f59e0b;color:#0f172a;cursor:pointer;font-weight:600">Skip Case</button>
       <button id="csc-stop-btn" style="margin-top:8px;border:none;padding:6px 14px;border-radius:6px;background:#ef4444;color:#fff;cursor:pointer">Stop</button>
     `;
+
+    document.getElementById('csc-skip-btn').addEventListener('click', async () => {
+      const currentState = getState();
+      if (!currentState || currentState.step === 'DONE') return;
+      const skipBtn = document.getElementById('csc-skip-btn');
+      if (skipBtn) {
+        skipBtn.disabled = true;
+        skipBtn.textContent = 'Skipping...';
+      }
+      try {
+        await skipCurrentCase(currentState, 'Skipped from control panel');
+      } catch (e) {
+        console.error('CSC skip failed:', e);
+        setStatusByType('error', 'Skip failed: ' + e.message);
+        if (skipBtn) {
+          skipBtn.disabled = false;
+          skipBtn.textContent = 'Skip Case';
+        }
+      }
+    });
 
     document.getElementById('csc-stop-btn').addEventListener('click', () => {
       clearState();
@@ -1049,10 +1434,12 @@
       });
 
       if (cleared && cleared.success) {
-        console.log('CSC: Cookies cleared by extension. Navigating to login...');
-        setStatusByType('info', 'Cookies cleared! Logging in...');
-        await wait(2000);
-        window.location.href = LOGIN_URL;
+        console.log('CSC: Cookies cleared by extension. Re-entering through public access...');
+        await clearClientSideStorageBestEffort();
+        setRecoveryFlag('public_access_reentry');
+        setStatusByType('info', 'Cookies cleared! Re-entering...');
+        await wait(6000);
+        window.location.href = PUBLIC_ACCESS_URL;
       } else {
         throw new Error('Extension returned failure');
       }
@@ -1084,9 +1471,27 @@
           <div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">
             Done ${state.done}/${state.total} | Will resume from case ${state.currentIndex + 1}
           </div>
+          <button id="csc-skip-case-btn" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#f59e0b;color:#0f172a;font-size:14px;font-weight:700;">Skip This Case</button>
           <button id="csc-resume-btn" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#2563eb;color:#fff;font-size:14px;font-weight:600;">Resume (after clearing cookies)</button>
           <button id="csc-stop-btn" style="width:100%;padding:8px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#ef4444;color:#fff;font-size:12px;">Cancel Run</button>
         `;
+        document.getElementById('csc-skip-case-btn').addEventListener('click', async () => {
+          const btn = document.getElementById('csc-skip-case-btn');
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Skipping...';
+          }
+          try {
+            await skipCurrentCase(state, 'Skipped during CAPTCHA recovery');
+          } catch (err) {
+            console.error('CSC skip failed during recovery:', err);
+            setStatusByType('error', 'Skip failed: ' + err.message);
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = 'Skip This Case';
+            }
+          }
+        });
         document.getElementById('csc-resume-btn').addEventListener('click', () => {
           setRecoveryFlag('resuming');
           window.location.href = LOGIN_URL;
@@ -1109,6 +1514,7 @@
   // CAPTCHA RECOVERY (replaces old wait-and-retry)
   // ============================================================
   if (hasCaptchaBlock()) {
+      if (await retryCurrentSearchBeforeRecovery(state)) return;
       await startCaptchaRecovery(state);
       return;
     }
@@ -1130,7 +1536,12 @@
 
       const docket = parseDocket(c.courtDocketNumber);
       if (docket) {
-        await ensureDocketTab();
+        state.activeSearchMode = 'docket';
+        const docketTabReady = await ensureDocketTab();
+        if (!docketTabReady) {
+          setStatusByType('error', 'Could not switch to Docket Number tab');
+          return;
+        }
         await wait(300);
 
         const typeSelect = document.getElementById('searchByDocForm:docketType');
@@ -1146,10 +1557,32 @@
 
         state.step = 'READ_JACKET';
         state.lastMatch = { matchScore: 10, docket: c.courtDocketNumber };
+        if (typeof state.captchaRetries !== 'number') state.captchaRetries = 0;
         setState(state);
 
         setStatusByType('info', `Docket search: ${docket.type}-${docket.number}-${docket.year}`);
-        clickDocketSearchButton();
+        await clickDocketSearchButton();
+        return;
+      }
+
+      state.activeSearchMode = 'party';
+      const candidates = ensureCaseSearchState(state);
+      if (!candidates.length) {
+        await saveAndAdvance(c.instrumentNumber, {
+          courtStatus: 'RECHECK',
+          courtStatusNote: buildStatusNote('RECHECK_REASON:ALL_NAMES_SKIPPED', 'All candidate names matched skip rules')
+        }, state);
+        state.notFound++; state.done++; state.currentIndex++; state.nameIndex = 0;
+        await maybeTakeBreak(state);
+        showPanel(state);
+        if (state.currentIndex < state.cases.length) {
+          state.step = 'FILL_AND_SEARCH';
+          setState(state);
+          await wait(400);
+          await processState(state);
+        } else {
+          finishRun(state);
+        }
         return;
       }
 
@@ -1173,39 +1606,51 @@
         return;
       }
 
-      await ensurePartyNameTab();
-      await wait(200);
+      let fieldsReady = populatePartyNameFields(parsed);
+      if (!fieldsReady) {
+        const partyTabReady = await ensurePartyNameTab();
+        if (!partyTabReady) {
+          setStatusByType('error', 'Could not switch to Party Name tab');
+          return;
+        }
+        await wait(200);
+        fieldsReady = populatePartyNameFields(parsed);
+      }
 
-      const lastField = document.getElementById('searchByPartyNameForm:partyLName');
-      const firstField = document.getElementById('searchByPartyNameForm:partyFName');
-      const midField = document.getElementById('searchByPartyNameForm:partyMName');
-
-      if (!lastField || !firstField) {
+      if (!fieldsReady) {
         setStatusByType('error', 'Cannot find name fields');
         return;
       }
 
-      setField('searchByPartyNameForm:partyLName', parsed.last);
-      await wait(150);
-      setField('searchByPartyNameForm:partyFName', (parsed.first || '').slice(0, 9));
-      await wait(150);
-      if (midField) setField('searchByPartyNameForm:partyMName', parsed.mid);
-      await wait(150);
-
-      if (lastField.value !== parsed.last || firstField.value !== (parsed.first || '').slice(0, 9)) {
-        lastField.value = parsed.last;
-        firstField.value = (parsed.first || '').slice(0, 9);
-      }
-
       state.step = 'READ_RESULTS';
+      if (typeof state.captchaRetries !== 'number') state.captchaRetries = 0;
       setState(state);
       setStatusByType('info', `Searching ${parsed.last}, ${(parsed.first || '').slice(0, 9)}`);
-      clickSearchButton();
+      if (!await clickPartySearchButtonPassive()) {
+        const partyTabReady = await ensurePartyNameTab();
+        if (!partyTabReady) {
+          setStatusByType('error', 'Could not switch to Party Name tab');
+          return;
+        }
+        await wait(200);
+        if (!populatePartyNameFields(parsed)) {
+          setStatusByType('error', 'Cannot find name fields');
+          return;
+        }
+        if (!await clickSearchButton()) {
+          setStatusByType('error', 'Could not submit party name search');
+          return;
+        }
+      }
       return;
     }
 
     if (state.step === 'READ_RESULTS') {
-      if (hasCaptchaBlock()) { await startCaptchaRecovery(state); return; }
+      if (hasCaptchaBlock()) {
+        if (await retryCurrentSearchBeforeRecovery(state)) return;
+        await startCaptchaRecovery(state);
+        return;
+      }
       const bodyText = document.body.innerText || '';
 
       if (bodyText.includes('Party Name is invalid')) {
@@ -1223,6 +1668,7 @@
             courtStatus: 'RECHECK',
             courtStatusNote: buildStatusNote('RECHECK_REASON:ALL_NAMES_INVALID', 'names tried: ' + names.length)
           }, state);
+          resetCaptchaRetries(state);
           state.notFound++; state.done++; state.currentIndex++; state.nameIndex = 0;
           await maybeTakeBreak(state);
           showPanel(state);
@@ -1238,8 +1684,8 @@
       }
 
       if (page === 'SEARCH') {
-          const nameIndex = state.nameIndex || 0;
-          const names = ensureCaseSearchState(state);
+        const nameIndex = state.nameIndex || 0;
+        const names = ensureCaseSearchState(state);
         const nextNameIndex = nameIndex + 1;
 
         if (nextNameIndex < names.length) {
@@ -1253,6 +1699,7 @@
             courtStatus: 'RECHECK',
             courtStatusNote: buildStatusNote('RECHECK_REASON:NO_RESULTS_ALL_NAMES', 'names tried: ' + names.length)
           }, state);
+          resetCaptchaRetries(state);
           state.notFound++; state.done++; state.currentIndex++; state.nameIndex = 0;
           await maybeTakeBreak(state);
           showPanel(state);
@@ -1292,11 +1739,12 @@
             setState(state);
             window.location.href = SEARCH_URL;
           } else {
-            await saveAndAdvance(c.instrumentNumber, {
-              courtStatus: 'RECHECK',
-              courtStatusNote: buildStatusNote('RECHECK_REASON:NO_MATCH_ALL_NAMES', `${rows.length} results scanned; names tried: ${names.length}`)
-            }, state);
-            state.notFound++; state.done++; state.currentIndex++; state.nameIndex = 0;
+          await saveAndAdvance(c.instrumentNumber, {
+            courtStatus: 'RECHECK',
+            courtStatusNote: buildStatusNote('RECHECK_REASON:NO_MATCH_ALL_NAMES', `${rows.length} results scanned; names tried: ${names.length}`)
+          }, state);
+          resetCaptchaRetries(state);
+          state.notFound++; state.done++; state.currentIndex++; state.nameIndex = 0;
             await maybeTakeBreak(state);
             showPanel(state);
             if (state.currentIndex < state.cases.length) {
@@ -1323,18 +1771,19 @@
           const trs = t.querySelectorAll('tbody tr');
           if (trs[match.rowIndex]) {
             const link = trs[match.rowIndex].querySelector('td:nth-child(3) a');
-            if (link) { link.click(); clicked = true; break; }
+            if (link) { await clickResultLinkHuman(link); clicked = true; break; }
           }
         }
 
         if (!clicked) {
           const linkId = 'searchByPartyNameForm:idPartyTable:' + match.rowIndex + ':lnkSrchByDocNum';
           const link = document.getElementById(linkId);
-          if (link) { link.click(); clicked = true; }
+          if (link) { await clickResultLinkHuman(link); clicked = true; }
         }
 
         if (!clicked) {
           await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Could not click docket link' }, state);
+          resetCaptchaRetries(state);
           state.errors++; state.done++; state.currentIndex++;
           await maybeTakeBreak(state);
           state.step = state.currentIndex < state.cases.length ? 'FILL_AND_SEARCH' : 'DONE';
@@ -1360,6 +1809,7 @@
           if (hasCaptchaBlock()) { await startCaptchaRecovery(state); return; }
           if (detectPage() !== 'JACKET') {
             await saveAndAdvance(c.instrumentNumber, { courtStatus: 'ERROR', courtStatusNote: 'Jacket page did not load' }, state);
+            resetCaptchaRetries(state);
             state.errors++; state.done++; state.currentIndex++;
             await maybeTakeBreak(state);
             state.step = state.currentIndex < state.cases.length ? 'FILL_AND_SEARCH' : 'DONE';
@@ -1439,6 +1889,7 @@
         courtStatusNote: statusNote
       }, state);
 
+      resetCaptchaRetries(state);
       if (status === 'OPEN') state.open++;
       else if (status === 'CLOSED') state.closed++;
       else if (status === 'STAY') state.stay++;
@@ -1474,7 +1925,7 @@
   }
 
   try {
-    await wait(1000);
+    await wait(250);
     await loadSearchConfig();
     const state = getState();
     if (state && state.step !== 'DONE') {
@@ -1487,4 +1938,3 @@
     console.error('CSC ERROR:', e);
   }
 })();
-
