@@ -109,6 +109,15 @@ function uniqueNames(names) {
   return Array.from(new Set((names || []).map(name => (name || '').trim()).filter(Boolean)));
 }
 
+function normalizeTownName(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/\./g, ' ')
+    .replace(/\bMT\b/g, 'MT')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
@@ -579,7 +588,7 @@ async function enrichCamdenCases(data, options = {}) {
     if (c.propertyAddress) {
       // Backfill lastSaleDate if missing
       if (!c.lastSaleDate && c.town && c.block && c.lot) {
-        const munCode = TOWN_TO_MUN_CODE[(c.town || '').toUpperCase().trim()];
+        const munCode = TOWN_TO_MUN_CODE[normalizeTownName(c.town)];
         if (munCode) {
           await delay(400);
           try {
@@ -595,7 +604,7 @@ async function enrichCamdenCases(data, options = {}) {
       continue;
     }
 
-    const town = (c.town || '').toUpperCase().trim();
+    const town = normalizeTownName(c.town);
     const block = (c.block || '').trim();
     const lot = (c.lot || '').trim();
     const munCode = TOWN_TO_MUN_CODE[town];
