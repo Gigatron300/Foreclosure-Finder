@@ -95,11 +95,15 @@ function getCourtSearchCandidates(c) {
     .filter(candidate => !shouldSkipCourtSearchName(candidate.name));
 }
 
+function hasCourtLookupInput(c) {
+  return !!(c?.courtDocketNumber || getCourtSearchCandidates(c).length);
+}
+
 function getDefaultCourtStatusCases(data, { testMode = false } = {}) {
   let cases = (data.cases || []).filter(c => {
     const existingStatus = (c.courtStatus || '').trim().toUpperCase();
     if (existingStatus) return false;
-    if (!getCourtSearchCandidates(c).length) return false;
+    if (!hasCourtLookupInput(c)) return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
@@ -114,7 +118,7 @@ function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
     const existingStatus = (c.courtStatus || '').toUpperCase();
     if (existingStatus !== 'OPEN' && existingStatus !== 'STAY') return false;
     if (!c.courtDocketNumber) return false;
-    if (!getCourtSearchCandidates(c).length) return false;
+    if (!hasCourtLookupInput(c)) return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
@@ -1051,6 +1055,10 @@ app.post('/api/camden/court-status-update', cors({
     const isFinalStatus = existingStatus === 'OPEN' || existingStatus === 'CLOSED' || existingStatus === 'STAY';
     const isDowngrade = incomingStatus === 'RECHECK' || incomingStatus === 'NOT_FOUND' || incomingStatus === 'UNKNOWN';
     const mergedCourtData = { ...courtData };
+
+    if (incomingStatus === 'RECHECK') {
+      mergedCourtData.courtDocketNumber = data.cases[caseIdx].courtDocketNumber || '';
+    }
 
     if (isFinalStatus && isDowngrade) {
       mergedCourtData.courtStatus = existingStatus;

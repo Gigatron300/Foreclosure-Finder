@@ -288,9 +288,10 @@
     const names = uniqueNames(params && Array.isArray(params.names) ? params.names : []);
     const windowDays = params && params.windowDays ? params.windowDays : 90;
     const hasLockedDocket = !!(params && params.hasLockedDocket);
+    const hasProvidedDocket = !!(params && params.hasProvidedDocket);
 
     const daysDiff = dateDistanceDays(filingDate, jacketDate);
-    if (daysDiff == null || daysDiff <= windowDays || hasLockedDocket) {
+    if (daysDiff == null || daysDiff <= windowDays || hasLockedDocket || hasProvidedDocket) {
       return { action: 'accept', daysDiff };
     }
 

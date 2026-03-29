@@ -288,9 +288,10 @@
     const names = uniqueNames(params && Array.isArray(params.names) ? params.names : []);
     const windowDays = params && params.windowDays ? params.windowDays : 90;
     const hasLockedDocket = !!(params && params.hasLockedDocket);
+    const hasProvidedDocket = !!(params && params.hasProvidedDocket);
 
     const daysDiff = dateDistanceDays(filingDate, jacketDate);
-    if (daysDiff == null || daysDiff <= windowDays || hasLockedDocket) {
+    if (daysDiff == null || daysDiff <= windowDays || hasLockedDocket || hasProvidedDocket) {
       return { action: 'accept', daysDiff };
     }
 
@@ -1850,7 +1851,8 @@
           currentNameIndex: state.nameIndex || 0,
           names: ensureCaseSearchState(state).map(item => item.name),
           windowDays: candidate && candidate.dateWindowDays ? candidate.dateWindowDays : SEARCH_WINDOW_DAYS,
-          hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK')
+          hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK'),
+          hasProvidedDocket: !!c.courtDocketNumber
         });
         if (jacketDecision.action === 'next-name') {
           state.nameIndex = jacketDecision.nextNameIndex;
@@ -1886,14 +1888,13 @@
         `${label} | ${jacket.docketNumber} | ${jacket.caseStatus} / ${jacket.caseDisposition || '-'}${!dateOk ? ' | DATE MISMATCH' : ''}`
       );
 
-      await saveAndAdvance(c.instrumentNumber, {
+      const courtUpdate = {
         courtStatus: status,
         courtStatusRaw: jacket.caseStatus,
         courtDisposition: jacket.caseDisposition,
         courtCaseType: jacket.caseType,
         courtCaseCaption: jacket.caseCaption,
         courtFiledDate: jacket.caseInitDate,
-        courtDocketNumber: jacket.docketNumber,
         courtDispositionDate: jacket.dispositionDate,
         courtCaseActions: jacket.courtCaseActions || [],
         courtCaseActionsText: jacket.courtCaseActionsText || '',
@@ -1902,7 +1903,12 @@
         courtLatestActionDate: jacket.courtLatestActionDate || '',
         courtMatchScore: match.matchScore || 0,
         courtStatusNote: statusNote
-      }, state);
+      };
+      if (status !== 'RECHECK' && jacket.docketNumber) {
+        courtUpdate.courtDocketNumber = jacket.docketNumber;
+      }
+
+      await saveAndAdvance(c.instrumentNumber, courtUpdate, state);
 
       resetCaptchaRetries(state);
       if (status === 'OPEN') state.open++;

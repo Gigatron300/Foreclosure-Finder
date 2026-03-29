@@ -574,7 +574,8 @@
       currentNameIndex: state.nameIndex,
       names: ensureCaseSearchState(state).map(item => item.name),
       windowDays: (getCurrentSearchCandidate(state) && getCurrentSearchCandidate(state).dateWindowDays) || SEARCH_WINDOW_DAYS,
-      hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK')
+      hasLockedDocket: !!(c.courtDocketNumber && c.courtStatus && c.courtStatus !== 'RECHECK'),
+      hasProvidedDocket: !!c.courtDocketNumber
     });
 
     if (jacketDecision.action !== 'accept') {
@@ -584,18 +585,22 @@
 
     setStatus(`${status === 'OPEN' ? '🟢' : status === 'CLOSED' || status === 'STAY' ? '🔴' : '⚪'} ${jacket.docketNumber}: ${jacket.caseStatus} / ${jacket.caseDisposition}`);
 
-    await finalizeCaseAndMoveNext(state, {
+    const courtUpdate = {
       courtStatus: status,
       courtStatusRaw: jacket.caseStatus,
       courtDisposition: jacket.caseDisposition,
       courtCaseType: jacket.caseType,
       courtCaseCaption: jacket.caseCaption,
       courtFiledDate: jacket.caseInitDate,
-      courtDocketNumber: jacket.docketNumber,
       courtDispositionDate: jacket.dispositionDate,
       courtMatchScore: match.matchScore || 0,
       courtStatusNote: buildStatusNote('MATCHED', `${getCurrentSearchName(state)} | score ${match.matchScore || 0}`)
-    }, status === 'OPEN' ? 'open' : status === 'CLOSED' ? 'closed' : status === 'STAY' ? 'stay' : null);
+    };
+    if (status !== 'RECHECK' && jacket.docketNumber) {
+      courtUpdate.courtDocketNumber = jacket.docketNumber;
+    }
+
+    await finalizeCaseAndMoveNext(state, courtUpdate, status === 'OPEN' ? 'open' : status === 'CLOSED' ? 'closed' : status === 'STAY' ? 'stay' : null);
 
     setState(state);
     showPanel(state);
