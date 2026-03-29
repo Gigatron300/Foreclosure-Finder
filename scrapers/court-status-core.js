@@ -159,6 +159,7 @@
 
   function classify(status, disposition) {
     const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
+    if (/REINSTATED/.test(combined)) return 'REINSTATED';
     if (/BANKRUPTCY STAY|AUTOMATIC STAY|STAYED|CASE STAYED|\bSTAY\b/.test(combined)) return 'STAY';
     if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
     if (/OPEN|ACTIVE|PENDING|DEFAULTED/.test(combined)) return 'OPEN';

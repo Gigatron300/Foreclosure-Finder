@@ -780,6 +780,7 @@
                         </div>
                         <div id="courtStatusFilterOptions" class="filter-dropdown-options">
                             <label class="filter-dropdown-option"><input type="checkbox" value="OPEN" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Open Cases Only</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="REINSTATED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Reinstated Cases Only</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="CLOSED" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Closed/Dismissed Only</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="STAY" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Bankruptcy Stay Only</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="RECHECK" onchange="handleMultiFilterChange('courtStatusFilterOptions', 'courtStatusFilterButton', 'All Court Status', COURT_STATUS_LABELS)"> <span>Needs Recheck</span></label>
@@ -846,6 +847,7 @@
         };
         const COURT_STATUS_LABELS = {
             OPEN: 'Open Cases Only',
+            REINSTATED: 'Reinstated Cases Only',
             CLOSED: 'Closed/Dismissed Only',
             STAY: 'Bankruptcy Stay Only',
             RECHECK: 'Needs Recheck',
@@ -1233,7 +1235,7 @@
                 document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
                 document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
-                document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
+                document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN' || c.courtStatus === 'REINSTATED').length || '-';
                 document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
                 document.getElementById('stayCount').textContent = allCases.filter(c => c.courtStatus === 'STAY').length || '-';
                 document.getElementById('recheckCount').textContent = allCases.filter(c => c.courtStatus === 'RECHECK').length || '-';
@@ -1532,7 +1534,7 @@
                 : '';
             const mapsUrl = hasAddr ? `https://www.google.com/maps/search/${encodedAddress}` : '';
             const effectiveMode = getEffectiveStreetViewMode();
-            const autoLoadThisCard = effectiveMode === 'auto' || (effectiveMode === 'open-only' && c.courtStatus === 'OPEN');
+            const autoLoadThisCard = effectiveMode === 'auto' || (effectiveMode === 'open-only' && (c.courtStatus === 'OPEN' || c.courtStatus === 'REINSTATED'));
 
             let streetViewHtml;
             if (!hasAddr) {
@@ -1570,6 +1572,7 @@
             if (c.courtStatus) {
                 const colors = {
                     'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '●' },
+                    'REINSTATED': { bg: 'rgba(59,130,246,0.15)', text: '#60a5fa', icon: '◍' },
                     'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '○' },
                     'STAY': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '◉' },
                     'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '◐' }

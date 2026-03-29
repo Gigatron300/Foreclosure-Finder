@@ -159,6 +159,7 @@
 
   function classify(status, disposition) {
     const combined = ((status || '') + ' ' + (disposition || '')).toUpperCase();
+    if (/REINSTATED/.test(combined)) return 'REINSTATED';
     if (/BANKRUPTCY STAY|AUTOMATIC STAY|STAYED|CASE STAYED|\bSTAY\b/.test(combined)) return 'STAY';
     if (/CLOSED|DISMISSED|DISPOSED|RESOLVED|SETTLED|TERMINATED/.test(combined)) return 'CLOSED';
     if (/OPEN|ACTIVE|PENDING|DEFAULTED/.test(combined)) return 'OPEN';
@@ -1872,12 +1873,14 @@
       }
 
       const label = status === 'OPEN' ? 'OPEN'
+        : status === 'REINSTATED' ? 'REINSTATED'
         : status === 'CLOSED' ? 'CLOSED'
         : status === 'STAY' ? 'STAY'
         : status === 'RECHECK' ? 'RECHECK'
         : 'UNKNOWN';
 
       const tone = status === 'OPEN' ? 'open'
+        : status === 'REINSTATED' ? 'open'
         : status === 'CLOSED' ? 'closed'
         : status === 'STAY' ? 'closed'
         : status === 'RECHECK' ? 'recheck'
@@ -1912,6 +1915,7 @@
 
       resetCaptchaRetries(state);
       if (status === 'OPEN') state.open++;
+      else if (status === 'REINSTATED') state.open++;
       else if (status === 'CLOSED') state.closed++;
       else if (status === 'STAY') state.stay++;
       else if (status === 'RECHECK') state.notFound++;
