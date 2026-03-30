@@ -720,6 +720,10 @@
                     <div class="stat-label">Open Cases</div>
                 </div>
                 <div class="stat-item">
+                    <div class="stat-value" id="reinstatedCount" style="color: #93c5fd;">-</div>
+                    <div class="stat-label">Reinstated</div>
+                </div>
+                <div class="stat-item">
                     <div class="stat-value" id="closedCount" style="color: #f87171;">-</div>
                     <div class="stat-label">Closed/Dismissed</div>
                 </div>
@@ -1235,7 +1239,8 @@
                 document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
                 document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
-                document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN' || c.courtStatus === 'REINSTATED').length || '-';
+                document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
+                document.getElementById('reinstatedCount').textContent = allCases.filter(c => c.courtStatus === 'REINSTATED').length || '-';
                 document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
                 document.getElementById('stayCount').textContent = allCases.filter(c => c.courtStatus === 'STAY').length || '-';
                 document.getElementById('recheckCount').textContent = allCases.filter(c => c.courtStatus === 'RECHECK').length || '-';
