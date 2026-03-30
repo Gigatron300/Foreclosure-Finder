@@ -710,6 +710,34 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
     await ensureDataDir();
     await fs.writeFile(CAMDEN_CSV_FILE, csvData, 'utf8');
 
+    // Merge court status + enrichment data from existing file for cases that already exist
+    const existingData = await readJsonFileSafe(CAMDEN_DATA_FILE, null);
+    if (existingData && Array.isArray(existingData.cases)) {
+      const existingByInstrument = new Map(existingData.cases.map(c => [c.instrumentNumber, c]));
+      const courtFields = [
+        'courtStatus', 'courtStatusRaw', 'courtStatusNote', 'courtDocketNumber',
+        'courtDisposition', 'courtCaseType', 'courtCaseCaption', 'courtFiledDate',
+        'courtDispositionDate', 'courtCaseActions', 'courtCaseActionsText',
+        'courtCaseActionCount', 'courtLatestActionText', 'courtLatestActionDate', 'courtMatchScore'
+      ];
+      const enrichmentFields = [
+        'propertyAddress', 'assessedValue', 'landValue', 'improvementValue',
+        'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
+        'propertyClass', 'ownerOfRecord'
+      ];
+      parsed.cases = parsed.cases.map(c => {
+        const existing = existingByInstrument.get(c.instrumentNumber);
+        if (!existing) return c;
+        const merged = { ...c };
+        for (const field of [...courtFields, ...enrichmentFields]) {
+          if (existing[field] !== undefined && existing[field] !== null && existing[field] !== '') {
+            merged[field] = existing[field];
+          }
+        }
+        return merged;
+      });
+    }
+
     // Save parsed JSON
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(parsed, null, 2));
 
