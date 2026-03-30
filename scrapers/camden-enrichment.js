@@ -611,16 +611,21 @@ async function enrichCamdenCases(data, options = {}) {
     const prefix = `  ${i + 1}/${total}`;
 
     if (c.propertyAddress) {
-      // Backfill lastSaleDate if missing
-      if (!c.lastSaleDate && c.town && c.block && c.lot) {
+      // Backfill missing fields from already-enriched cases
+      const needsBackfill = (!c.lastSaleDate || c.dwellingUnits == null) && c.town && c.block && c.lot;
+      if (needsBackfill) {
         const munCode = TOWN_TO_MUN_CODE[normalizeTownName(c.town)];
         if (munCode) {
           await delay(400);
           try {
             const result = await queryParcel(munCode, c.block, c.lot);
-            if (result && result.saleDate) {
-              c.lastSaleDate = result.saleDate;
-              console.log(`${prefix} 📅 Backfilled sale date for ${c.instrumentNumber}`);
+            if (result) {
+              if (!c.lastSaleDate && result.saleDate) {
+                c.lastSaleDate = result.saleDate;
+              }
+              if (c.dwellingUnits == null && result.dwellingUnits != null) {
+                c.dwellingUnits = result.dwellingUnits;
+              }
             }
           } catch (e) {}
         }
