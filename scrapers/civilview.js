@@ -132,6 +132,17 @@ async function scrapeCounty(browser, county) {
   try {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
+
+    // Block images, fonts, and stylesheets to reduce memory usage
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const type = req.resourceType();
+      if (type === 'image' || type === 'font' || type === 'media') {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
     
     // Load search page
     console.log('  Loading listings...');
@@ -212,12 +223,24 @@ async function scrapeCounty(browser, county) {
         // Extract detail page data
         const data = await page.evaluate(() => {
           const getField = (label) => {
+            const lower = label.toLowerCase();
+            // Try .sale-detail-item structure (Montgomery County)
             const items = document.querySelectorAll('.sale-detail-item');
             for (const item of items) {
               const l = item.querySelector('.sale-detail-label');
               const v = item.querySelector('.sale-detail-value');
-              if (l && v && l.textContent.toLowerCase().includes(label.toLowerCase())) {
+              if (l && v && l.textContent.toLowerCase().includes(lower)) {
                 return v.textContent.trim().replace(/\s+/g, ' ');
+              }
+            }
+            // Fallback: table row layout (Camden County uses <td> pairs)
+            const tds = document.querySelectorAll('td');
+            for (const td of tds) {
+              if (td.textContent.toLowerCase().includes(lower)) {
+                const next = td.nextElementSibling;
+                if (next && next.tagName === 'TD') {
+                  return next.textContent.trim().replace(/\s+/g, ' ');
+                }
               }
             }
             return '';
@@ -243,6 +266,34 @@ async function scrapeCounty(browser, county) {
           
           const statusHistory = getStatusHistory();
           
+          // Fallback: scan all label/value pairs for any dollar amount if named fields don't match
+          const skipLabels = ['sheriff', 'date', 'attorney', 'plaintiff', 'defendant', 'address',
+            'parcel', 'township', 'court case', 'description', 'phone', 'status', 'property note'];
+          const findDebtFallback = () => {
+            // Try .sale-detail-item structure
+            const items = document.querySelectorAll('.sale-detail-item');
+            for (const item of items) {
+              const l = item.querySelector('.sale-detail-label');
+              const v = item.querySelector('.sale-detail-value');
+              if (!l || !v) continue;
+              const label = l.textContent.toLowerCase();
+              if (skipLabels.some(s => label.includes(s))) continue;
+              const val = v.textContent.trim();
+              if (/\$[\d,]+/.test(val)) return val;
+            }
+            // Try table cell pairs
+            const tds = document.querySelectorAll('td');
+            for (const td of tds) {
+              const label = td.textContent.toLowerCase();
+              if (skipLabels.some(s => label.includes(s))) continue;
+              const next = td.nextElementSibling;
+              if (!next || next.tagName !== 'TD') continue;
+              const val = next.textContent.trim();
+              if (/\$[\d,]+/.test(val)) return val;
+            }
+            return '';
+          };
+
           return {
             sheriff: getField('sheriff'),
             courtCase: getField('court case'),
@@ -250,7 +301,7 @@ async function scrapeCounty(browser, county) {
             plaintiff: getField('plaintiff'),
             defendant: getField('defendant'),
             address: getField('address'),
-            debt: getField('debt amount') || getField('approx') || getField('upset'),
+            debt: getField('debt amount') || getField('approx') || getField('upset') || getField('judgment amount') || getField('amount') || findDebtFallback(),
             attorney: getField('attorney'),
             attorneyPhone: getField('attorney phone'),
             parcel: getField('parcel'),
