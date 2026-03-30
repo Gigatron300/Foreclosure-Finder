@@ -1249,7 +1249,7 @@ app.get('/api/camden/export/open-addresses', (req, res, next) => {
     const data = JSON.parse(content);
     const cases = (data.cases || [])
       .map(scoreCamdenCase)
-      .filter(c => (c.courtStatus || '').toUpperCase() === 'OPEN' && c.propertyAddress);
+      .filter(c => ['OPEN', 'REINSTATED'].includes((c.courtStatus || '').toUpperCase()) && c.propertyAddress);
 
     const headers = ['Instrument Number', 'Address', 'Town', 'Docket Number', 'Plaintiff', 'Defendant'];
     const rows = cases.map(c => ([
