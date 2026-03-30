@@ -222,7 +222,8 @@
     const seen = new Set();
     const out = [];
     (candidates || []).forEach(candidate => {
-      if (!candidate || !candidate.name || shouldSkipCourtSearchName(candidate.name)) return;
+      if (!candidate || !candidate.name) return;
+      if (!candidate.allowSkipOverride && shouldSkipCourtSearchName(candidate.name)) return;
       const key = uniqueCandidateKey(candidate);
       if (seen.has(key)) return;
       seen.add(key);
@@ -232,6 +233,7 @@
   }
 
   function getSearchCandidates(c) {
+    const allowSkipOverride = !!(c && c.courtDocketNumber);
     if (Array.isArray(c && c.searchCandidates) && c.searchCandidates.length) {
       const standard = [];
       c.searchCandidates.forEach(candidate => {
@@ -243,7 +245,8 @@
             partyCode: candidate.partyCode || '',
             mode: 'standard',
             dateWindowDays: 90,
-            sourceFullName: baseName
+            sourceFullName: baseName,
+            allowSkipOverride
           });
         });
         expandThreePartTailFirst(baseName).forEach(name => {
@@ -252,7 +255,8 @@
             partyCode: candidate.partyCode || '',
             mode: 'three-part-tail-first',
             dateWindowDays: 90,
-            sourceFullName: baseName
+            sourceFullName: baseName,
+            allowSkipOverride
           });
         });
       });
@@ -265,20 +269,21 @@
       c && c.defendant ? c.defendant : ''
     ]);
     const expanded = [];
-    sourceNames.filter(name => !shouldSkipCourtSearchName(name)).forEach(name => {
+    sourceNames.filter(name => allowSkipOverride || !shouldSkipCourtSearchName(name)).forEach(name => {
       expandSearchName(name).forEach(variant => {
-        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90, sourceFullName: name });
+        expanded.push({ name: variant, partyCode: '', mode: 'standard', dateWindowDays: 90, sourceFullName: name, allowSkipOverride });
       });
       expandThreePartTailFirst(name).forEach(variant => {
-        expanded.push({ name: variant, partyCode: '', mode: 'three-part-tail-first', dateWindowDays: 90, sourceFullName: name });
+        expanded.push({ name: variant, partyCode: '', mode: 'three-part-tail-first', dateWindowDays: 90, sourceFullName: name, allowSkipOverride });
       });
     });
-    return uniqueCandidates(expanded.length ? expanded : sourceNames.filter(name => !shouldSkipCourtSearchName(name)).map(name => ({
+    return uniqueCandidates(expanded.length ? expanded : sourceNames.filter(name => allowSkipOverride || !shouldSkipCourtSearchName(name)).map(name => ({
       name,
       partyCode: '',
       mode: 'standard',
       dateWindowDays: 90,
-      sourceFullName: name
+      sourceFullName: name,
+      allowSkipOverride
     })));
   }
 
@@ -714,10 +719,10 @@
 
   function parseDocket(docket) {
     if (!docket) return null;
-    const cleaned = docket.replace(/\s+/g, '').toUpperCase();
-    const m = cleaned.match(/([FC])[-]?(\d{4,6})-(\d{2})$/);
+    const cleaned = String(docket).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const m = cleaned.match(/(?:SWC)?([FC])(\d{2,6})(\d{2})$/);
     if (m) return { type: m[1], number: m[2], year: m[3] };
-    const m2 = cleaned.match(/(\d{4,6})-(\d{2})$/);
+    const m2 = cleaned.match(/(\d{2,6})(\d{2})$/);
     if (m2) return { type: 'F', number: m2[1], year: m2[2] };
     return null;
   }

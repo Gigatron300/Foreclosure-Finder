@@ -71,6 +71,7 @@ function mapCaseForCourtStatus(c) {
 }
 
 function getCourtSearchCandidates(c) {
+  const allowSkipOverride = !!(c && c.courtDocketNumber);
   if (Array.isArray(c?.searchCandidates) && c.searchCandidates.length) {
     return c.searchCandidates
       .map(candidate => ({
@@ -78,7 +79,7 @@ function getCourtSearchCandidates(c) {
         partyCode: (candidate?.partyCode || '').trim()
       }))
       .filter(candidate => candidate.name)
-      .filter(candidate => !shouldSkipCourtSearchName(candidate.name));
+      .filter(candidate => allowSkipOverride || !shouldSkipCourtSearchName(candidate.name));
   }
 
   const receivingParties = (Array.isArray(c?.searchNames) && c.searchNames.length ? c.searchNames : (Array.isArray(c?.defendants) && c.defendants.length ? c.defendants : c?.allDefendants)) || [];
@@ -92,7 +93,7 @@ function getCourtSearchCandidates(c) {
   ))
     .map(value => JSON.parse(value))
     .filter(candidate => candidate.name)
-    .filter(candidate => !shouldSkipCourtSearchName(candidate.name));
+    .filter(candidate => allowSkipOverride || !shouldSkipCourtSearchName(candidate.name));
 }
 
 function hasCourtLookupInput(c) {
