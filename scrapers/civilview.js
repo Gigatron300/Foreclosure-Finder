@@ -294,6 +294,24 @@ async function scrapeCounty(browser, county) {
             return '';
           };
 
+          const debt = getField('debt amount') || getField('approx') || getField('upset') || getField('judgment amount') || getField('amount') || findDebtFallback();
+
+          // DEBUG: capture TD pairs when debt is missing so we can identify the right label
+          const debugLabels = debt ? [] : (() => {
+            const pairs = [];
+            const tds = document.querySelectorAll('td');
+            for (const td of tds) {
+              const next = td.nextElementSibling;
+              if (next && next.tagName === 'TD') {
+                const label = td.textContent.trim().replace(/\s+/g, ' ');
+                const val = next.textContent.trim().replace(/\s+/g, ' ');
+                if (label) pairs.push(`"${label}" => "${val}"`);
+                if (pairs.length >= 10) break;
+              }
+            }
+            return pairs;
+          })();
+
           return {
             sheriff: getField('sheriff'),
             courtCase: getField('court case'),
@@ -301,14 +319,15 @@ async function scrapeCounty(browser, county) {
             plaintiff: getField('plaintiff'),
             defendant: getField('defendant'),
             address: getField('address'),
-            debt: getField('debt amount') || getField('approx') || getField('upset') || getField('judgment amount') || getField('amount') || findDebtFallback(),
+            debt,
             attorney: getField('attorney'),
             attorneyPhone: getField('attorney phone'),
             parcel: getField('parcel'),
             township: getField('township'),
             description: getField('description'),
             status: statusHistory.length > 0 ? statusHistory[statusHistory.length - 1].status : 'Scheduled',
-            statusHistory
+            statusHistory,
+            debugLabels
           };
         });
         
@@ -340,6 +359,9 @@ async function scrapeCounty(browser, county) {
         
         const debt = parseDebtAmount(data.debt);
         console.log(`  ${i + 1}/${listings.length} ✓ ${addr.address || 'Property'} - ${debt > 0 ? '$' + debt.toLocaleString() : 'N/A'}`);
+        if (debt === 0 && data.debugLabels && data.debugLabels.length > 0) {
+          console.log(`    [DEBUG] TD pairs: ${data.debugLabels.slice(0, 5).join(' | ')}`);
+        }
         
       } catch (err) {
         // Use listing data as fallback
