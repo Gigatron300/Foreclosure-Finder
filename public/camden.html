@@ -1645,6 +1645,7 @@
                                 <div class="detail-value">${c.instrumentNumber || 'N/A'}</div>
                             </div>
                             ${c.yearConstructed ? `<div class="detail-item"><div class="detail-label">Year Built</div><div class="detail-value">${c.yearConstructed}</div></div>` : ''}
+                            ${c.dwellingUnits != null ? `<div class="detail-item"><div class="detail-label">Units</div><div class="detail-value">${c.dwellingUnits} ${c.dwellingUnits === 1 ? 'unit' : 'units'}</div></div>` : ''}
                         </div>
 
                         ${courtHtml}

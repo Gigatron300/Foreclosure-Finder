@@ -723,7 +723,7 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
       const enrichmentFields = [
         'propertyAddress', 'assessedValue', 'landValue', 'improvementValue',
         'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
-        'propertyClass', 'ownerOfRecord'
+        'propertyClass', 'ownerOfRecord', 'dwellingUnits'
       ];
       parsed.cases = parsed.cases.map(c => {
         const existing = existingByInstrument.get(c.instrumentNumber);

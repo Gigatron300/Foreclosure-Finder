@@ -63,7 +63,7 @@ const OUT_FIELDS = [
   'PROP_LOC', 'PROP_CLASS', 'BLDG_DESC',
   'LAND_VAL', 'IMPRVT_VAL', 'NET_VALUE',
   'SALE_PRICE', 'DEED_DATE', 'DEED_BOOK', 'DEED_PAGE',
-  'YR_CONSTR', 'ADD_LOTS1', 'CALC_ACRE'
+  'YR_CONSTR', 'ADD_LOTS1', 'CALC_ACRE', 'DWELL'
 ].join(',');
 
 // ============================================================
@@ -579,6 +579,7 @@ async function queryParcel(munCode, block, lot) {
     saleDate: attrs.DEED_DATE,
     yearConstructed: attrs.YR_CONSTR,
     acreage: attrs.CALC_ACRE,
+    dwellingUnits: attrs.DWELL != null ? attrs.DWELL : null,
     matchedBlock: attrs.PCLBLOCK,
     matchedLot: attrs.PCLLOT,
     matchCount: features.length,
@@ -662,6 +663,7 @@ async function enrichCamdenCases(data, options = {}) {
         c.lastSalePrice = result.salePrice;
         c.lastSaleDate = result.saleDate;
         c.propertyClass = result.propertyClass;
+        c.dwellingUnits = result.dwellingUnits;
         c.enrichmentSource = 'NJ MOD-IV via ArcGIS REST';
         c.enrichedAt = new Date().toISOString();
 
