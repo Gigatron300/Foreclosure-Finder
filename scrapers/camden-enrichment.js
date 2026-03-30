@@ -165,14 +165,15 @@ function scoreCamdenCase(caseData) {
   const trialSignals = hasAny(['TRIAL SCHEDULED', 'TRIAL DATE', 'TRIAL']);
 
   // A) Stage & Time Pressure (0-35): highest that applies
+  // Note: saleStaySignals no longer tops the chart — a stay means the sale was postponed,
+  // not imminent, and the owner is actively fighting (already penalized in section C).
   const hasWritReturn = hasAny(['WRIT RETURN']);
   const hasWritIssued = hasAny(['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT']);
   const hasFinalJudgment = hasAny(['UNCONTESTED ORDER FOR FINAL JUDGMENT', 'ORDER FOR FINAL JUDGMENT', 'FINAL JUDGMENT']);
   const hasMfjFiled = hasAny(['MOTION FOR FINAL JUDGMENT']);
   let stageA = 2;
-  if (saleStaySignals) stageA = 35;
-  else if (hasWritReturn) stageA = 30;
-  else if (hasWritIssued) stageA = 25;
+  if (hasWritReturn) stageA = 35;
+  else if (hasWritIssued || saleStaySignals) stageA = 25;
   else if (hasFinalJudgment) stageA = 20;
   else if (hasMfjFiled) stageA = 12;
   else if (defaultSignals) stageA = 6;
@@ -225,6 +226,25 @@ function scoreCamdenCase(caseData) {
   exitE = clamp(exitE, 0, 20);
   factors.push({ text: 'E Exit / Resolution', impact: exitE });
 
+  // F) Time in Foreclosure (-5..+8): sweet spot is 12-30 months
+  // Too fresh = owner still has hope/options; too old = situation is complex
+  let timeF = 0;
+  const daysOpen = c.daysSinceFiling || 0;
+  if (daysOpen >= 365 && daysOpen < 900) timeF = 8;        // 1–2.5 years: sweet spot
+  else if (daysOpen >= 900 && daysOpen < 1460) timeF = 4;  // 2.5–4 years: still solid
+  else if (daysOpen > 0 && daysOpen < 180) timeF = -5;     // under 6 months: too fresh
+  else if (daysOpen >= 1460) timeF = -3;                   // 4+ years: likely complicated
+  // 6–12 months: neutral (0)
+  timeF = clamp(timeF, -5, 8);
+  if (timeF !== 0) factors.push({ text: 'F Time in Foreclosure', impact: timeF });
+
+  // G) Plaintiff Type (0..+6): tax lien owners are typically less sophisticated,
+  // have smaller amounts owed, and are more likely to want out
+  let plaintiffG = 0;
+  const pType = (c.plaintiffType || '').toUpperCase();
+  if (pType === 'TAX_LIEN') plaintiffG = 6;
+  if (plaintiffG !== 0) factors.push({ text: 'G Plaintiff Type (Tax Lien)', impact: plaintiffG });
+
   // Small confidence guardrail
   let confidenceAdj = 0;
   if (actionList.length > 0) confidenceAdj += 2;
@@ -233,7 +253,7 @@ function scoreCamdenCase(caseData) {
   confidenceAdj = clamp(confidenceAdj, -5, 5);
   if (confidenceAdj !== 0) factors.push({ text: 'Confidence adjustment', impact: confidenceAdj });
 
-  const rawScore = stageA + distressB + resistanceC + frictionD + exitE + confidenceAdj;
+  const rawScore = stageA + distressB + resistanceC + frictionD + exitE + timeF + plaintiffG + confidenceAdj;
   const score = clamp(Math.round(rawScore), 0, 100);
   const grade = gradeFromScore(score);
   const summary = [
@@ -242,6 +262,8 @@ function scoreCamdenCase(caseData) {
     `C:${resistanceC}`,
     `D:${frictionD}`,
     `E:${exitE}`,
+    `F:${timeF}`,
+    `G:${plaintiffG}`,
     `Conf:${confidenceAdj}`
   ].join(' ');
 
@@ -258,6 +280,8 @@ function scoreCamdenCase(caseData) {
       resistanceC,
       frictionD,
       exitE,
+      timeF,
+      plaintiffG,
       confidenceAdj
     }
   };
