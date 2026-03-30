@@ -790,6 +790,24 @@
                 </div>
 
                 <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="unitsFilterButton">Units</label>
+                    <button type="button" id="unitsFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('unitsFilterDropdown', event)">All Units</button>
+                    <div id="unitsFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('unitsFilterOptions', true, 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('unitsFilterOptions', false, 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)">Clear</button>
+                        </div>
+                        <div id="unitsFilterOptions" class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="checkbox" value="1" onchange="handleMultiFilterChange('unitsFilterOptions', 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)"> <span>1 Unit</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="2" onchange="handleMultiFilterChange('unitsFilterOptions', 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)"> <span>2 Units</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="3-4" onchange="handleMultiFilterChange('unitsFilterOptions', 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)"> <span>3–4 Units</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="5+" onchange="handleMultiFilterChange('unitsFilterOptions', 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)"> <span>5+ Units</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="unknown" onchange="handleMultiFilterChange('unitsFilterOptions', 'unitsFilterButton', 'All Units', UNITS_FILTER_LABELS)"> <span>Unknown</span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-dropdown-group">
                     <label class="filter-dropdown-label" for="addressFilterButton">Address</label>
                     <input type="hidden" id="addressFilter" value="">
                     <button type="button" id="addressFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('addressFilterDropdown', event)">All Cases</button>
@@ -852,6 +870,13 @@
             STAY: 'Bankruptcy Stay Only',
             RECHECK: 'Needs Recheck',
             NOT_CHECKED: 'Not Yet Checked'
+        };
+        const UNITS_FILTER_LABELS = {
+            '1': '1 Unit',
+            '2': '2 Units',
+            '3-4': '3–4 Units',
+            '5+': '5+ Units',
+            'unknown': 'Unknown'
         };
 
         function toggleApiDropdown() {
@@ -1191,6 +1216,7 @@
             const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
             const selectedTowns = getSelectedTownValues();
             const selectedCourtStatuses = getSelectedCheckboxValues('courtStatusFilterOptions');
+            const selectedUnits = getSelectedCheckboxValues('unitsFilterOptions');
 
             try {
                 let apiSortBy = sortBy;
@@ -1227,6 +1253,18 @@
                     cases = cases.filter(c => {
                         const normalizedStatus = c.courtStatus || 'NOT_CHECKED';
                         return statusSet.has(normalizedStatus);
+                    });
+                }
+
+                if (selectedUnits.length) {
+                    const unitSet = new Set(selectedUnits);
+                    cases = cases.filter(c => {
+                        const u = c.dwellingUnits;
+                        if (u == null) return unitSet.has('unknown');
+                        if (unitSet.has(String(u))) return true;
+                        if (unitSet.has('3-4') && u >= 3 && u <= 4) return true;
+                        if (unitSet.has('5+') && u >= 5) return true;
+                        return false;
                     });
                 }
 
