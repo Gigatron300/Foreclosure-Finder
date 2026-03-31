@@ -673,8 +673,7 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       const { instrumentNumber, address } = req.body;
       if (!instrumentNumber || !address) return res.status(400).json({ error: 'Missing fields' });
 
-      const dataFile = path.join(__dirname, 'data', 'camden-pipeline.json');
-      const raw = await fs.readFile(dataFile, 'utf8');
+      const raw = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
       const data = JSON.parse(raw);
 
       const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
@@ -685,7 +684,7 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       found.enrichedAt = new Date().toISOString();
       Object.assign(found, scoreCamdenCase(found));
 
-      await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
+      await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
