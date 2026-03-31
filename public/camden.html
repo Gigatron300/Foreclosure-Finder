@@ -1694,6 +1694,7 @@
                                 <div style="display:flex;gap:8px;">
                                     <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
                                     <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Zillow</a>
+                                    <a href="#" onclick="event.preventDefault();manualAddress('${c.instrumentNumber}','${(c.propertyAddress||'').replace(/'/g,"\\'")}')" style="background:#4b5563;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Edit Addr</a>
                                 </div>
                             ` : '<span></span>'}
                         </div>
@@ -1865,8 +1866,8 @@ function copyCourtCmd() {
             }
             return 'just now';
         }
-async function manualAddress(instrumentNumber) {
-            const address = prompt('Enter the property address (e.g. 123 MAIN ST):');
+async function manualAddress(instrumentNumber, currentAddress = '') {
+            const address = prompt('Enter the property address (e.g. 123 MAIN ST):', currentAddress);
             if (!address || !address.trim()) return;
 
             try {
