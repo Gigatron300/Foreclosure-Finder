@@ -1756,7 +1756,9 @@
                         </div>
 
                         <div class="property-footer">
-                            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;"
+                                data-tags-for="${c.instrumentNumber}"
+                                data-current-tags="${JSON.stringify(c.userTags || []).replace(/"/g, '&quot;')}">
                                 ${(c.userTags || []).map(tag => `<span class="tag-pill">${tag}<button onclick="removeTag('${c.instrumentNumber}','${tag.replace(/'/g, "\\'")}')">✕</button></span>`).join('')}
                                 <input type="text" list="tagSuggestions"
                                     placeholder="Add tag..."
@@ -1987,10 +1989,24 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
             setAllMultiFilterOptions('tagFilterOptions', checked, 'tagFilterButton', 'All Tags');
         }
 
+        function renderTagPills(instrumentNumber, tags) {
+            const container = document.querySelector(`[data-tags-for="${instrumentNumber}"]`);
+            if (!container) return;
+            container.setAttribute('data-current-tags', JSON.stringify(tags));
+            container.innerHTML = tags.map(tag =>
+                `<span class="tag-pill">${tag}<button onclick="removeTag('${instrumentNumber}','${tag.replace(/'/g, "\\'")}')">✕</button></span>`
+            ).join('') + `<input type="text" list="tagSuggestions" placeholder="Add tag..." class="tag-input" onblur="addTag('${instrumentNumber}',this.value,this)" onkeydown="if(event.key==='Enter'){addTag('${instrumentNumber}',this.value,this);event.preventDefault()}" />`;
+        }
+
         async function addTag(instrumentNumber, tag, inputEl) {
             const cleanTag = (tag || '').trim().toUpperCase();
             if (!cleanTag) return;
             if (inputEl) inputEl.value = '';
+            const container = document.querySelector(`[data-tags-for="${instrumentNumber}"]`);
+            const currentTags = container ? JSON.parse(container.getAttribute('data-current-tags') || '[]') : [];
+            if (currentTags.includes(cleanTag)) return;
+            const newTags = [...currentTags, cleanTag];
+            renderTagPills(instrumentNumber, newTags);
             try {
                 const r = await fetch('/api/camden/tag', {
                     method: 'POST',
@@ -1998,14 +2014,19 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                     body: JSON.stringify({ instrumentNumber, tag: cleanTag, action: 'add' })
                 });
                 const result = await r.json();
-                if (result.success) loadData();
-                else alert('Error: ' + (result.error || 'Unknown error'));
+                if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
+                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData();
             } catch (e) {
+                renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
             }
         }
 
         async function removeTag(instrumentNumber, tag) {
+            const container = document.querySelector(`[data-tags-for="${instrumentNumber}"]`);
+            const currentTags = container ? JSON.parse(container.getAttribute('data-current-tags') || '[]') : [];
+            const newTags = currentTags.filter(t => t !== tag);
+            renderTagPills(instrumentNumber, newTags);
             try {
                 const r = await fetch('/api/camden/tag', {
                     method: 'POST',
@@ -2013,9 +2034,10 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                     body: JSON.stringify({ instrumentNumber, tag, action: 'remove' })
                 });
                 const result = await r.json();
-                if (result.success) loadData();
-                else alert('Error: ' + (result.error || 'Unknown error'));
+                if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
+                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData();
             } catch (e) {
+                renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
             }
         }
