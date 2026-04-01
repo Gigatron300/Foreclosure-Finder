@@ -724,11 +724,21 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
 
 app.post('/api/camden/tag', checkAuth, async (req, res) => {
   try {
-    const { instrumentNumber, tag } = req.body;
-    if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
+    const { instrumentNumber, tag, action } = req.body;
+    if (!instrumentNumber || !tag) return res.status(400).json({ error: 'Missing fields' });
     const annotations = await readAnnotations();
     if (!annotations[instrumentNumber]) annotations[instrumentNumber] = {};
-    annotations[instrumentNumber].userTag = tag || null;
+    // Migrate old single userTag to array
+    let tags = Array.isArray(annotations[instrumentNumber].userTags)
+      ? [...annotations[instrumentNumber].userTags]
+      : (annotations[instrumentNumber].userTag ? [annotations[instrumentNumber].userTag] : []);
+    delete annotations[instrumentNumber].userTag;
+    if (action === 'remove') {
+      tags = tags.filter(t => t !== tag);
+    } else {
+      if (!tags.includes(tag)) tags.push(tag);
+    }
+    annotations[instrumentNumber].userTags = tags;
     await writeAnnotations(annotations);
     res.json({ success: true });
   } catch (e) {
@@ -839,9 +849,12 @@ app.get('/api/camden', checkAuth, async (req, res) => {
     let cases = (data.cases || []).map(c => {
       const scored = scoreCamdenCase(c);
       const ann = annotations[c.instrumentNumber] || {};
+      // Migrate old single userTag to array
+      let userTags = Array.isArray(ann.userTags) ? ann.userTags
+        : (ann.userTag ? [ann.userTag] : (c.userTag ? [c.userTag] : []));
       return {
         ...scored,
-        userTag: ann.userTag ?? c.userTag ?? null,
+        userTags,
         userNotes: ann.userNotes ?? c.userNotes ?? '',
         scoreHistory: ann.scoreHistory ?? c.scoreHistory ?? []
       };

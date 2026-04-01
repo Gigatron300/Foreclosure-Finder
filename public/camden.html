@@ -455,14 +455,20 @@
             border-radius: 6px; font-size: 0.8rem; text-decoration: none;
         }
         .maps-link:hover { background: #3367d6; }
+        .tag-pill {
+            display: inline-flex; align-items: center; gap: 3px;
+            background: rgba(184,134,11,0.15); border: 1px solid rgba(184,134,11,0.3);
+            color: var(--benoro-gold); border-radius: 4px; padding: 3px 6px;
+            font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+        }
+        .tag-pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 0.7rem; line-height: 1; opacity: 0.6; }
+        .tag-pill button:hover { opacity: 1; }
         .tag-input {
             background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
             border-radius: 4px; color: #e2e8f0; font-size: 0.75rem; padding: 4px 8px;
-            width: 120px; font-family: inherit;
+            width: 100px; font-family: inherit;
         }
         .tag-input:focus { outline: none; border-color: rgba(184,134,11,0.5); }
-        .tag-input.has-tag { background: rgba(184,134,11,0.12); border-color: rgba(184,134,11,0.35); color: var(--benoro-gold); font-weight: 600; }
-        .tag-clear { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; padding: 2px 4px; line-height: 1; }
         .notes-area {
             width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.04);
             border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
@@ -1305,9 +1311,9 @@
                 }
 
                 if (tagFilter === '__untagged__') {
-                    cases = cases.filter(c => !c.userTag);
+                    cases = cases.filter(c => !(c.userTags || []).length);
                 } else if (tagFilter) {
-                    cases = cases.filter(c => c.userTag === tagFilter);
+                    cases = cases.filter(c => (c.userTags || []).includes(tagFilter));
                 }
 
                 // Stats (from unfiltered data for totals)
@@ -1743,14 +1749,13 @@
                         </div>
 
                         <div class="property-footer">
-                            <div style="display:flex;gap:4px;align-items:center;">
+                            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                                ${(c.userTags || []).map(tag => `<span class="tag-pill">${tag}<button onclick="removeTag('${c.instrumentNumber}','${tag.replace(/'/g, "\\'")}')">✕</button></span>`).join('')}
                                 <input type="text" list="tagSuggestions"
-                                    value="${(c.userTag || '').replace(/"/g, '&quot;')}"
                                     placeholder="Add tag..."
-                                    class="tag-input${c.userTag ? ' has-tag' : ''}"
-                                    onblur="setTag('${c.instrumentNumber}', this.value)"
-                                    onkeydown="if(event.key==='Enter')this.blur()" />
-                                ${c.userTag ? `<button onclick="event.preventDefault();setTag('${c.instrumentNumber}','')" class="tag-clear" title="Clear tag">✕</button>` : ''}
+                                    class="tag-input"
+                                    onblur="addTag('${c.instrumentNumber}', this.value, this)"
+                                    onkeydown="if(event.key==='Enter'){addTag('${c.instrumentNumber}',this.value,this);event.preventDefault()}" />
                             </div>
                             ${hasAddr ? `
                                 <div style="display:flex;gap:8px;">
@@ -1954,9 +1959,11 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
             const currentVal = document.getElementById('tagFilter').value;
             const tagCounts = new Map();
             for (const c of allCases) {
-                if (c.userTag) tagCounts.set(c.userTag, (tagCounts.get(c.userTag) || 0) + 1);
+                for (const tag of (c.userTags || [])) {
+                    tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+                }
             }
-            const untaggedCount = allCases.filter(c => !c.userTag).length;
+            const untaggedCount = allCases.filter(c => !(c.userTags || []).length).length;
             const tags = [...tagCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
             container.innerHTML = `
                 <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="" ${!currentVal ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', 'All Tags')"> <span>All Tags</span></label>
@@ -1965,13 +1972,30 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
             `;
         }
 
-        async function setTag(instrumentNumber, tag) {
-            const finalTag = (tag || '').trim().toUpperCase() || null;
+        async function addTag(instrumentNumber, tag, inputEl) {
+            const cleanTag = (tag || '').trim().toUpperCase();
+            if (!cleanTag) return;
+            if (inputEl) inputEl.value = '';
             try {
                 const r = await fetch('/api/camden/tag', {
                     method: 'POST',
                     headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ instrumentNumber, tag: finalTag })
+                    body: JSON.stringify({ instrumentNumber, tag: cleanTag, action: 'add' })
+                });
+                const result = await r.json();
+                if (result.success) loadData();
+                else alert('Error: ' + (result.error || 'Unknown error'));
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function removeTag(instrumentNumber, tag) {
+            try {
+                const r = await fetch('/api/camden/tag', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instrumentNumber, tag, action: 'remove' })
                 });
                 const result = await r.json();
                 if (result.success) loadData();
