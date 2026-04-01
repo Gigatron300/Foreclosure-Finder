@@ -26,6 +26,7 @@ const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
 const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
 const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
 const CAMDEN_COURT_REFRESH_BATCH_FILE = path.join(CONFIG.outputDir, 'camden-court-refresh-batch.json');
+const CAMDEN_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'camden-annotations.json');
 const STREETVIEW_CACHE_DIR = path.join(CONFIG.outputDir, 'streetview-cache');
 const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '4000', 10);
 const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(30 * 24 * 60 * 60 * 1000), 10);
@@ -668,13 +669,30 @@ app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
 
 // ============== CAMDEN COUNTY PIPELINE API ==============
 
-function pushScoreHistory(caseObj) {
+async function readAnnotations() {
+  try {
+    const raw = await fs.readFile(CAMDEN_ANNOTATIONS_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch (e) {
+    return {};
+  }
+}
+
+async function writeAnnotations(annotations) {
+  await ensureDataDir();
+  await fs.writeFile(CAMDEN_ANNOTATIONS_FILE, JSON.stringify(annotations, null, 2));
+}
+
+function pushScoreHistory(caseObj, annotations) {
   if (typeof caseObj.sellerScore !== 'number') return;
-  if (!Array.isArray(caseObj.scoreHistory)) caseObj.scoreHistory = [];
-  const last = caseObj.scoreHistory[caseObj.scoreHistory.length - 1];
+  const key = caseObj.instrumentNumber;
+  if (!annotations[key]) annotations[key] = {};
+  if (!Array.isArray(annotations[key].scoreHistory)) annotations[key].scoreHistory = [];
+  const history = annotations[key].scoreHistory;
+  const last = history[history.length - 1];
   if (!last || last.score !== caseObj.sellerScore) {
-    caseObj.scoreHistory.push({ score: caseObj.sellerScore, grade: caseObj.sellerGrade || '', date: new Date().toISOString() });
-    if (caseObj.scoreHistory.length > 20) caseObj.scoreHistory = caseObj.scoreHistory.slice(-20);
+    history.push({ score: caseObj.sellerScore, grade: caseObj.sellerGrade || '', date: new Date().toISOString() });
+    if (history.length > 20) annotations[key].scoreHistory = history.slice(-20);
   }
 }
 
@@ -692,10 +710,12 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       found.propertyAddress = address;
       found.enrichmentSource = 'Manual entry';
       found.enrichedAt = new Date().toISOString();
-      pushScoreHistory(found);
+      const annForAddr = await readAnnotations();
+      pushScoreHistory(found, annForAddr);
       Object.assign(found, scoreCamdenCase(found));
 
       await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+      await writeAnnotations(annForAddr);
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -706,12 +726,10 @@ app.post('/api/camden/tag', checkAuth, async (req, res) => {
   try {
     const { instrumentNumber, tag } = req.body;
     if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
-    const raw = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
-    if (!found) return res.status(404).json({ error: 'Case not found' });
-    found.userTag = tag || null;
-    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    const annotations = await readAnnotations();
+    if (!annotations[instrumentNumber]) annotations[instrumentNumber] = {};
+    annotations[instrumentNumber].userTag = tag || null;
+    await writeAnnotations(annotations);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -722,12 +740,10 @@ app.post('/api/camden/notes', checkAuth, async (req, res) => {
   try {
     const { instrumentNumber, notes } = req.body;
     if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
-    const raw = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
-    if (!found) return res.status(404).json({ error: 'Case not found' });
-    found.userNotes = notes || '';
-    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    const annotations = await readAnnotations();
+    if (!annotations[instrumentNumber]) annotations[instrumentNumber] = {};
+    annotations[instrumentNumber].userNotes = notes || '';
+    await writeAnnotations(annotations);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -767,12 +783,11 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
         'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
         'propertyClass', 'ownerOfRecord', 'dwellingUnits'
       ];
-      const userFields = ['userTag', 'userNotes', 'scoreHistory'];
       parsed.cases = parsed.cases.map(c => {
         const existing = existingByInstrument.get(c.instrumentNumber);
         if (!existing) return c;
         const merged = { ...c };
-        for (const field of [...courtFields, ...enrichmentFields, ...userFields]) {
+        for (const field of [...courtFields, ...enrichmentFields]) {
           if (existing[field] !== undefined && existing[field] !== null && existing[field] !== '') {
             merged[field] = existing[field];
           }
@@ -820,7 +835,17 @@ app.get('/api/camden', checkAuth, async (req, res) => {
   try {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
     const data = JSON.parse(content);
-    let cases = (data.cases || []).map(scoreCamdenCase);
+    const annotations = await readAnnotations();
+    let cases = (data.cases || []).map(c => {
+      const scored = scoreCamdenCase(c);
+      const ann = annotations[c.instrumentNumber] || {};
+      return {
+        ...scored,
+        userTag: ann.userTag ?? c.userTag ?? null,
+        userNotes: ann.userNotes ?? c.userNotes ?? '',
+        scoreHistory: ann.scoreHistory ?? c.scoreHistory ?? []
+      };
+    });
 
     // Filters
     if (req.query.plaintiffType) {
@@ -1141,9 +1166,11 @@ app.post('/api/camden/court-status-update', cors({
     }
 
     Object.assign(data.cases[caseIdx], mergedCourtData);
-    pushScoreHistory(data.cases[caseIdx]);
+    const annForCourt = await readAnnotations();
+    pushScoreHistory(data.cases[caseIdx], annForCourt);
     data.cases[caseIdx] = scoreCamdenCase(data.cases[caseIdx]);
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    await writeAnnotations(annForCourt);
 
     console.log(`⚖️ ${instrumentNumber} → ${data.cases[caseIdx].courtStatus} (${mergedCourtData.courtDisposition || 'N/A'})`);
     res.json({ success: true, instrumentNumber, status: data.cases[caseIdx].courtStatus });
