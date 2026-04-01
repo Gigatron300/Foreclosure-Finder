@@ -465,6 +465,9 @@ function parseCamdenCSV(csvText) {
       lastSalePrice: null,
       propertyClass: '',
       ownerOfRecord: '',
+      userTag: null,
+      userNotes: '',
+      scoreHistory: [],
     });
   }
 

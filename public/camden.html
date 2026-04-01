@@ -455,6 +455,21 @@
             border-radius: 6px; font-size: 0.8rem; text-decoration: none;
         }
         .maps-link:hover { background: #3367d6; }
+        .tag-input {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 4px; color: #e2e8f0; font-size: 0.75rem; padding: 4px 8px;
+            width: 120px; font-family: inherit;
+        }
+        .tag-input:focus { outline: none; border-color: rgba(184,134,11,0.5); }
+        .tag-input.has-tag { background: rgba(184,134,11,0.12); border-color: rgba(184,134,11,0.35); color: var(--benoro-gold); font-weight: 600; }
+        .tag-clear { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; padding: 2px 4px; line-height: 1; }
+        .notes-area {
+            width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+            color: #e2e8f0; font-size: 0.8rem; padding: 7px 9px; resize: vertical;
+            font-family: inherit; min-height: 38px; line-height: 1.4;
+        }
+        .notes-area:focus { outline: none; border-color: rgba(184,134,11,0.5); }
 
         .no-results { text-align: center; padding: 60px 20px; color: var(--benoro-text-muted); }
         .loading { text-align: center; padding: 60px 20px; }
@@ -821,6 +836,18 @@
                 </div>
 
                 <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label">Tag</label>
+                    <input type="hidden" id="tagFilter" value="">
+                    <button type="button" id="tagFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('tagFilterDropdown', event)">All Tags</button>
+                    <div id="tagFilterDropdown" class="filter-dropdown-panel">
+                        <div id="tagFilterOptions" class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="" checked onchange="setSingleFilterValue('tagFilter', 'All Tags')"> <span>All Tags</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="__untagged__" onchange="setSingleFilterValue('tagFilter', 'Untagged')"> <span>Untagged</span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-dropdown-group">
                     <label class="filter-dropdown-label" for="townFilterButton">Town</label>
                     <button type="button" id="townFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('townFilterDropdown', event)">All towns</button>
                     <div id="townFilterDropdown" class="filter-dropdown-panel">
@@ -842,6 +869,13 @@
             <div class="results-header">
                 <h2>Cases <span class="case-count" id="caseCount">(0)</span></h2>
             </div>
+
+            <datalist id="tagSuggestions">
+                <option value="PASS">
+                <option value="PURSUE">
+                <option value="RED ZONE">
+                <option value="GREG ZONE">
+            </datalist>
 
             <div class="cases-grid" id="casesGrid">
                 <div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>
@@ -1213,6 +1247,7 @@
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const addressFilter = document.getElementById('addressFilter').value;
+            const tagFilter = document.getElementById('tagFilter').value;
             const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
             const selectedTowns = getSelectedTownValues();
             const selectedCourtStatuses = getSelectedCheckboxValues('courtStatusFilterOptions');
@@ -1242,6 +1277,7 @@
 
                 const allCases = data.cases || [];
                 let cases = allCases;
+                populateTagFilter(allCases);
 
                 if (selectedTypes.length) {
                     const typeSet = new Set(selectedTypes);
@@ -1266,6 +1302,12 @@
                         if (unitSet.has('5+') && u >= 5) return true;
                         return false;
                     });
+                }
+
+                if (tagFilter === '__untagged__') {
+                    cases = cases.filter(c => !c.userTag);
+                } else if (tagFilter) {
+                    cases = cases.filter(c => c.userTag === tagFilter);
                 }
 
                 // Stats (from unfiltered data for totals)
@@ -1604,6 +1646,11 @@
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
+            const prevScore = Array.isArray(c.scoreHistory) && c.scoreHistory.length > 0 ? c.scoreHistory[c.scoreHistory.length - 1].score : null;
+            const scoreDelta = prevScore !== null ? c.sellerScore - prevScore : null;
+            const deltaHtml = scoreDelta !== null && scoreDelta !== 0
+                ? `<span style="font-size:0.75rem;font-weight:700;color:${scoreDelta > 0 ? '#4ade80' : '#f87171'};margin-left:6px;">${scoreDelta > 0 ? '▲' : '▼'}${Math.abs(scoreDelta)}</span>`
+                : '';
 
             // Court status badge
             let courtHtml = '';
@@ -1652,6 +1699,7 @@
                         <div class="score-strip">
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
+                            ${deltaHtml}
                         </div>
                         ${scoreExplainHtml}
                         <div class="address-row">
@@ -1689,7 +1737,21 @@
                         ${courtHtml}
                         ${latestAction ? `<div class="action-strip"><b>Latest Action</b> (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
 
+                        <div style="margin-top:10px;">
+                            <textarea class="notes-area" placeholder="Add notes..."
+                                onblur="saveNotes('${c.instrumentNumber}', this.value)">${(c.userNotes || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+                        </div>
+
                         <div class="property-footer">
+                            <div style="display:flex;gap:4px;align-items:center;">
+                                <input type="text" list="tagSuggestions"
+                                    value="${(c.userTag || '').replace(/"/g, '&quot;')}"
+                                    placeholder="Add tag..."
+                                    class="tag-input${c.userTag ? ' has-tag' : ''}"
+                                    onblur="setTag('${c.instrumentNumber}', this.value)"
+                                    onkeydown="if(event.key==='Enter')this.blur()" />
+                                ${c.userTag ? `<button onclick="event.preventDefault();setTag('${c.instrumentNumber}','')" class="tag-clear" title="Clear tag">✕</button>` : ''}
+                            </div>
                             ${hasAddr ? `
                                 <div style="display:flex;gap:8px;">
                                     <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
@@ -1886,6 +1948,51 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 alert('Error: ' + e.message);
             }
         }
+        function populateTagFilter(allCases) {
+            const container = document.getElementById('tagFilterOptions');
+            if (!container) return;
+            const currentVal = document.getElementById('tagFilter').value;
+            const tagCounts = new Map();
+            for (const c of allCases) {
+                if (c.userTag) tagCounts.set(c.userTag, (tagCounts.get(c.userTag) || 0) + 1);
+            }
+            const untaggedCount = allCases.filter(c => !c.userTag).length;
+            const tags = [...tagCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+            container.innerHTML = `
+                <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="" ${!currentVal ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', 'All Tags')"> <span>All Tags</span></label>
+                <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="__untagged__" ${currentVal === '__untagged__' ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', 'Untagged')"> <span>Untagged (${untaggedCount})</span></label>
+                ${tags.map(([tag, count]) => `<label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="${tag}" ${currentVal === tag ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', '${tag.replace(/'/g, "\\'")}')"> <span>${tag} (${count})</span></label>`).join('')}
+            `;
+        }
+
+        async function setTag(instrumentNumber, tag) {
+            const finalTag = (tag || '').trim().toUpperCase() || null;
+            try {
+                const r = await fetch('/api/camden/tag', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instrumentNumber, tag: finalTag })
+                });
+                const result = await r.json();
+                if (result.success) loadData();
+                else alert('Error: ' + (result.error || 'Unknown error'));
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function saveNotes(instrumentNumber, notes) {
+            try {
+                await fetch('/api/camden/notes', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instrumentNumber, notes })
+                });
+            } catch (e) {
+                console.error('Error saving notes:', e);
+            }
+        }
+
         registerStreetViewCache();
         checkExistingAuth();
     </script>

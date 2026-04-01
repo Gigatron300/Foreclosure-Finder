@@ -668,6 +668,16 @@ app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
 
 // ============== CAMDEN COUNTY PIPELINE API ==============
 
+function pushScoreHistory(caseObj) {
+  if (typeof caseObj.sellerScore !== 'number') return;
+  if (!Array.isArray(caseObj.scoreHistory)) caseObj.scoreHistory = [];
+  const last = caseObj.scoreHistory[caseObj.scoreHistory.length - 1];
+  if (!last || last.score !== caseObj.sellerScore) {
+    caseObj.scoreHistory.push({ score: caseObj.sellerScore, grade: caseObj.sellerGrade || '', date: new Date().toISOString() });
+    if (caseObj.scoreHistory.length > 20) caseObj.scoreHistory = caseObj.scoreHistory.slice(-20);
+  }
+}
+
 app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
     try {
       const { instrumentNumber, address } = req.body;
@@ -682,6 +692,7 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       found.propertyAddress = address;
       found.enrichmentSource = 'Manual entry';
       found.enrichedAt = new Date().toISOString();
+      pushScoreHistory(found);
       Object.assign(found, scoreCamdenCase(found));
 
       await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
@@ -690,6 +701,38 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
       res.status(500).json({ error: e.message });
     }
   });
+
+app.post('/api/camden/tag', checkAuth, async (req, res) => {
+  try {
+    const { instrumentNumber, tag } = req.body;
+    if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
+    const raw = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
+    if (!found) return res.status(404).json({ error: 'Case not found' });
+    found.userTag = tag || null;
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/camden/notes', checkAuth, async (req, res) => {
+  try {
+    const { instrumentNumber, notes } = req.body;
+    if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
+    const raw = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    const found = data.cases.find(c => c.instrumentNumber === instrumentNumber);
+    if (!found) return res.status(404).json({ error: 'Case not found' });
+    found.userNotes = notes || '';
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // Upload Camden County CSV
 app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
@@ -724,11 +767,12 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
         'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
         'propertyClass', 'ownerOfRecord', 'dwellingUnits'
       ];
+      const userFields = ['userTag', 'userNotes', 'scoreHistory'];
       parsed.cases = parsed.cases.map(c => {
         const existing = existingByInstrument.get(c.instrumentNumber);
         if (!existing) return c;
         const merged = { ...c };
-        for (const field of [...courtFields, ...enrichmentFields]) {
+        for (const field of [...courtFields, ...enrichmentFields, ...userFields]) {
           if (existing[field] !== undefined && existing[field] !== null && existing[field] !== '') {
             merged[field] = existing[field];
           }
@@ -1097,6 +1141,7 @@ app.post('/api/camden/court-status-update', cors({
     }
 
     Object.assign(data.cases[caseIdx], mergedCourtData);
+    pushScoreHistory(data.cases[caseIdx]);
     data.cases[caseIdx] = scoreCamdenCase(data.cases[caseIdx]);
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
 
