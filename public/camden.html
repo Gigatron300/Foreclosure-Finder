@@ -843,12 +843,14 @@
 
                 <div class="filter-dropdown-group">
                     <label class="filter-dropdown-label">Tag</label>
-                    <input type="hidden" id="tagFilter" value="">
                     <button type="button" id="tagFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('tagFilterDropdown', event)">All Tags</button>
                     <div id="tagFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllTagFilters(true)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllTagFilters(false)">Clear</button>
+                        </div>
                         <div id="tagFilterOptions" class="filter-dropdown-options">
-                            <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="" checked onchange="setSingleFilterValue('tagFilter', 'All Tags')"> <span>All Tags</span></label>
-                            <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="__untagged__" onchange="setSingleFilterValue('tagFilter', 'Untagged')"> <span>Untagged</span></label>
+                            <div class="filter-dropdown-empty">No tags yet</div>
                         </div>
                     </div>
                 </div>
@@ -1253,7 +1255,7 @@
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const addressFilter = document.getElementById('addressFilter').value;
-            const tagFilter = document.getElementById('tagFilter').value;
+            const selectedTags = getSelectedCheckboxValues('tagFilterOptions');
             const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
             const selectedTowns = getSelectedTownValues();
             const selectedCourtStatuses = getSelectedCheckboxValues('courtStatusFilterOptions');
@@ -1310,10 +1312,13 @@
                     });
                 }
 
-                if (tagFilter === '__untagged__') {
-                    cases = cases.filter(c => !(c.userTags || []).length);
-                } else if (tagFilter) {
-                    cases = cases.filter(c => (c.userTags || []).includes(tagFilter));
+                if (selectedTags.length) {
+                    const tagSet = new Set(selectedTags);
+                    cases = cases.filter(c => {
+                        const tags = c.userTags || [];
+                        if (tagSet.has('__untagged__') && tags.length === 0) return true;
+                        return tags.some(t => tagSet.has(t));
+                    });
                 }
 
                 // Stats (from unfiltered data for totals)
@@ -1956,7 +1961,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
         function populateTagFilter(allCases) {
             const container = document.getElementById('tagFilterOptions');
             if (!container) return;
-            const currentVal = document.getElementById('tagFilter').value;
+            const selected = new Set(getSelectedCheckboxValues('tagFilterOptions'));
             const tagCounts = new Map();
             for (const c of allCases) {
                 for (const tag of (c.userTags || [])) {
@@ -1965,11 +1970,19 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
             }
             const untaggedCount = allCases.filter(c => !(c.userTags || []).length).length;
             const tags = [...tagCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+            if (!tags.length && !untaggedCount) {
+                container.innerHTML = '<div class="filter-dropdown-empty">No tags yet</div>';
+                return;
+            }
             container.innerHTML = `
-                <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="" ${!currentVal ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', 'All Tags')"> <span>All Tags</span></label>
-                <label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="__untagged__" ${currentVal === '__untagged__' ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', 'Untagged')"> <span>Untagged (${untaggedCount})</span></label>
-                ${tags.map(([tag, count]) => `<label class="filter-dropdown-option"><input type="radio" name="tagFilterOption" value="${tag}" ${currentVal === tag ? 'checked' : ''} onchange="setSingleFilterValue('tagFilter', '${tag.replace(/'/g, "\\'")}')"> <span>${tag} (${count})</span></label>`).join('')}
+                <label class="filter-dropdown-option"><input type="checkbox" value="__untagged__" ${selected.has('__untagged__') ? 'checked' : ''} onchange="handleMultiFilterChange('tagFilterOptions','tagFilterButton','All Tags')"> <span>Untagged (${untaggedCount})</span></label>
+                ${tags.map(([tag, count]) => `<label class="filter-dropdown-option"><input type="checkbox" value="${tag}" ${selected.has(tag) ? 'checked' : ''} onchange="handleMultiFilterChange('tagFilterOptions','tagFilterButton','All Tags')"> <span>${tag} (${count})</span></label>`).join('')}
             `;
+            updateMultiFilterButtonText('tagFilterButton', getSelectedCheckboxValues('tagFilterOptions'), 'All Tags');
+        }
+
+        function setAllTagFilters(checked) {
+            setAllMultiFilterOptions('tagFilterOptions', checked, 'tagFilterButton', 'All Tags');
         }
 
         async function addTag(instrumentNumber, tag, inputEl) {
