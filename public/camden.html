@@ -881,8 +881,10 @@
             <datalist id="tagSuggestions">
                 <option value="PASS">
                 <option value="PURSUE">
-                <option value="RED ZONE">
+                <option value="MAYBE">
+                <option value="GREEN ZONE">
                 <option value="GREY ZONE">
+                <option value="RED ZONE">
             </datalist>
 
             <div class="cases-grid" id="casesGrid">
@@ -1316,8 +1318,8 @@
                     const tagSet = new Set(selectedTags);
                     cases = cases.filter(c => {
                         const tags = c.userTags || [];
-                        if (tagSet.has('__untagged__') && tags.length === 0) return true;
-                        return tags.some(t => tagSet.has(t));
+                        if (tagSet.has('__untagged__')) return tags.length === 0;
+                        return selectedTags.every(t => tags.includes(t));
                     });
                 }
 
