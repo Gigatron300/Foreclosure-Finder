@@ -674,13 +674,18 @@ async function readAnnotations() {
     const raw = await fs.readFile(CAMDEN_ANNOTATIONS_FILE, 'utf8');
     return JSON.parse(raw);
   } catch (e) {
-    return {};
+    if (e.code === 'ENOENT') return {}; // File doesn't exist yet, that's fine
+    console.error('⚠️ Annotations file corrupted or unreadable:', e.message);
+    throw e; // Don't return {} — caller must not overwrite with empty data
   }
 }
 
 async function writeAnnotations(annotations) {
   await ensureDataDir();
-  await fs.writeFile(CAMDEN_ANNOTATIONS_FILE, JSON.stringify(annotations, null, 2));
+  // Write to temp file first, then rename atomically to avoid corruption on partial writes
+  const tmp = CAMDEN_ANNOTATIONS_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(annotations, null, 2));
+  await fs.rename(tmp, CAMDEN_ANNOTATIONS_FILE);
 }
 
 function pushScoreHistory(caseObj, annotations) {
