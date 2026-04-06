@@ -370,6 +370,8 @@
         .score-badge.grade-c { background: rgba(251,191,36,0.18); color: #fbbf24; }
         .score-badge.grade-d { background: rgba(251,146,60,0.18); color: #fb923c; }
         .score-badge.grade-f { background: rgba(248,113,113,0.18); color: #f87171; }
+        .score-badge.urgency-medium { background: rgba(251,191,36,0.18); color: #fde68a; }
+        .score-badge.urgency-high { background: rgba(248,113,113,0.18); color: #fecaca; }
         .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
         .score-explain {
             margin: 8px 0 12px;
@@ -401,6 +403,23 @@
             margin-bottom: 4px;
         }
         .score-breakdown-row b { color: var(--benoro-white); font-weight: 600; }
+        .urgency-note {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            line-height: 1.35;
+        }
+        .urgency-note.medium {
+            background: rgba(251,191,36,0.10);
+            border: 1px solid rgba(251,191,36,0.18);
+            color: #fde68a;
+        }
+        .urgency-note.high {
+            background: rgba(248,113,113,0.10);
+            border: 1px solid rgba(248,113,113,0.20);
+            color: #fecaca;
+        }
         .score-upside {
             margin-top: 8px;
             border: 1px solid rgba(255,255,255,0.06);
@@ -1552,6 +1571,9 @@
             const exitE = Number(sc.exitE) || 0;
             const confidenceAdj = Number(sc.confidenceAdj) || 0;
             const total = Number(c.sellerScore) || 0;
+            const urgencyLevel = String(c.urgencyLevel || sc.urgencyLevel || 'NONE').toUpperCase();
+            const urgencyReasons = Array.isArray(c.urgencyReasons) ? c.urgencyReasons : [];
+            const buyerWarning = c.buyerWarning || '';
 
             const rows = [
                 ['A Stage & Time Pressure', stageA],
@@ -1563,6 +1585,9 @@
             ];
 
             const tips = buildHowToScoreHigherTips(c);
+            const urgencyHtml = urgencyLevel !== 'NONE'
+                ? `<div class="urgency-note ${urgencyLevel === 'HIGH' ? 'high' : 'medium'}"><b>Buyer Urgency:</b> ${buyerWarning}${urgencyReasons.length ? ` (${urgencyReasons.join(', ')})` : ''}</div>`
+                : '';
             return `
                 <details class="score-explain">
                     <summary>Score Breakdown</summary>
@@ -1571,6 +1596,7 @@
                         <div class="score-breakdown-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
                             <span>Total</span><b>${total}</b>
                         </div>
+                        ${urgencyHtml}
                         <details class="score-upside">
                             <summary>How To Score Higher</summary>
                             <ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul>
@@ -1656,6 +1682,9 @@
             const sellerGrade = (c.sellerGrade || 'F').toUpperCase();
             const sellerLikelihood = c.sellerLikelihood || 'Very Low';
             const scoreClass = `grade-${sellerGrade.toLowerCase()}`;
+            const urgencyLevel = String(c.urgencyLevel || 'NONE').toUpperCase();
+            const urgencyBadgeClass = urgencyLevel === 'HIGH' ? 'urgency-high' : urgencyLevel === 'MEDIUM' ? 'urgency-medium' : '';
+            const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
@@ -1712,6 +1741,7 @@
                         <div class="score-strip">
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
+                            ${urgencyBadgeText ? `<span class="score-badge ${urgencyBadgeClass}" title="${(c.buyerWarning || '').replace(/"/g, '&quot;')}">${urgencyBadgeText}</span>` : ''}
                             ${deltaHtml}
                         </div>
                         ${scoreExplainHtml}

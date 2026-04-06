@@ -138,6 +138,38 @@ function labelFromGrade(grade) {
   return 'Very Low';
 }
 
+function buildUrgencySignal(signals) {
+  const reasons = [];
+  let level = 'NONE';
+
+  if (signals.hasWritReturn) {
+    level = 'HIGH';
+    reasons.push('Writ return filed');
+  } else if (signals.hasWritIssued) {
+    level = 'HIGH';
+    reasons.push('Writ issued');
+  } else if (signals.saleStaySignals) {
+    level = 'HIGH';
+    reasons.push('Sheriff sale activity or postponement');
+  } else if (signals.hasFinalJudgment) {
+    level = 'MEDIUM';
+    reasons.push('Final judgment entered');
+  } else if (signals.hasMfjFiled) {
+    level = 'MEDIUM';
+    reasons.push('Motion for final judgment filed');
+  }
+
+  return {
+    level,
+    reasons,
+    buyerWarning: level === 'NONE'
+      ? ''
+      : level === 'HIGH'
+        ? 'High urgency: compressed buyer timeline'
+        : 'Moderate urgency: watch buyer timeline'
+  };
+}
+
 function scoreCamdenCase(caseData) {
   const c = caseData || {};
   const status = (c.status || '').toUpperCase();
@@ -171,6 +203,13 @@ function scoreCamdenCase(caseData) {
   const hasWritIssued = hasAny(['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT']);
   const hasFinalJudgment = hasAny(['UNCONTESTED ORDER FOR FINAL JUDGMENT', 'ORDER FOR FINAL JUDGMENT', 'FINAL JUDGMENT']);
   const hasMfjFiled = hasAny(['MOTION FOR FINAL JUDGMENT']);
+  const urgencySignal = buildUrgencySignal({
+    hasWritReturn,
+    hasWritIssued,
+    hasFinalJudgment,
+    hasMfjFiled,
+    saleStaySignals
+  });
   let stageA = 2;
   if (hasWritReturn) stageA = 35;
   else if (hasWritIssued || saleStaySignals) stageA = 25;
@@ -272,6 +311,9 @@ function scoreCamdenCase(caseData) {
     sellerScore: score,
     sellerGrade: grade,
     sellerLikelihood: labelFromGrade(grade),
+    urgencyLevel: urgencySignal.level,
+    urgencyReasons: urgencySignal.reasons,
+    buyerWarning: urgencySignal.buyerWarning,
     sellerFactors: factors,
     sellerScoreSummary: summary,
     scoreComponents: {
@@ -282,7 +324,8 @@ function scoreCamdenCase(caseData) {
       exitE,
       timeF,
       plaintiffG,
-      confidenceAdj
+      confidenceAdj,
+      urgencyLevel: urgencySignal.level
     }
   };
 }
