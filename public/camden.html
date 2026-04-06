@@ -813,15 +813,18 @@
 
                 <div class="filter-dropdown-group">
                     <label class="filter-dropdown-label" for="dealStageFilterButton">Deal Stage</label>
-                    <input type="hidden" id="dealStageFilter" value="ACTIVE_OPPORTUNITIES">
                     <button type="button" id="dealStageFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('dealStageFilterDropdown', event)">Active Opportunities</button>
                     <div id="dealStageFilterDropdown" class="filter-dropdown-panel">
-                        <div class="filter-dropdown-options">
-                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="ACTIVE_OPPORTUNITIES" checked onchange="setSingleFilterValue('dealStageFilter', 'Active Opportunities')"> <span>Active Opportunities</span></label>
-                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="MEDIUM_URGENCY" onchange="setSingleFilterValue('dealStageFilter', 'Medium Urgency')"> <span>Medium Urgency</span></label>
-                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="HIGH_URGENCY" onchange="setSingleFilterValue('dealStageFilter', 'High Urgency')"> <span>High Urgency</span></label>
-                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="LATE_TAX_LIENS" onchange="setSingleFilterValue('dealStageFilter', 'Late Tax Liens')"> <span>Late Tax Liens</span></label>
-                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="ALL_STAGES" onchange="setSingleFilterValue('dealStageFilter', 'All Stages')"> <span>All Stages</span></label>
+                        <div class="filter-dropdown-actions">
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('dealStageFilterOptions', true, 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)">Select All</button>
+                            <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('dealStageFilterOptions', false, 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)">Clear</button>
+                        </div>
+                        <div id="dealStageFilterOptions" class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="checkbox" value="ACTIVE_OPPORTUNITIES" checked onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active Opportunities</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="MEDIUM_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Medium Urgency</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="LATE_TAX_LIENS" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Late Tax Liens</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="ALL_STAGES" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>All Stages</span></label>
                         </div>
                     </div>
                 </div>
@@ -949,6 +952,13 @@
             STAY: 'Bankruptcy Stay Only',
             RECHECK: 'Needs Recheck',
             NOT_CHECKED: 'Not Yet Checked'
+        };
+        const DEAL_STAGE_LABELS = {
+            ACTIVE_OPPORTUNITIES: 'Active Opportunities',
+            MEDIUM_URGENCY: 'Medium Urgency',
+            HIGH_URGENCY: 'High Urgency',
+            LATE_TAX_LIENS: 'Late Tax Liens',
+            ALL_STAGES: 'All Stages'
         };
         const UNITS_FILTER_LABELS = {
             '1': '1 Unit',
@@ -1140,6 +1150,12 @@
                 default:
                     return true;
             }
+        }
+
+        function matchesAnyDealStage(caseObj, selectedStages) {
+            if (!selectedStages.length) return true;
+            if (selectedStages.includes('ALL_STAGES')) return true;
+            return selectedStages.some(stage => matchesDealStage(caseObj, stage));
         }
 
         function toggleFilterDropdown(id, event) {
@@ -1337,7 +1353,7 @@
         async function loadData() {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
-            const dealStageFilter = document.getElementById('dealStageFilter').value || 'ACTIVE_OPPORTUNITIES';
+            const selectedDealStages = getSelectedCheckboxValues('dealStageFilterOptions');
             const addressFilter = document.getElementById('addressFilter').value;
             const selectedTags = getSelectedCheckboxValues('tagFilterOptions');
             const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
@@ -1371,7 +1387,7 @@
                 let cases = allCases;
                 populateTagFilter(allCases);
 
-                cases = cases.filter(c => matchesDealStage(c, dealStageFilter));
+                cases = cases.filter(c => matchesAnyDealStage(c, selectedDealStages));
 
                 if (selectedTypes.length) {
                     const typeSet = new Set(selectedTypes);
