@@ -340,6 +340,26 @@ function scoreCamdenCase(caseData) {
     `Conf:${confidenceAdj}`
   ].join(' ');
 
+  // Writ countdown: find the earliest writ issuance date from court actions
+  const WRIT_ISSUED_SIGNALS = ['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT'];
+  let writIssuedDate = null;
+  let daysUntilSale = null;
+  if (hasWritIssued && !hasWritReturn && actionList.length > 0) {
+    const writAction = actionList.find(a =>
+      a && a.docketText && WRIT_ISSUED_SIGNALS.some(s => a.docketText.toUpperCase().includes(s))
+    );
+    if (writAction && writAction.filedDate) {
+      try {
+        const parsed = new Date(writAction.filedDate);
+        if (!isNaN(parsed)) {
+          writIssuedDate = writAction.filedDate;
+          const daysSinceWrit = Math.floor((Date.now() - parsed) / 86400000);
+          daysUntilSale = Math.max(0, 150 - daysSinceWrit);
+        }
+      } catch (e) { /* ignore parse errors */ }
+    }
+  }
+
   return {
     ...c,
     plaintiffType: resolvedPlaintiffType,
@@ -351,6 +371,8 @@ function scoreCamdenCase(caseData) {
     buyerWarning: urgencySignal.buyerWarning,
     sellerFactors: factors,
     sellerScoreSummary: summary,
+    writIssuedDate,
+    daysUntilSale,
     scoreComponents: {
       stageA,
       distressB,

@@ -373,6 +373,7 @@
         .score-badge.urgency-medium { background: rgba(251,191,36,0.18); color: #fde68a; }
         .score-badge.urgency-high { background: rgba(248,113,113,0.18); color: #fecaca; }
         .score-badge.late-tax-lien { background: rgba(244,114,182,0.18); color: #f9a8d4; }
+        .score-badge.writ-countdown { background: rgba(251,146,60,0.18); color: #fdba74; }
         .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
         .score-explain {
             margin: 8px 0 12px;
@@ -1770,6 +1771,10 @@
             const urgencyBadgeClass = urgencyLevel === 'HIGH' ? 'urgency-high' : urgencyLevel === 'MEDIUM' ? 'urgency-medium' : '';
             const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
             const urgencyTooltip = [c.buyerWarning || '', ...urgencyReasons].filter(Boolean).join(' - ').replace(/"/g, '&quot;');
+            const daysUntilSale = (c.daysUntilSale != null) ? c.daysUntilSale : null;
+            const writCountdownHtml = (daysUntilSale != null && urgencyLevel === 'HIGH')
+                ? `<span class="score-badge writ-countdown" title="Est. days until sheriff sale (150-day legal max from writ issuance)">${daysUntilSale}d to sale</span>`
+                : '';
             const lateTaxLienTooltip = 'Late-stage tax lien: final judgment or writ detected -- lien holder has effectively taken the property';
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
@@ -1828,6 +1833,7 @@
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
                             ${urgencyBadgeText ? `<span class="score-badge ${urgencyBadgeClass}" title="${urgencyTooltip}">${urgencyBadgeText}</span>` : ''}
+                            ${writCountdownHtml}
                             ${lateTaxLien ? `<span class="score-badge late-tax-lien" title="${lateTaxLienTooltip}">Late Stage Lien</span>` : ''}
                             ${deltaHtml}
                         </div>
