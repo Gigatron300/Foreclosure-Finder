@@ -372,6 +372,7 @@
         .score-badge.grade-f { background: rgba(248,113,113,0.18); color: #f87171; }
         .score-badge.urgency-medium { background: rgba(251,191,36,0.18); color: #fde68a; }
         .score-badge.urgency-high { background: rgba(248,113,113,0.18); color: #fecaca; }
+        .score-badge.late-tax-lien { background: rgba(244,114,182,0.18); color: #f9a8d4; }
         .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
         .score-explain {
             margin: 8px 0 12px;
@@ -1748,9 +1749,11 @@
             const scoreClass = `grade-${sellerGrade.toLowerCase()}`;
             const urgencyLevel = String(c.urgencyLevel || 'NONE').toUpperCase();
             const urgencyReasons = Array.isArray(c.urgencyReasons) ? c.urgencyReasons : [];
+            const lateTaxLien = isLateTaxLien(c);
             const urgencyBadgeClass = urgencyLevel === 'HIGH' ? 'urgency-high' : urgencyLevel === 'MEDIUM' ? 'urgency-medium' : '';
             const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
             const urgencyTooltip = [c.buyerWarning || '', ...urgencyReasons].filter(Boolean).join(' - ').replace(/"/g, '&quot;');
+            const lateTaxLienTooltip = 'Late-stage tax lien: final judgment, redemption order, or redemption signal detected';
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
@@ -1808,6 +1811,7 @@
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
                             ${urgencyBadgeText ? `<span class="score-badge ${urgencyBadgeClass}" title="${urgencyTooltip}">${urgencyBadgeText}</span>` : ''}
+                            ${lateTaxLien ? `<span class="score-badge late-tax-lien" title="${lateTaxLienTooltip}">Late Stage Lien</span>` : ''}
                             ${deltaHtml}
                         </div>
                         ${scoreExplainHtml}
