@@ -1781,8 +1781,9 @@
             const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
             const urgencyTooltip = [c.buyerWarning || '', ...urgencyReasons].filter(Boolean).join(' - ').replace(/"/g, '&quot;');
             const daysUntilSale = (c.daysUntilSale != null) ? c.daysUntilSale : null;
+            const daysUntilSaleEst = (c.daysUntilSaleEst != null) ? c.daysUntilSaleEst : null;
             const writCountdownHtml = (daysUntilSale != null && urgencyLevel === 'HIGH')
-                ? `<span class="score-badge writ-countdown" title="Est. days until sheriff sale (150-day legal max from writ issuance)">${daysUntilSale}d to sale</span>`
+                ? `<span class="score-badge writ-countdown" title="Est. based on typical 90-day county schedule / Max based on 150-day legal deadline (N.J.S.A. 2A:50-64)">${daysUntilSaleEst}d est / ${daysUntilSale}d max</span>`
                 : '';
             const lateTaxLienTooltip = 'Late-stage tax lien: final judgment or writ detected -- lien holder has effectively taken the property';
             const scoreExplainHtml = buildScoreExplainHtml(c);

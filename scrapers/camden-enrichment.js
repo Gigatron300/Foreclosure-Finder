@@ -344,6 +344,7 @@ function scoreCamdenCase(caseData) {
   const WRIT_ISSUED_SIGNALS = ['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT'];
   let writIssuedDate = null;
   let daysUntilSale = null;
+  let daysUntilSaleEst = null;
   if (hasWritIssued && !hasWritReturn && actionList.length > 0) {
     const writAction = actionList.find(a =>
       a && a.docketText && WRIT_ISSUED_SIGNALS.some(s => a.docketText.toUpperCase().includes(s))
@@ -355,6 +356,7 @@ function scoreCamdenCase(caseData) {
           writIssuedDate = writAction.filedDate;
           const daysSinceWrit = Math.floor((Date.now() - parsed) / 86400000);
           daysUntilSale = Math.max(0, 150 - daysSinceWrit);
+          daysUntilSaleEst = Math.max(0, 90 - daysSinceWrit);
         }
       } catch (e) { /* ignore parse errors */ }
     }
@@ -373,6 +375,7 @@ function scoreCamdenCase(caseData) {
     sellerScoreSummary: summary,
     writIssuedDate,
     daysUntilSale,
+    daysUntilSaleEst,
     scoreComponents: {
       stageA,
       distressB,
