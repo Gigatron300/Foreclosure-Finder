@@ -1683,8 +1683,10 @@
             const sellerLikelihood = c.sellerLikelihood || 'Very Low';
             const scoreClass = `grade-${sellerGrade.toLowerCase()}`;
             const urgencyLevel = String(c.urgencyLevel || 'NONE').toUpperCase();
+            const urgencyReasons = Array.isArray(c.urgencyReasons) ? c.urgencyReasons : [];
             const urgencyBadgeClass = urgencyLevel === 'HIGH' ? 'urgency-high' : urgencyLevel === 'MEDIUM' ? 'urgency-medium' : '';
             const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
+            const urgencyTooltip = [c.buyerWarning || '', ...urgencyReasons].filter(Boolean).join(' - ').replace(/"/g, '&quot;');
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
@@ -1741,7 +1743,7 @@
                         <div class="score-strip">
                             <span class="score-badge ${scoreClass}">Grade ${sellerGrade}</span>
                             <span class="score-text">Score ${sellerScore} - ${sellerLikelihood}</span>
-                            ${urgencyBadgeText ? `<span class="score-badge ${urgencyBadgeClass}" title="${(c.buyerWarning || '').replace(/"/g, '&quot;')}">${urgencyBadgeText}</span>` : ''}
+                            ${urgencyBadgeText ? `<span class="score-badge ${urgencyBadgeClass}" title="${urgencyTooltip}">${urgencyBadgeText}</span>` : ''}
                             ${deltaHtml}
                         </div>
                         ${scoreExplainHtml}
