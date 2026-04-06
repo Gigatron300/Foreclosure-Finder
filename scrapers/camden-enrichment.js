@@ -159,7 +159,14 @@ function buildUrgencySignal(signals) {
   const caseCategory = String(signals.caseCategory || '').toUpperCase();
   const hasLateTaxLienSignal = !!(signals.hasFinalJudgment || signals.hasRedemptionOrder);
 
-  if (signals.hasWritReturn) {
+  if (caseCategory === 'TAX_LIEN' && hasLateTaxLienSignal) {
+    level = 'NONE';
+  } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
+    level = 'MEDIUM';
+    reasons.push('Default stage on tax lien');
+  } else if (caseCategory === 'TAX_LIEN') {
+    level = 'NONE';
+  } else if (signals.hasWritReturn) {
     level = 'HIGH';
     reasons.push('Writ return filed');
   } else if (signals.hasWritIssued) {
@@ -168,11 +175,6 @@ function buildUrgencySignal(signals) {
   } else if (signals.saleStaySignals) {
     level = 'HIGH';
     reasons.push('Sheriff sale activity or postponement');
-  } else if (caseCategory === 'TAX_LIEN' && hasLateTaxLienSignal) {
-    level = 'NONE';
-  } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
-    level = 'MEDIUM';
-    reasons.push('Default stage on tax lien');
   } else if (caseCategory !== 'TAX_LIEN' && signals.hasFinalJudgment) {
     level = 'MEDIUM';
     reasons.push('Final judgment entered');
