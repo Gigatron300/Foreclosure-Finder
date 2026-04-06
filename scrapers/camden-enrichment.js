@@ -81,6 +81,15 @@ const GOVERNMENT_KEYWORDS = [
   'MUNICIPAL', 'HOUSING AUTHORITY', 'REDEVELOPMENT'
 ];
 
+function classifyCourtCaseType(caseType) {
+  const upper = String(caseType || '').toUpperCase().trim();
+  if (!upper) return '';
+  if (upper.includes('TAX FORECLOSURE')) return 'TAX_LIEN';
+  if (upper.includes('RESIDENTIAL MORTGAGE FORECLOSURE')) return 'MORTGAGE';
+  if (upper.includes('COMMERCIAL MORTGAGE FORECLOSURE')) return 'MORTGAGE';
+  return '';
+}
+
 function classifyPlaintiff(name) {
   if (!name) return 'UNKNOWN';
   const upper = name.toUpperCase();
@@ -93,6 +102,12 @@ function classifyPlaintiff(name) {
     if (upper.includes(kw)) return 'GOVERNMENT';
   }
   return 'MORTGAGE';
+}
+
+function resolveCaseCategory(caseData) {
+  const byCaseType = classifyCourtCaseType(caseData && caseData.courtCaseType);
+  if (byCaseType) return byCaseType;
+  return classifyPlaintiff(caseData && caseData.primaryPlaintiff);
 }
 
 function classifyDefendant(name) {
@@ -172,6 +187,7 @@ function buildUrgencySignal(signals) {
 
 function scoreCamdenCase(caseData) {
   const c = caseData || {};
+  const resolvedPlaintiffType = resolveCaseCategory(c);
   const status = (c.status || '').toUpperCase();
   const courtStatus = (c.courtStatus || '').toUpperCase();
   const caseType = (c.courtCaseType || '').toUpperCase();
@@ -280,7 +296,7 @@ function scoreCamdenCase(caseData) {
   // G) Plaintiff Type (0..+6): tax lien owners are typically less sophisticated,
   // have smaller amounts owed, and are more likely to want out
   let plaintiffG = 0;
-  const pType = (c.plaintiffType || '').toUpperCase();
+  const pType = resolvedPlaintiffType.toUpperCase();
   if (pType === 'TAX_LIEN') plaintiffG = 6;
   if (plaintiffG !== 0) factors.push({ text: 'G Plaintiff Type (Tax Lien)', impact: plaintiffG });
 
@@ -308,6 +324,7 @@ function scoreCamdenCase(caseData) {
 
   return {
     ...c,
+    plaintiffType: resolvedPlaintiffType,
     sellerScore: score,
     sellerGrade: grade,
     sellerLikelihood: labelFromGrade(grade),
@@ -770,6 +787,7 @@ module.exports = {
   parseCamdenCSV,
   enrichCamdenCases,
   scoreCamdenCase,
+  classifyCourtCaseType,
   classifyPlaintiff,
   classifyDefendant,
   TOWN_TO_MUN_CODE
