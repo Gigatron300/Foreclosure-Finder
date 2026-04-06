@@ -822,6 +822,7 @@
                         </div>
                         <div id="dealStageFilterOptions" class="filter-dropdown-options">
                             <label class="filter-dropdown-option"><input type="checkbox" value="ACTIVE_OPPORTUNITIES" checked onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active Opportunities</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="NO_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active / No Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="MEDIUM_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Medium Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="LATE_TAX_LIENS" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Late Tax Liens</span></label>
@@ -957,6 +958,7 @@
         };
         const DEAL_STAGE_LABELS = {
             ACTIVE_OPPORTUNITIES: 'Active Opportunities',
+            NO_URGENCY: 'Active / No Urgency',
             MEDIUM_URGENCY: 'Medium Urgency',
             HIGH_URGENCY: 'High Urgency',
             LATE_TAX_LIENS: 'Late Tax Liens',
@@ -1149,6 +1151,8 @@
             switch (selectedStage) {
                 case 'ACTIVE_OPPORTUNITIES':
                     return isActiveOpportunity(caseObj);
+                case 'NO_URGENCY':
+                    return isActiveOpportunity(caseObj) && urgencyLevel === 'NONE';
                 case 'MEDIUM_URGENCY':
                     return urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
                 case 'HIGH_URGENCY':
