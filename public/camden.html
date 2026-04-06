@@ -811,6 +811,21 @@
                 </div>
 
                 <div class="filter-dropdown-group">
+                    <label class="filter-dropdown-label" for="dealStageFilterButton">Deal Stage</label>
+                    <input type="hidden" id="dealStageFilter" value="ACTIVE_OPPORTUNITIES">
+                    <button type="button" id="dealStageFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('dealStageFilterDropdown', event)">Active Opportunities</button>
+                    <div id="dealStageFilterDropdown" class="filter-dropdown-panel">
+                        <div class="filter-dropdown-options">
+                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="ACTIVE_OPPORTUNITIES" checked onchange="setSingleFilterValue('dealStageFilter', 'Active Opportunities')"> <span>Active Opportunities</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="MEDIUM_URGENCY" onchange="setSingleFilterValue('dealStageFilter', 'Medium Urgency')"> <span>Medium Urgency</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="HIGH_URGENCY" onchange="setSingleFilterValue('dealStageFilter', 'High Urgency')"> <span>High Urgency</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="LATE_TAX_LIENS" onchange="setSingleFilterValue('dealStageFilter', 'Late Tax Liens')"> <span>Late Tax Liens</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="dealStageFilterOption" value="ALL_STAGES" onchange="setSingleFilterValue('dealStageFilter', 'All Stages')"> <span>All Stages</span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-dropdown-group">
                     <label class="filter-dropdown-label" for="courtStatusFilterButton">Court Status</label>
                     <button type="button" id="courtStatusFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('courtStatusFilterDropdown', event)">All Court Status</button>
                     <div id="courtStatusFilterDropdown" class="filter-dropdown-panel">
@@ -941,6 +956,12 @@
             '5+': '5+ Units',
             'unknown': 'Unknown'
         };
+        const LATE_TAX_LIEN_SIGNALS = [
+            'FINAL JUDGMENT',
+            'ORDER FIXING AMOUNT',
+            'MOTION FIXING AMOUNT',
+            'REDEMPTION'
+        ];
 
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
@@ -1078,6 +1099,46 @@
 
         function getSelectedTownValues() {
             return getSelectedCheckboxValues('townFilterOptions');
+        }
+
+        function getCaseStageContext(caseObj) {
+            return [
+                caseObj.courtCaseType || '',
+                caseObj.courtDisposition || '',
+                caseObj.courtCaseActionsText || '',
+                caseObj.courtLatestActionText || ''
+            ].join(' ').toUpperCase();
+        }
+
+        function caseHasAnySignal(caseObj, signals) {
+            const context = getCaseStageContext(caseObj);
+            return signals.some(signal => context.includes(signal));
+        }
+
+        function isLateTaxLien(caseObj) {
+            return caseObj.plaintiffType === 'TAX_LIEN' && caseHasAnySignal(caseObj, LATE_TAX_LIEN_SIGNALS);
+        }
+
+        function isActiveOpportunity(caseObj) {
+            if (isLateTaxLien(caseObj)) return false;
+            return !caseHasAnySignal(caseObj, ['WRIT RETURN']);
+        }
+
+        function matchesDealStage(caseObj, selectedStage) {
+            const urgencyLevel = String(caseObj.urgencyLevel || 'NONE').toUpperCase();
+            switch (selectedStage) {
+                case 'ACTIVE_OPPORTUNITIES':
+                    return isActiveOpportunity(caseObj);
+                case 'MEDIUM_URGENCY':
+                    return urgencyLevel === 'MEDIUM';
+                case 'HIGH_URGENCY':
+                    return urgencyLevel === 'HIGH';
+                case 'LATE_TAX_LIENS':
+                    return isLateTaxLien(caseObj);
+                case 'ALL_STAGES':
+                default:
+                    return true;
+            }
         }
 
         function toggleFilterDropdown(id, event) {
@@ -1275,6 +1336,7 @@
         async function loadData() {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
+            const dealStageFilter = document.getElementById('dealStageFilter').value || 'ACTIVE_OPPORTUNITIES';
             const addressFilter = document.getElementById('addressFilter').value;
             const selectedTags = getSelectedCheckboxValues('tagFilterOptions');
             const selectedTypes = getSelectedCheckboxValues('typeFilterOptions');
@@ -1307,6 +1369,8 @@
                 const allCases = data.cases || [];
                 let cases = allCases;
                 populateTagFilter(allCases);
+
+                cases = cases.filter(c => matchesDealStage(c, dealStageFilter));
 
                 if (selectedTypes.length) {
                     const typeSet = new Set(selectedTypes);
