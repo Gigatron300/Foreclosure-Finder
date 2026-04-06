@@ -170,8 +170,8 @@ function buildUrgencySignal(signals) {
   } else if (caseCategory === 'TAX_LIEN') {
     level = 'NONE';
   } else if (signals.hasWritReturn) {
-    level = 'HIGH';
-    reasons.push('Writ return filed');
+    level = 'NONE';
+    // Writ Return = sale has already run or been attempted -- no longer actionable
   } else if (signals.hasWritIssued) {
     level = 'HIGH';
     reasons.push('Writ issued');

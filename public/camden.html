@@ -825,6 +825,7 @@
                             <label class="filter-dropdown-option"><input type="checkbox" value="MEDIUM_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Medium Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="LATE_TAX_LIENS" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Late Tax Liens</span></label>
+                            <label class="filter-dropdown-option"><input type="checkbox" value="SALE_RUN" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Sale Run</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="ALL_STAGES" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>All Stages</span></label>
                         </div>
                     </div>
@@ -959,6 +960,7 @@
             MEDIUM_URGENCY: 'Medium Urgency',
             HIGH_URGENCY: 'High Urgency',
             LATE_TAX_LIENS: 'Late Tax Liens',
+            SALE_RUN: 'Sale Run',
             ALL_STAGES: 'All Stages'
         };
         const UNITS_FILTER_LABELS = {
@@ -1132,9 +1134,14 @@
             return caseObj.plaintiffType === 'TAX_LIEN' && caseHasAnySignal(caseObj, LATE_TAX_LIEN_SIGNALS);
         }
 
+        function isSaleRun(caseObj) {
+            return caseHasAnySignal(caseObj, ['WRIT RETURN']);
+        }
+
         function isActiveOpportunity(caseObj) {
             if (isLateTaxLien(caseObj)) return false;
-            return !caseHasAnySignal(caseObj, ['WRIT RETURN']);
+            if (isSaleRun(caseObj)) return false;
+            return true;
         }
 
         function matchesDealStage(caseObj, selectedStage) {
@@ -1145,9 +1152,11 @@
                 case 'MEDIUM_URGENCY':
                     return urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
                 case 'HIGH_URGENCY':
-                    return urgencyLevel === 'HIGH';
+                    return urgencyLevel === 'HIGH' && !isSaleRun(caseObj);
                 case 'LATE_TAX_LIENS':
                     return isLateTaxLien(caseObj);
+                case 'SALE_RUN':
+                    return isSaleRun(caseObj);
                 case 'ALL_STAGES':
                 default:
                     return true;
