@@ -1,0 +1,383 @@
+
+    CAMDEN LEAD SCORING -- CHEAT SHEET
+    ====================================
+
+
+    GRADE THRESHOLDS
+    ________________
+
+        Score       Grade   Label
+        -------     -----   ---------
+        80 - 100      A     Very High
+        65 -  79      B     High
+        50 -  64      C     Moderate
+        35 -  49      D     Low
+         0 -  34      F     Very Low
+
+
+
+    ====================================
+    SCORING RUBRIC
+    ====================================
+
+
+    A.  STAGE & TIME PRESSURE                               (0 to 35 pts)
+        Highest match wins -- only one level applies
+        ___________________________________________________________
+
+        35    Writ Return
+                  Sheriff attempted to execute the sale.
+                  Sale is imminent or already ran.
+
+        25    Writ of Execution / Foreclosure Writ Notice / Alias Writ
+                  Court has authorized the sheriff sale.
+                  Execution is in motion.
+
+        25    Sheriff Sale / Stay of Sheriff Sale / Postponement Letter
+                  Sale has been scheduled or recently postponed.
+
+        20    Final Judgment  (any form)
+                  Court ruled in the lender's favor.
+                  Owner has legally lost the case.
+
+        12    Motion for Final Judgment
+                  Lender has asked the court for judgment.
+                  Ruling is pending.
+
+         6    Default / Defaulted / Request for Default
+                  Owner has not responded to the complaint.
+
+         2    Baseline
+                  No meaningful stage signals found.
+
+
+    ___________________________________________________________
+
+    B.  DISTRESS SIGNALS                                    (0 to 25 pts)
+        Additive, capped at 25
+        ___________________________________________________________
+
+        +8    Default / Defaulted / Request for Default
+                  Owner went silent on the lender.
+
+        +6    Additional Sums
+                  Extra fees/advances added to the debt -- owner is deeper in.
+
+        +6    Alias Writ
+                  Second or renewed writ after the first expired.
+                  Case dragged on without resolution.
+
+        +5    Foreclosure Judgment Notice / Foreclosure Writ Notice
+                  Formal court notices sent regarding judgment or writ.
+
+        +4    14-Day Notice / Certification Regarding 14-Day Notice
+                  Required pre-sale notice served -- sale is very close.
+
+
+    ___________________________________________________________
+
+    C.  RESISTANCE / DEFENSE                              (-30 to 0 pts)
+        Subtractive -- penalizes active owner opposition
+        ___________________________________________________________
+
+        -25   Contested Answer with Counterclaim
+                  Owner is fighting back and filed claims against the lender.
+
+        -18   Contested Answer  (no counterclaim)
+                  Owner formally disputed the foreclosure.
+
+        -12   Trial Scheduled / Trial Date / Trial
+                  Heading to trial -- long timeline, uncertain outcome.
+
+        -10   Notice of Appearance
+                  An attorney entered on the owner's behalf.
+
+        -10   Sheriff Sale Stay / Postponement
+                  Owner (or bankruptcy) paused the sale.
+
+         -6   Objection / Reply Brief / Opposition
+                  Owner is actively filing responses in court.
+
+
+    ___________________________________________________________
+
+    D.  TITLE / PROBATE / FRICTION                        (-25 to 0 pts)
+        Subtractive -- penalizes complexity in title or ownership
+        ___________________________________________________________
+
+        -25   Bankruptcy / Automatic Stay / Chapter 7 or 13
+                  Federal court has jurisdiction. Sale is frozen.
+
+        -15   Heirs / Estate / Deceased / Guardian Ad Litem / Personal Rep
+                  Probate or estate issue -- multiple parties, complex title.
+
+        -10   Substitution of Attorney / Limited Representation /
+              Deficiency Notice
+                  Attorney changed mid-case or limited scope rep involved.
+
+         -6   Certification of Diligent Inquiry
+                  Lender couldn't locate the owner.
+                  May be abandoned or untraceable.
+
+         -5   Motion to Reform Mortgage / Correcting Defendant Name
+                  Document errors in the chain of title requiring court fix.
+
+
+    ___________________________________________________________
+
+    E.  EXIT / RESOLUTION SIGNALS                           (0 to 20 pts)
+        Additive -- signals that the case may be wrapping up
+        ___________________________________________________________
+
+        +20   Stipulation of Settlement / Dismissal
+                  Case settled or dismissed.
+                  Owner may have sold or paid off.
+
+         20   Redemption Order  (Motion/Order Fixing Amount)
+                  Court set the payoff amount -- owner has a deadline.
+                  Pre-judgment window; lien holder is about to take title.
+
+        +10   Postponement Letter / Sale Postponement /
+              Limited Representation
+                  Sale delayed -- owner may be in active negotiation.
+
+         +6   Motion Withdrawn / Withdrawn
+                  A motion was pulled back -- negotiation likely in progress.
+
+
+    ___________________________________________________________
+
+    F.  TIME IN FORECLOSURE                                 (-5 to +8 pts)
+        Based on days since filing
+        ___________________________________________________________
+
+        +8    365 - 899 days    (1 - 2.5 years)
+                  Sweet spot. Owner has felt pressure but case isn't stale.
+
+        +4    900 - 1,459 days  (2.5 - 4 years)
+                  Still workable but getting complicated.
+
+         0    180 - 364 days    (6 - 12 months)
+                  Neutral. Too early to read how the owner will respond.
+
+        -5    1 - 179 days      (under 6 months)
+                  Too fresh. Owner still has hope and real options.
+
+        -3    1,460+ days       (4+ years)
+                  Likely complex -- bankruptcy history, title issues, or dug in.
+
+
+    ___________________________________________________________
+
+    G.  PLAINTIFF TYPE                                    (-15 to +6 pts)
+        ___________________________________________________________
+
+        +6    Tax Lien -- early stage
+                  Small dollar lien, less sophisticated holder.
+                  Motivated to resolve quickly.
+
+        -15   Tax Lien -- late stage                               NO-GO
+                  Lien holder has effectively taken the property.
+                  They are a sophisticated investor who wants a profit.
+
+         0    All others  (mortgage, government)
+                  Neutral.
+
+        Late-stage tax lien is triggered by any of:
+            Final Judgment  |  Writ Issued  |  Writ Return
+
+
+    ___________________________________________________________
+
+    CONFIDENCE ADJUSTMENT                                   (-5 to +5 pts)
+        ___________________________________________________________
+
+        +2    Court case actions present
+                  Actual docket data available for scoring.
+
+        +1    Court docket number present
+                  Case was successfully matched in the court system.
+
+        -3    Court status is NOT_FOUND or ERROR
+                  No court data found. Score relies on scrape data only.
+
+
+
+    ====================================
+    URGENCY LEVELS
+    ====================================
+
+    Displayed as a badge on the card -- separate from the lead score.
+
+    ____________________________
+    MORTGAGE FORECLOSURES
+    ____________________________
+
+    Mortgage foreclosures follow a predictable legal timeline with clear
+    escalation points. Urgency rises as the case moves closer to a sheriff sale.
+
+        HIGH      Writ Return
+                      Sheriff has acted. Sale has run or is imminent.
+
+        HIGH      Writ of Execution / Writ Issued
+                      Sheriff sale is authorized and scheduled.
+
+        HIGH      Sheriff Sale / Stay / Postponement
+                      Sale is on the calendar, even if temporarily delayed.
+
+        MEDIUM    Final Judgment
+                      Court ruled for the lender. Sale process will begin.
+
+        MEDIUM    Motion for Final Judgment
+                      Judgment is pending. Sale process is close.
+
+        NONE      All earlier stages
+
+
+    ____________________________
+    TAX LIEN FORECLOSURES
+    ____________________________
+
+    Tax lien foreclosures work differently from mortgage foreclosures.
+    They are less structured, move on their own timeline, and do not have
+    the same clear escalation points. For this reason, there is no HIGH
+    urgency level for tax liens.
+
+    The only stage worth flagging is default -- the owner has stopped
+    engaging, which creates a potential window to approach them.
+
+    Once a tax lien moves past default (Final Judgment, Writ, Redemption),
+    the lien holder effectively owns the property. Anyone buying a tax lien
+    is a sophisticated investor looking to profit -- not a motivated seller.
+    These are no-go leads.
+
+        MEDIUM    Redemption Order  (Motion/Order Fixing Amount)
+                      Court has set a specific dollar amount and deadline
+                      for the owner to pay off the lien. Owner has a clock
+                      ticking and clearly can't or won't pay. Best window
+                      to approach before the lien holder takes title.
+
+        MEDIUM    Default stage
+                      Owner went silent. Earlier window, less pressure.
+
+        NONE      Late stage  (Final Judgment, Writ Issued, Writ Return)
+                      Lien holder owns it. Do not pursue.
+
+        NONE      All other tax lien stages
+
+
+    ____________________________
+    WARNING LABELS
+    ____________________________
+
+        HIGH   --> "High urgency: compressed buyer timeline"
+        MEDIUM --> "Moderate urgency: watch buyer timeline"
+
+
+
+    ====================================
+    PLAINTIFF CLASSIFICATION
+    ====================================
+
+    Evaluated in this priority order:
+
+    1.  TAX_LIEN
+            Court case type is "Tax Foreclosure"
+            -- OR --
+            Plaintiff name matches known tax lien investors:
+
+            FIG, PRO CAP, PROCAP, ACTLIEN, TLCF, MTAG, US BANK CUST,
+            TAX LIEN, LIEN HOLDER, CERTES, TOWER,
+            FUND LLC, CAPITAL LLC, INVESTORS LLC, HOLDINGS LLC
+
+    2.  GOVERNMENT
+            Plaintiff name contains:
+            COUNTY OF, STATE OF, CITY OF, TOWNSHIP OF, BOROUGH OF,
+            MUNICIPAL, HOUSING AUTHORITY, REDEVELOPMENT
+
+    3.  MORTGAGE
+            Default for banks, servicers, and private lenders.
+
+    4.  ENTITY
+            Fallback for LLC, INC, CORP, TRUST, BANK, etc.
+            when no other rule applies.
+
+
+
+    ====================================
+    COURT TERMS GLOSSARY
+    ====================================
+
+    Writ of Execution
+        Court order authorizing the sheriff to conduct a sale.
+
+    Alias Writ
+        A renewed writ issued when the original expired without a sale.
+
+    Writ Return
+        Sheriff has returned the writ after the sale occurred or was attempted.
+
+    Final Judgment
+        Court ruled in the lender's favor. Owner has legally lost.
+
+    Motion for Final Judgment  (MFJ)
+        Lender's request asking the court to enter final judgment.
+
+    Uncontested Order for Final Judgment
+        Final judgment entered without opposition from the owner.
+
+    Default / Request for Default
+        Owner failed to respond to the complaint within the required time.
+
+    Contested Answer
+        Owner formally responded to the foreclosure complaint.
+
+    Contested Answer w/ Counterclaim
+        Owner responded and also filed their own claims against the lender.
+
+    Notice of Appearance
+        An attorney filed notice that they represent a party in the case.
+
+    Stipulation of Settlement
+        Both parties agreed to resolve the case (sale, payoff, modification).
+
+    Stipulation of Dismissal
+        Case formally dismissed, usually after settlement.
+
+    Automatic Stay
+        Bankruptcy filing that halts all foreclosure activity by federal law.
+
+    Guardian Ad Litem
+        Court-appointed representative for a party who cannot represent themselves.
+
+    Motion to Reform Mortgage
+        Request to correct an error in the original mortgage documents.
+
+    Certification of Diligent Inquiry
+        Lender's sworn statement that they tried and failed to locate the owner.
+
+    14-Day Notice
+        Required notice served to the owner before sheriff sale proceeds.
+
+    Postponement Letter
+        Sale was delayed, often at owner's request or by agreement.
+
+    Motion / Order Fixing Amount
+        Court sets the exact dollar amount needed to redeem (pay off) the property.
+
+    Redemption
+        Owner's right to reclaim the property by paying the full lien balance + fees.
+
+    Additional Sums
+        Extra amounts added to the debt: attorney fees, advances, taxes paid by lender.
+
+    Limited Representation
+        Attorney entered for a limited purpose only -- not full representation.
+
+    Substitution of Attorney
+        Owner changed lawyers mid-case.
+
+    Deficiency Notice
+        Notice that the sale proceeds didn't fully cover the debt.
+        Owner may still owe the difference.
+

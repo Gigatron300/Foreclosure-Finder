@@ -157,10 +157,13 @@ function buildUrgencySignal(signals) {
   const reasons = [];
   let level = 'NONE';
   const caseCategory = String(signals.caseCategory || '').toUpperCase();
-  const hasLateTaxLienSignal = !!(signals.hasFinalJudgment || signals.hasRedemptionOrder);
+  const hasLateTaxLienSignal = !!(signals.hasFinalJudgment);
 
   if (caseCategory === 'TAX_LIEN' && hasLateTaxLienSignal) {
     level = 'NONE';
+  } else if (caseCategory === 'TAX_LIEN' && signals.hasRedemptionOrder) {
+    level = 'MEDIUM';
+    reasons.push('Redemption amount set -- owner has a deadline to pay or lose the property');
   } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
     level = 'MEDIUM';
     reasons.push('Default stage on tax lien');
@@ -305,11 +308,14 @@ function scoreCamdenCase(caseData) {
   timeF = clamp(timeF, -5, 8);
   if (timeF !== 0) factors.push({ text: 'F Time in Foreclosure', impact: timeF });
 
-  // G) Plaintiff Type (0..+6): tax lien owners are typically less sophisticated,
-  // have smaller amounts owed, and are more likely to want out
+  // G) Plaintiff Type: early-stage tax liens are motivated sellers (small amounts owed, less sophisticated).
+  // Late-stage tax liens are no-go — lien holder has effectively taken the property and wants a profit.
   let plaintiffG = 0;
   const pType = resolvedPlaintiffType.toUpperCase();
-  if (pType === 'TAX_LIEN') plaintiffG = 6;
+  if (pType === 'TAX_LIEN') {
+    const isLateStageTaxLien = hasFinalJudgment || hasWritIssued || hasWritReturn;
+    plaintiffG = isLateStageTaxLien ? -15 : 6;
+  }
   if (plaintiffG !== 0) factors.push({ text: 'G Plaintiff Type (Tax Lien)', impact: plaintiffG });
 
   // Small confidence guardrail
