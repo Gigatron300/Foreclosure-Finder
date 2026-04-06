@@ -157,6 +157,7 @@ function buildUrgencySignal(signals) {
   const reasons = [];
   let level = 'NONE';
   const caseCategory = String(signals.caseCategory || '').toUpperCase();
+  const hasLateTaxLienSignal = !!(signals.hasFinalJudgment || signals.hasRedemptionOrder);
 
   if (signals.hasWritReturn) {
     level = 'HIGH';
@@ -167,6 +168,8 @@ function buildUrgencySignal(signals) {
   } else if (signals.saleStaySignals) {
     level = 'HIGH';
     reasons.push('Sheriff sale activity or postponement');
+  } else if (caseCategory === 'TAX_LIEN' && hasLateTaxLienSignal) {
+    level = 'NONE';
   } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
     level = 'MEDIUM';
     reasons.push('Default stage on tax lien');
@@ -223,6 +226,7 @@ function scoreCamdenCase(caseData) {
   const hasWritIssued = hasAny(['WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT']);
   const hasFinalJudgment = hasAny(['UNCONTESTED ORDER FOR FINAL JUDGMENT', 'ORDER FOR FINAL JUDGMENT', 'FINAL JUDGMENT']);
   const hasMfjFiled = hasAny(['MOTION FOR FINAL JUDGMENT']);
+  const redemptionOrder = hasAny(['MOTION FIXING AMOUNT', 'ORDER FIXING AMOUNT', 'REDEMPTION']);
   const urgencySignal = buildUrgencySignal({
     caseCategory: resolvedPlaintiffType,
     defaultSignals,
@@ -230,6 +234,7 @@ function scoreCamdenCase(caseData) {
     hasWritIssued,
     hasFinalJudgment,
     hasMfjFiled,
+    hasRedemptionOrder: redemptionOrder,
     saleStaySignals
   });
   let stageA = 2;
@@ -278,7 +283,6 @@ function scoreCamdenCase(caseData) {
 
   // E) Exit / Resolution Signals (0-20): additive, capped
   let exitE = 0;
-  const redemptionOrder = hasAny(['MOTION FIXING AMOUNT', 'ORDER FIXING AMOUNT', 'REDEMPTION']);
   const softWindow = hasAny(['POSTPONEMENT LETTER', 'SALE POSTPONEMENT', 'LIMITED REPRESENTATION']);
   if (settlementSignals) exitE += 20;
   if (softWindow) exitE += 10;

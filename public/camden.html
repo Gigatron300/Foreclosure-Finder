@@ -1130,7 +1130,7 @@
                 case 'ACTIVE_OPPORTUNITIES':
                     return isActiveOpportunity(caseObj);
                 case 'MEDIUM_URGENCY':
-                    return urgencyLevel === 'MEDIUM';
+                    return urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
                 case 'HIGH_URGENCY':
                     return urgencyLevel === 'HIGH';
                 case 'LATE_TAX_LIENS':
