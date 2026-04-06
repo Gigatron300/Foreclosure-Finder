@@ -256,12 +256,13 @@
                       for the owner to pay off the lien. Owner has a clock
                       ticking and clearly can't or won't pay. Best window
                       to approach before the lien holder takes title.
-
-        MEDIUM    Default stage
-                      Owner went silent. Earlier window, less pressure.
+                      Typically 3-6 months before final judgment.
 
         NONE      Late stage  (Final Judgment, Writ Issued, Writ Return)
                       Lien holder owns it. Do not pursue.
+
+        NONE      All other stages including default
+                      Default alone does not indicate real time pressure.
 
         NONE      All other tax lien stages
 

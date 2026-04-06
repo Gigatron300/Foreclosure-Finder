@@ -969,9 +969,10 @@
         };
         const LATE_TAX_LIEN_SIGNALS = [
             'FINAL JUDGMENT',
-            'ORDER FIXING AMOUNT',
-            'MOTION FIXING AMOUNT',
-            'REDEMPTION'
+            'WRIT OF EXECUTION',
+            'FORECLOSURE WRIT NOTICE',
+            'ALIAS WRIT',
+            'WRIT RETURN'
         ];
 
         function toggleApiDropdown() {
@@ -1769,7 +1770,7 @@
             const urgencyBadgeClass = urgencyLevel === 'HIGH' ? 'urgency-high' : urgencyLevel === 'MEDIUM' ? 'urgency-medium' : '';
             const urgencyBadgeText = urgencyLevel === 'HIGH' ? 'Urgency High' : urgencyLevel === 'MEDIUM' ? 'Urgency Medium' : '';
             const urgencyTooltip = [c.buyerWarning || '', ...urgencyReasons].filter(Boolean).join(' - ').replace(/"/g, '&quot;');
-            const lateTaxLienTooltip = 'Late-stage tax lien: final judgment, redemption order, or redemption signal detected';
+            const lateTaxLienTooltip = 'Late-stage tax lien: final judgment or writ detected -- lien holder has effectively taken the property';
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);

@@ -166,7 +166,7 @@ function buildUrgencySignal(signals) {
     reasons.push('Redemption amount set -- owner has a deadline to pay or lose the property');
   } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
     level = 'MEDIUM';
-    reasons.push('Default stage on tax lien');
+    reasons.push('Default stage -- owner disengaged, no hard deadline yet');
   } else if (caseCategory === 'TAX_LIEN') {
     level = 'NONE';
   } else if (signals.hasWritReturn) {
