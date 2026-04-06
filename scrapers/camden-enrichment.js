@@ -156,6 +156,7 @@ function labelFromGrade(grade) {
 function buildUrgencySignal(signals) {
   const reasons = [];
   let level = 'NONE';
+  const caseCategory = String(signals.caseCategory || '').toUpperCase();
 
   if (signals.hasWritReturn) {
     level = 'HIGH';
@@ -166,10 +167,13 @@ function buildUrgencySignal(signals) {
   } else if (signals.saleStaySignals) {
     level = 'HIGH';
     reasons.push('Sheriff sale activity or postponement');
-  } else if (signals.hasFinalJudgment) {
+  } else if (caseCategory === 'TAX_LIEN' && signals.defaultSignals) {
+    level = 'MEDIUM';
+    reasons.push('Default stage on tax lien');
+  } else if (caseCategory !== 'TAX_LIEN' && signals.hasFinalJudgment) {
     level = 'MEDIUM';
     reasons.push('Final judgment entered');
-  } else if (signals.hasMfjFiled) {
+  } else if (caseCategory !== 'TAX_LIEN' && signals.hasMfjFiled) {
     level = 'MEDIUM';
     reasons.push('Motion for final judgment filed');
   }
@@ -220,6 +224,8 @@ function scoreCamdenCase(caseData) {
   const hasFinalJudgment = hasAny(['UNCONTESTED ORDER FOR FINAL JUDGMENT', 'ORDER FOR FINAL JUDGMENT', 'FINAL JUDGMENT']);
   const hasMfjFiled = hasAny(['MOTION FOR FINAL JUDGMENT']);
   const urgencySignal = buildUrgencySignal({
+    caseCategory: resolvedPlaintiffType,
+    defaultSignals,
     hasWritReturn,
     hasWritIssued,
     hasFinalJudgment,
