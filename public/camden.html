@@ -1140,7 +1140,13 @@
             return caseHasAnySignal(caseObj, ['WRIT RETURN']);
         }
 
+        function isClosedCourtCase(caseObj) {
+            const courtStatus = String(caseObj.courtStatus || '').toUpperCase();
+            return courtStatus === 'CLOSED' || courtStatus === 'STAY';
+        }
+
         function isActiveOpportunity(caseObj) {
+            if (isClosedCourtCase(caseObj)) return false;
             if (isLateTaxLien(caseObj)) return false;
             if (isSaleRun(caseObj)) return false;
             return true;
@@ -1154,9 +1160,9 @@
                 case 'NO_URGENCY':
                     return isActiveOpportunity(caseObj) && urgencyLevel === 'NONE';
                 case 'MEDIUM_URGENCY':
-                    return urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
+                    return !isClosedCourtCase(caseObj) && urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
                 case 'HIGH_URGENCY':
-                    return urgencyLevel === 'HIGH' && !isSaleRun(caseObj);
+                    return !isClosedCourtCase(caseObj) && urgencyLevel === 'HIGH' && !isSaleRun(caseObj);
                 case 'LATE_TAX_LIENS':
                     return isLateTaxLien(caseObj);
                 case 'SALE_RUN':

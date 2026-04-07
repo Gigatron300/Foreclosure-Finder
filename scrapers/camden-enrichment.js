@@ -157,6 +157,13 @@ function buildUrgencySignal(signals) {
   const reasons = [];
   let level = 'NONE';
   const caseCategory = String(signals.caseCategory || '').toUpperCase();
+  if (signals.isClosedCase) {
+    return {
+      level: 'NONE',
+      reasons: [],
+      buyerWarning: ''
+    };
+  }
   const hasLateTaxLienSignal = !!(signals.hasFinalJudgment);
 
   if (caseCategory === 'TAX_LIEN' && hasLateTaxLienSignal) {
@@ -215,6 +222,7 @@ function scoreCamdenCase(caseData) {
   const has = (s) => contextText.includes(s);
   const hasAny = (arr) => arr.some(has);
   const hasAll = (arr) => arr.every(has);
+  const isClosedCase = courtStatus === 'CLOSED' || courtStatus === 'STAY';
 
   const defaultSignals = hasAny(['DEFAULT', 'DEFAULTED', 'REQUEST FOR DEFAULT']);
   const settlementSignals = hasAny(['STIPULATION OF SETTLEMENT', 'STIPULATION OF DISMISSAL', 'SETTLEMENT']);
@@ -234,6 +242,7 @@ function scoreCamdenCase(caseData) {
   const redemptionOrder = hasAny(['MOTION FIXING AMOUNT', 'ORDER FIXING AMOUNT', 'REDEMPTION']);
   const urgencySignal = buildUrgencySignal({
     caseCategory: resolvedPlaintiffType,
+    isClosedCase,
     defaultSignals,
     hasWritReturn,
     hasWritIssued,
