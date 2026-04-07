@@ -44,6 +44,47 @@ function toCSVField(value) {
   return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
+const LATE_TAX_LIEN_SIGNALS = [
+  'FINAL JUDGMENT',
+  'WRIT OF EXECUTION',
+  'FORECLOSURE WRIT NOTICE',
+  'ALIAS WRIT',
+  'WRIT RETURN'
+];
+
+function normalizeCourtDocket(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function findMatchingCourtDocket(normalizedCaseDocket, normalizedDockets) {
+  return normalizedDockets.find(docket =>
+    docket === normalizedCaseDocket ||
+    normalizedCaseDocket.endsWith(docket) ||
+    docket.endsWith(normalizedCaseDocket)
+  ) || null;
+}
+
+function getCourtStageContext(c) {
+  return [
+    c.courtCaseType || '',
+    c.courtDisposition || '',
+    c.courtCaseActionsText || '',
+    c.courtLatestActionText || ''
+  ].join(' ').toUpperCase();
+}
+
+function isLateStageTaxLien(c) {
+  if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return false;
+  const context = getCourtStageContext(c);
+  return LATE_TAX_LIEN_SIGNALS.some(signal => context.includes(signal));
+}
+
+function hasActiveOpenCourtState(c) {
+  const rawStatus = String(c.courtStatusRaw || '').toUpperCase();
+  const disposition = String(c.courtDisposition || '').toUpperCase();
+  return /\bACTIVE\b/.test(rawStatus) || /\bOPEN\b/.test(disposition);
+}
+
 async function readJsonFileSafe(filePath, fallback = null) {
   try {
     const content = await fs.readFile(filePath, 'utf8');
@@ -787,6 +828,9 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
     const existingData = await readJsonFileSafe(CAMDEN_DATA_FILE, null);
     if (existingData && Array.isArray(existingData.cases)) {
       const existingByInstrument = new Map(existingData.cases.map(c => [c.instrumentNumber, c]));
+      const importMeta = parsed.importMetadata || {};
+      const hasCourtStatusColumn = importMeta.hasCourtStatusColumn === true;
+      const hasCourtDocketColumn = importMeta.hasCourtDocketColumn === true;
       const courtFields = [
         'courtStatus', 'courtStatusRaw', 'courtStatusNote', 'courtDocketNumber',
         'courtDisposition', 'courtCaseType', 'courtCaseCaption', 'courtFiledDate',
@@ -802,11 +846,26 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
         const existing = existingByInstrument.get(c.instrumentNumber);
         if (!existing) return c;
         const merged = { ...c };
+        const uploadedCourtStatus = String(c.courtStatus || '').trim();
+        const uploadedCourtDocket = String(c.courtDocketNumber || '').trim();
+
         for (const field of [...courtFields, ...enrichmentFields]) {
+          if (field === 'courtStatus' && hasCourtStatusColumn) continue;
+          if (field === 'courtStatusNote' && hasCourtStatusColumn) continue;
+          if (field === 'courtDocketNumber' && hasCourtDocketColumn) continue;
           if (existing[field] !== undefined && existing[field] !== null && existing[field] !== '') {
             merged[field] = existing[field];
           }
         }
+
+        if (hasCourtStatusColumn) {
+          merged.courtStatus = uploadedCourtStatus ? uploadedCourtStatus.toUpperCase() : '';
+          merged.courtStatusNote = uploadedCourtStatus ? `MANUAL_CSV_OVERRIDE:${merged.courtStatus}` : '';
+        }
+        if (hasCourtDocketColumn) {
+          merged.courtDocketNumber = uploadedCourtDocket;
+        }
+
         return merged;
       });
     }
@@ -1209,25 +1268,11 @@ app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
     const data = JSON.parse(content);
     const ann = await readAnnotations();
 
-    const LATE_TAX_LIEN_SIGNALS = [
-      'FINAL JUDGMENT', 'WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT', 'WRIT RETURN'
-    ];
-
-    function isLateStageTaxLien(c) {
-      if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return false;
-      const context = [
-        c.courtCaseType || '',
-        c.courtDisposition || '',
-        c.courtCaseActionsText || '',
-        c.courtLatestActionText || ''
-      ].join(' ').toUpperCase();
-      return LATE_TAX_LIEN_SIGNALS.some(s => context.includes(s));
-    }
-
     let closed = 0;
     let skipped = 0;
     data.cases = data.cases.map(c => {
       if ((c.courtStatus || '').toUpperCase() === 'CLOSED') { skipped++; return c; }
+      if (hasActiveOpenCourtState(c)) { skipped++; return c; }
       if (!isLateStageTaxLien(c)) { skipped++; return c; }
 
       c.courtStatus = 'CLOSED';
@@ -1250,6 +1295,72 @@ app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
 });
 
 // Export Camden CSV — preserves original format, adds court status columns
+app.options('/api/camden/admin/reopen-court-status-by-docket', cors());
+app.post('/api/camden/admin/reopen-court-status-by-docket', cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'X-Auth-Token']
+}), (req, res, next) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token === SITE_PASSWORD) next();
+  else res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
+  try {
+    const rawDockets = Array.isArray(req.body?.dockets) ? req.body.dockets : [];
+    const normalizedDockets = Array.from(new Set(rawDockets.map(normalizeCourtDocket).filter(Boolean)));
+    if (!normalizedDockets.length) {
+      return res.status(400).json({ error: 'dockets array required' });
+    }
+
+    const nextStatus = String(req.body?.courtStatus || 'OPEN').toUpperCase();
+    if (!['OPEN', 'RECHECK'].includes(nextStatus)) {
+      return res.status(400).json({ error: 'courtStatus must be OPEN or RECHECK' });
+    }
+
+    const notePrefix = String(req.body?.note || 'ADMIN_REOPENED:DOCKET_BATCH').trim() || 'ADMIN_REOPENED:DOCKET_BATCH';
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const ann = await readAnnotations();
+    const notFound = new Set(normalizedDockets);
+    const updated = [];
+
+    data.cases = data.cases.map(c => {
+      const normalizedCaseDocket = normalizeCourtDocket(c.courtDocketNumber);
+      if (!normalizedCaseDocket) return c;
+
+      const matchedDocket = findMatchingCourtDocket(normalizedCaseDocket, Array.from(notFound));
+      if (!matchedDocket) return c;
+
+      notFound.delete(matchedDocket);
+      c.courtStatus = nextStatus;
+      c.courtStatusNote = `${notePrefix} | raw:${c.courtStatusRaw || '-'} | disp:${c.courtDisposition || '-'}`;
+      pushScoreHistory(c, ann);
+      c = scoreCamdenCase(c);
+      updated.push({
+        instrumentNumber: c.instrumentNumber,
+        docket: c.courtDocketNumber || '',
+        status: c.courtStatus,
+        rawStatus: c.courtStatusRaw || '',
+        disposition: c.courtDisposition || ''
+      });
+      return c;
+    });
+
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    await writeAnnotations(ann);
+
+    console.log(`Reopened ${updated.length} court-status cases by docket (${Array.from(notFound).length} not found)`);
+    res.json({
+      success: true,
+      updatedCount: updated.length,
+      updated,
+      notFound: Array.from(notFound)
+    });
+  } catch (error) {
+    console.error('Reopen by docket error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.options('/api/camden/court-status-refresh/advance', cors());
 app.post('/api/camden/court-status-refresh/advance', cors({
   origin: '*',

@@ -593,6 +593,10 @@ function parseCamdenCSV(csvText) {
   return {
     source: 'Camden County Clerk - Lis Pendens Filed',
     processedAt: new Date().toISOString(),
+    importMetadata: {
+      hasCourtStatusColumn: col.courtStatus >= 0,
+      hasCourtDocketColumn: col.courtDocket >= 0
+    },
     totalCases: scoredCases.length,
     totalRows: lines.length - 1,
     summary: { byPlaintiffType, byDefendantType, byTown },
