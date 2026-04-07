@@ -121,9 +121,6 @@ function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
     if (existingStatus !== 'OPEN' && existingStatus !== 'STAY' && existingStatus !== 'REINSTATED') return false;
     if (!c.courtDocketNumber) return false;
     if (!hasCourtLookupInput(c)) return false;
-    // Tax lien cases are never worth re-checking: late-stage ones are effectively closed,
-    // early-stage ones don't have meaningful urgency signals to refresh.
-    if ((c.plaintiffType || '').toUpperCase() === 'TAX_LIEN') return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
