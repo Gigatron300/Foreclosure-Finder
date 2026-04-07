@@ -121,6 +121,9 @@ function getCamdenOpenRefreshCases(data, { testMode = false } = {}) {
     if (existingStatus !== 'OPEN' && existingStatus !== 'STAY' && existingStatus !== 'REINSTATED') return false;
     if (!c.courtDocketNumber) return false;
     if (!hasCourtLookupInput(c)) return false;
+    // Tax lien cases are never worth re-checking: late-stage ones are effectively closed,
+    // early-stage ones don't have meaningful urgency signals to refresh.
+    if ((c.plaintiffType || '').toUpperCase() === 'TAX_LIEN') return false;
     return true;
   }).map(mapCaseForCourtStatus);
 
@@ -1194,6 +1197,47 @@ app.post('/api/camden/court-status-update', cors({
     res.json({ success: true, instrumentNumber, status: data.cases[caseIdx].courtStatus });
   } catch (error) {
     console.error('Court status update error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// One-shot admin: bulk-close all late-stage tax lien cases.
+// Late-stage = plaintiff is a tax lien holder AND case actions contain Final Judgment / Writ signals.
+// These cases are effectively completed — the lien holder took the property. No value as leads.
+app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (token !== SITE_PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
+    const data = JSON.parse(content);
+    const ann = await readAnnotations();
+
+    const LATE_STAGE_RE = /final judgment|writ of execution|alias writ|writ return|writ issued|order fixing amount|motion fixing amount/i;
+
+    let closed = 0;
+    let skipped = 0;
+    data.cases = data.cases.map(c => {
+      if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return c;
+      const actionsText = c.courtCaseActionsText || c.courtLatestActionText || '';
+      if (!LATE_STAGE_RE.test(actionsText)) { skipped++; return c; }
+      if ((c.courtStatus || '').toUpperCase() === 'CLOSED') { skipped++; return c; }
+
+      c.courtStatus = 'CLOSED';
+      c.courtStatusNote = 'BULK_CLOSED:LATE_STAGE_TAX_LIEN';
+      pushScoreHistory(c, ann);
+      c = scoreCamdenCase(c);
+      closed++;
+      return c;
+    });
+
+    await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+    await writeAnnotations(ann);
+
+    console.log(`Bulk-closed ${closed} late-stage tax lien cases (${skipped} skipped)`);
+    res.json({ success: true, closed, skipped });
+  } catch (error) {
+    console.error('Bulk close error:', error);
     res.status(500).json({ error: error.message });
   }
 });

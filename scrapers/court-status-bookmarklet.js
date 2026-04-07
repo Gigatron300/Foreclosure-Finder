@@ -566,7 +566,16 @@
 
     const jacket = extractJacket();
     const c = state.cases[state.currentIndex];
-    const status = classify(jacket.caseStatus, jacket.caseDisposition);
+    let status = classify(jacket.caseStatus, jacket.caseDisposition);
+
+    // Tax lien cases with a "Defaulted" header are effectively closed.
+    // NJ courts permanently freezes Case Status at "Defaulted" when the defendant
+    // first fails to respond — it never updates even after Final Judgment or Writ Return.
+    // Cases that needed amended complaints (the rare ones still being actively pursued)
+    // show "Active" instead, and are correctly classified as OPEN above.
+    if (/tax foreclosure/i.test(jacket.caseType) && /defaulted/i.test(jacket.caseStatus) && status === 'OPEN') {
+      status = 'CLOSED';
+    }
     const match = state.lastMatch || {};
     const jacketDecision = Core.evaluateJacketMatch({
       filingDate: c.filingDate,
