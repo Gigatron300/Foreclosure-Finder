@@ -1199,8 +1199,8 @@ app.post('/api/camden/court-status-update', cors({
 });
 
 // One-shot admin: bulk-close all late-stage tax lien cases.
-// Late-stage = plaintiff is a tax lien holder AND case actions contain Final Judgment / Writ signals.
-// These cases are effectively completed — the lien holder took the property. No value as leads.
+// Uses the same logic as the Tampermonkey fix: tax lien + courtStatusRaw "Defaulted" = closed.
+// NJ courts freezes "Defaulted" permanently; cases still being pursued show "Active" instead.
 app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token !== SITE_PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
@@ -1210,15 +1210,17 @@ app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
     const data = JSON.parse(content);
     const ann = await readAnnotations();
 
-    const LATE_STAGE_RE = /final judgment|writ of execution|alias writ|writ return|writ issued|order fixing amount|motion fixing amount/i;
-
     let closed = 0;
     let skipped = 0;
     data.cases = data.cases.map(c => {
       if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return c;
-      const actionsText = c.courtCaseActionsText || c.courtLatestActionText || '';
-      if (!LATE_STAGE_RE.test(actionsText)) { skipped++; return c; }
       if ((c.courtStatus || '').toUpperCase() === 'CLOSED') { skipped++; return c; }
+      // Match the Tampermonkey logic: "Defaulted" raw status = lien holder completed the case
+      const rawStatus = (c.courtStatusRaw || '').toLowerCase();
+      const caseType = (c.courtCaseType || '').toLowerCase();
+      const isTaxForeclosure = /tax foreclosure/.test(caseType) || (c.plaintiffType || '').toUpperCase() === 'TAX_LIEN';
+      const isDefaulted = /defaulted/.test(rawStatus);
+      if (!isTaxForeclosure || !isDefaulted) { skipped++; return c; }
 
       c.courtStatus = 'CLOSED';
       c.courtStatusNote = 'BULK_CLOSED:LATE_STAGE_TAX_LIEN';
