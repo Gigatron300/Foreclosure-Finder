@@ -1199,8 +1199,7 @@ app.post('/api/camden/court-status-update', cors({
 });
 
 // One-shot admin: bulk-close all late-stage tax lien cases.
-// Uses the same logic as the Tampermonkey fix: tax lien + courtStatusRaw "Defaulted" = closed.
-// NJ courts freezes "Defaulted" permanently; cases still being pursued show "Active" instead.
+// Uses the exact same detection as the UI's isLateTaxLien() + getCaseStageContext().
 app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
   const token = req.headers['x-auth-token'] || req.query.token;
   if (token !== SITE_PASSWORD) return res.status(401).json({ error: 'Unauthorized' });
@@ -1210,17 +1209,26 @@ app.post('/api/camden/admin/close-late-stage-tax-liens', async (req, res) => {
     const data = JSON.parse(content);
     const ann = await readAnnotations();
 
+    const LATE_TAX_LIEN_SIGNALS = [
+      'FINAL JUDGMENT', 'WRIT OF EXECUTION', 'FORECLOSURE WRIT NOTICE', 'ALIAS WRIT', 'WRIT RETURN'
+    ];
+
+    function isLateStageTaxLien(c) {
+      if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return false;
+      const context = [
+        c.courtCaseType || '',
+        c.courtDisposition || '',
+        c.courtCaseActionsText || '',
+        c.courtLatestActionText || ''
+      ].join(' ').toUpperCase();
+      return LATE_TAX_LIEN_SIGNALS.some(s => context.includes(s));
+    }
+
     let closed = 0;
     let skipped = 0;
     data.cases = data.cases.map(c => {
-      if ((c.plaintiffType || '').toUpperCase() !== 'TAX_LIEN') return c;
       if ((c.courtStatus || '').toUpperCase() === 'CLOSED') { skipped++; return c; }
-      // Match the Tampermonkey logic: "Defaulted" raw status = lien holder completed the case
-      const rawStatus = (c.courtStatusRaw || '').toLowerCase();
-      const caseType = (c.courtCaseType || '').toLowerCase();
-      const isTaxForeclosure = /tax foreclosure/.test(caseType) || (c.plaintiffType || '').toUpperCase() === 'TAX_LIEN';
-      const isDefaulted = /defaulted/.test(rawStatus);
-      if (!isTaxForeclosure || !isDefaulted) { skipped++; return c; }
+      if (!isLateStageTaxLien(c)) { skipped++; return c; }
 
       c.courtStatus = 'CLOSED';
       c.courtStatusNote = 'BULK_CLOSED:LATE_STAGE_TAX_LIEN';
