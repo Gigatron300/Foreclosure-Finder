@@ -941,6 +941,8 @@
         let streetViewModeUnlocked = false;
         let streetViewModeRequiresPasskey = true;
         const streetViewCacheVersion = 'v2';
+        let camdenDataCache = null;
+        let camdenDataCachePromise = null;
         let camdenSheriffAddressKeys = null;
         let camdenSheriffAddressKeysPromise = null;
         const TYPE_FILTER_LABELS = {
@@ -1056,7 +1058,7 @@
                 streetViewModeUnlocked = true;
                 streetViewMode = localStorage.getItem('camdenStreetViewMode') || CAMDEN_DEFAULT_STREETVIEW_MODE;
                 renderStreetViewModeControls();
-                loadData();
+                loadData(false);
             } catch (e) {
                 alert('Could not unlock mode controls.');
             }
@@ -1099,7 +1101,7 @@
             const mode = document.getElementById('streetViewMode').value;
             streetViewMode = (mode === 'auto' || mode === 'open-only' || mode === 'on-demand') ? mode : 'open-only';
             localStorage.setItem('camdenStreetViewMode', streetViewMode);
-            loadData();
+            loadData(false);
         }
 
         function getFreshStreetViewUrl(streetViewUrl) {
@@ -1360,7 +1362,7 @@
                 if (result.success) {
                     el.textContent = `Uploaded: ${result.uniqueCases} unique cases from ${result.totalRows} rows. Click "Resolve Addresses" to enrich.`;
                     el.className = 'csv-status has-file';
-                    loadData();
+                    loadData(true);
                 } else {
                     el.textContent = 'Error: ' + result.error;
                     el.className = 'csv-status no-file';
@@ -1371,7 +1373,40 @@
             }
         }
 
-        async function loadData() {
+        async function fetchCamdenData(forceRefresh = false) {
+            if (!forceRefresh && camdenDataCache) return camdenDataCache;
+            if (!forceRefresh && camdenDataCachePromise) return camdenDataCachePromise;
+
+            camdenDataCachePromise = (async () => {
+                const r = await fetch('/api/camden?sortBy=daysSinceFiling&sortOrder=desc', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                const data = await r.json();
+                camdenDataCache = data;
+                return data;
+            })();
+
+            try {
+                return await camdenDataCachePromise;
+            } finally {
+                camdenDataCachePromise = null;
+            }
+        }
+
+        function sortCases(cases, sortBy) {
+            const sorters = {
+                sellerScoreDesc: (a, b) => (b.sellerScore || 0) - (a.sellerScore || 0),
+                sellerScoreAsc: (a, b) => (a.sellerScore || 0) - (b.sellerScore || 0),
+                daysSinceFilingAsc: (a, b) => (a.daysSinceFiling || 0) - (b.daysSinceFiling || 0),
+                daysSinceFilingDesc: (a, b) => (b.daysSinceFiling || 0) - (a.daysSinceFiling || 0),
+                assessedValue: (a, b) => (b.assessedValue || 0) - (a.assessedValue || 0),
+                town: (a, b) => (a.town || '').localeCompare(b.town || '')
+            };
+            const sorter = sorters[sortBy] || sorters.sellerScoreDesc;
+            return [...cases].sort(sorter);
+        }
+
+        async function loadData(forceRefresh = false) {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const selectedDealStages = getSelectedCheckboxValues('dealStageFilterOptions');
@@ -1383,21 +1418,7 @@
             const selectedUnits = getSelectedCheckboxValues('unitsFilterOptions');
 
             try {
-                let apiSortBy = sortBy;
-                let sortOrder = 'desc';
-                if (sortBy === 'sellerScoreDesc') apiSortBy = 'sellerScore';
-                else if (sortBy === 'sellerScoreAsc') { apiSortBy = 'sellerScore'; sortOrder = 'asc'; }
-                else if (sortBy === 'daysSinceFilingAsc') { apiSortBy = 'daysSinceFiling'; sortOrder = 'asc'; }
-                else if (sortBy === 'daysSinceFilingDesc') { apiSortBy = 'daysSinceFiling'; sortOrder = 'desc'; }
-
-                let url = `/api/camden?sortBy=${apiSortBy}&sortOrder=${sortOrder}`;
-                if (addressFilter) url += `&hasAddress=${addressFilter}`;
-                selectedTowns.forEach(town => {
-                    url += `&town=${encodeURIComponent(town)}`;
-                });
-
-                const r = await fetch(url, { headers: { 'X-Auth-Token': authToken } });
-                const data = await r.json();
+                const data = await fetchCamdenData(forceRefresh);
                 populateTownFilter(data.summary, selectedTowns);
 
                 if (data.lastUpdated) {
@@ -1407,6 +1428,17 @@
                 const allCases = data.cases || [];
                 let cases = allCases;
                 populateTagFilter(allCases);
+
+                if (addressFilter === 'true') {
+                    cases = cases.filter(c => !!c.propertyAddress);
+                } else if (addressFilter === 'false') {
+                    cases = cases.filter(c => !c.propertyAddress);
+                }
+
+                if (selectedTowns.length) {
+                    const townSet = new Set(selectedTowns.map(t => String(t || '').trim().toUpperCase()));
+                    cases = cases.filter(c => townSet.has(String(c.town || '').trim().toUpperCase()));
+                }
 
                 cases = cases.filter(c => matchesAnyDealStage(c, selectedDealStages));
 
@@ -1443,6 +1475,8 @@
                         return selectedTags.every(t => tags.includes(t));
                     });
                 }
+
+                cases = sortCases(cases, sortBy);
 
                 // Stats (from unfiltered data for totals)
                 document.getElementById('totalCases').textContent = cases.length;
@@ -1948,7 +1982,7 @@
                         setTimeout(check, 3000);
                     } else {
                         resetButtons();
-                        loadData();
+                        loadData(true);
                         checkCsvStatus();
                         if (status.lastStatus?.status === 'completed') {
                             const s = status.lastStatus.enrichmentSummary || {};
@@ -2099,7 +2133,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 });
                 const result = await r.json();
                 if (result.success) {
-                    loadData();
+                    loadData(true);
                 } else {
                     alert('Error: ' + (result.error || 'Unknown error'));
                 }
