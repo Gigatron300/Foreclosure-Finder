@@ -827,7 +827,6 @@
                             <label class="filter-dropdown-option"><input type="checkbox" value="HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="LATE_TAX_LIENS" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Late Tax Liens</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="SALE_RUN" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Sale Run</span></label>
-                            <label class="filter-dropdown-option"><input type="checkbox" value="ALL_STAGES" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>All Stages</span></label>
                         </div>
                     </div>
                 </div>
@@ -964,8 +963,7 @@
             MEDIUM_URGENCY: 'Medium Urgency',
             HIGH_URGENCY: 'High Urgency',
             LATE_TAX_LIENS: 'Late Tax Liens',
-            SALE_RUN: 'Sale Run',
-            ALL_STAGES: 'All Stages'
+            SALE_RUN: 'Sale Run'
         };
         const UNITS_FILTER_LABELS = {
             '1': '1 Unit',
@@ -1177,8 +1175,7 @@
 
         function matchesAnyDealStage(caseObj, selectedStages) {
             if (!selectedStages.length) return true;
-            if (selectedStages.includes('ALL_STAGES')) return true;
-            return selectedStages.some(stage => matchesDealStage(caseObj, stage));
+            return selectedStages.every(stage => matchesDealStage(caseObj, stage));
         }
 
         function toggleFilterDropdown(id, event) {
