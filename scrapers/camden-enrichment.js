@@ -252,7 +252,8 @@ function scoreCamdenCase(caseData) {
     saleStaySignals
   });
   let stageA = 2;
-  if (hasWritReturn) stageA = 35;
+  if (hasWritReturn && resolvedPlaintiffType !== 'TAX_LIEN') stageA = 0;
+  else if (hasWritReturn) stageA = 35;
   else if (hasWritIssued || saleStaySignals) stageA = 25;
   else if (hasFinalJudgment) stageA = 20;
   else if (hasMfjFiled) stageA = 12;
@@ -327,6 +328,11 @@ function scoreCamdenCase(caseData) {
   }
   if (plaintiffG !== 0) factors.push({ text: 'G Plaintiff Type (Tax Lien)', impact: plaintiffG });
 
+  // H) Terminal Outcome (-40..0): mortgage cases with writ return are usually over.
+  let terminalH = 0;
+  if (hasWritReturn && pType !== 'TAX_LIEN') terminalH = -40;
+  if (terminalH !== 0) factors.push({ text: 'H Terminal Outcome', impact: terminalH });
+
   // Small confidence guardrail
   let confidenceAdj = 0;
   if (actionList.length > 0) confidenceAdj += 2;
@@ -335,7 +341,7 @@ function scoreCamdenCase(caseData) {
   confidenceAdj = clamp(confidenceAdj, -5, 5);
   if (confidenceAdj !== 0) factors.push({ text: 'Confidence adjustment', impact: confidenceAdj });
 
-  const rawScore = stageA + distressB + resistanceC + frictionD + exitE + timeF + plaintiffG + confidenceAdj;
+  const rawScore = stageA + distressB + resistanceC + frictionD + exitE + timeF + plaintiffG + terminalH + confidenceAdj;
   const score = clamp(Math.round(rawScore), 0, 100);
   const grade = gradeFromScore(score);
   const summary = [
@@ -346,6 +352,7 @@ function scoreCamdenCase(caseData) {
     `E:${exitE}`,
     `F:${timeF}`,
     `G:${plaintiffG}`,
+    `H:${terminalH}`,
     `Conf:${confidenceAdj}`
   ].join(' ');
 
@@ -393,6 +400,7 @@ function scoreCamdenCase(caseData) {
       exitE,
       timeF,
       plaintiffG,
+      terminalH,
       confidenceAdj,
       urgencyLevel: urgencySignal.level
     }

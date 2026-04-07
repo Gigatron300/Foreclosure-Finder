@@ -1671,6 +1671,7 @@
             const resistanceC = Number(sc.resistanceC) || 0;
             const frictionD = Number(sc.frictionD) || 0;
             const exitE = Number(sc.exitE) || 0;
+            const terminalH = Number(sc.terminalH) || 0;
             const confidenceAdj = Number(sc.confidenceAdj) || 0;
             const total = Number(c.sellerScore) || 0;
             const urgencyLevel = String(c.urgencyLevel || sc.urgencyLevel || 'NONE').toUpperCase();
@@ -1683,6 +1684,7 @@
                 ['C Resistance / Defense', resistanceC],
                 ['D Title / Friction', frictionD],
                 ['E Exit / Resolution', exitE],
+                ['H Terminal Outcome', terminalH],
                 ['Confidence', confidenceAdj]
             ];
 
