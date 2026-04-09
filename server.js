@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -13,7 +14,11 @@ const { containsWholeWords, shouldSkipCourtSearchName } = require('./scrapers/se
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SITE_PASSWORD = process.env.SITE_PASSWORD || 'Benoro';
+const SITE_PASSWORD = process.env.SITE_PASSWORD;
+if (!SITE_PASSWORD) {
+  console.error('SITE_PASSWORD environment variable is required. Set it before starting the server.');
+  process.exit(1);
+}
 const STREETVIEW_MODE_PASSKEY = process.env.STREETVIEW_MODE_PASSKEY || '';
 
 app.use(cors());
