@@ -1598,9 +1598,15 @@
                 BOULEVARD: 'BLVD', BLVD: 'BLVD',
                 CIRCLE: 'CIR', CIR: 'CIR'
             };
+            const directionMap = {
+                NORTH: 'N', NO: 'N', NO: 'N',
+                SOUTH: 'S', SO: 'S',
+                EAST: 'E',
+                WEST: 'W'
+            };
             const streetTokens = tokens
                 .slice(1)
-                .map(t => suffixMap[t] || t)
+                .map(t => suffixMap[t] || directionMap[t] || t)
                 .filter(t => t && t !== 'NJ' && !/^\d{5}(-\d{4})?$/.test(t));
 
             if (!streetTokens.length) return null;
