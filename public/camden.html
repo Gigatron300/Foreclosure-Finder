@@ -2197,7 +2197,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 });
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
-                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData();
+                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(true);
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
@@ -2217,7 +2217,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 });
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
-                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData();
+                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(true);
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
