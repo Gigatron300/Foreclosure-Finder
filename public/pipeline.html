@@ -882,10 +882,30 @@
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
         const PIPELINE_DEFAULT_STREETVIEW_MODE = 'on-demand';
+        const PIPELINE_LOADED_PHOTOS_KEY = 'pipelineLoadedPhotos';
         let streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
         let streetViewModeUnlocked = false;
         let streetViewModeRequiresPasskey = true;
         let sweetSpotOnly = false;
+
+        function getLoadedPhotos() {
+            try {
+                const raw = localStorage.getItem(PIPELINE_LOADED_PHOTOS_KEY);
+                return raw ? new Set(JSON.parse(raw)) : new Set();
+            } catch (e) {
+                return new Set();
+            }
+        }
+
+        function markPhotoLoaded(caseNumber) {
+            if (!caseNumber) return;
+            const set = getLoadedPhotos();
+            if (set.has(caseNumber)) return;
+            set.add(caseNumber);
+            try {
+                localStorage.setItem(PIPELINE_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
+            } catch (e) {}
+        }
         
         function toggleSweetSpot() {
             sweetSpotOnly = !sweetSpotOnly;
@@ -1012,9 +1032,10 @@
             loadData();
         }
 
-        function loadStreetViewImage(btn, streetViewUrl, mapsUrl) {
+        function loadStreetViewImage(btn, streetViewUrl, mapsUrl, caseNumber) {
             const container = btn.closest('.no-image');
             if (!container) return;
+            markPhotoLoaded(caseNumber);
             container.outerHTML = `<a href="${mapsUrl}" target="_blank">
                 <img class="street-view-img" src="${streetViewUrl}" alt="Street View" loading="lazy"
                      onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>No Street View available</div>'">
@@ -1182,13 +1203,14 @@
             const streetViewUrl = canLoadStreetView
                 ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}`
                 : '';
-            const autoLoadThisCard = getEffectiveStreetViewMode() === 'auto';
-            
+            const previouslyLoaded = c.caseNumber && getLoadedPhotos().has(c.caseNumber);
+            const autoLoadThisCard = getEffectiveStreetViewMode() === 'auto' || previouslyLoaded;
+
             // Google Maps URL
             const mapsUrl = c.propertyAddress
                 ? `https://www.google.com/maps/search/${encodedAddress}`
                 : '';
-            
+
             let streetViewHtml;
             if (!c.propertyAddress) {
                 streetViewHtml = '<div class="no-image">No address available</div>';
@@ -1198,7 +1220,7 @@
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
-                    <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Load Photo</button>
+                    <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}', '${c.caseNumber}')">Load Photo</button>
                     <span style="font-size:0.72rem;color:var(--benoro-text-light);">On-demand mode</span>
                 </div>`;
             } else {
