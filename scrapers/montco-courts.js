@@ -354,7 +354,7 @@ async function scrapeMontgomeryCourts(options = {}) {
   console.log(`   Sweet spot: ${CONFIG.sweetSpotMinMonths}-${CONFIG.sweetSpotMaxMonths} months old`);
 
   let targets = allCases
-    .filter(c => c.status.toUpperCase().includes('OPEN') && !c.hasJudgement)
+    .filter(c => c.status.toUpperCase().includes('OPEN'))
     .map(c => {
       const m = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
       c.daysOpen = m ? Math.ceil((now - new Date(m[3], m[1] - 1, m[2])) / 86400000) : 0;
