@@ -248,6 +248,75 @@
             background: rgba(16, 185, 129, 0.9);
             color: white;
         }
+        .type-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .type-badge.mortgage { background: rgba(212,168,75,0.9); color: #152d42; }
+        .type-badge.lien { background: rgba(248,113,113,0.9); color: white; }
+        .type-badge.other { background: rgba(96,165,250,0.9); color: white; }
+        .stack-badge {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(15, 23, 42, 0.85);
+            color: #fde68a;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            border: 1px solid rgba(212,168,75,0.45);
+        }
+        .stack-section {
+            border-top: 1px solid var(--benoro-border);
+            padding: 12px 20px;
+            background: rgba(15, 23, 42, 0.35);
+        }
+        .stack-toggle {
+            background: none;
+            border: none;
+            color: var(--benoro-gold);
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .stack-toggle:hover { text-decoration: underline; }
+        .stack-toggle .arrow { transition: transform 0.15s ease; display: inline-block; }
+        .stack-toggle.open .arrow { transform: rotate(90deg); }
+        .stack-list { display: none; margin-top: 10px; }
+        .stack-list.open { display: block; }
+        .stack-row {
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            gap: 10px;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 0.78rem;
+            border-bottom: 1px solid rgba(212,168,75,0.08);
+        }
+        .stack-row:last-child { border-bottom: none; }
+        .stack-row .stack-case-num { color: var(--benoro-gold); font-weight: 600; }
+        .stack-row .stack-case-num a { color: inherit; text-decoration: none; }
+        .stack-row .stack-case-num a:hover { text-decoration: underline; }
+        .stack-row .stack-meta { color: var(--benoro-text-light); font-size: 0.72rem; }
+        .stack-row .stack-status { font-size: 0.7rem; opacity: 0.85; }
+        .stack-row .stack-pill { font-size: 0.65rem; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
+        .stack-row .stack-pill.mortgage { background: rgba(212,168,75,0.2); color: #fbbf24; }
+        .stack-row .stack-pill.lien { background: rgba(248,113,113,0.2); color: #fca5a5; }
+        .stack-row .stack-pill.other { background: rgba(96,165,250,0.2); color: #93c5fd; }
         .property-card.sweet-spot {
             border: 2px solid #10b981;
             box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
@@ -863,7 +932,14 @@
                 <option value="commencedDate">Sort: Filed Date</option>
                 <option value="propertyCity">Sort: City</option>
             </select>
-            
+
+            <select id="typeFilter" onchange="loadData()">
+                <option value="all">All Types</option>
+                <option value="mortgage">Mortgages</option>
+                <option value="lien">Liens</option>
+                <option value="other">Other</option>
+            </select>
+
             <input type="text" id="cityFilter" placeholder="Filter by city..." onkeyup="loadData()" style="width: 150px;">
         </div>
         
@@ -905,6 +981,52 @@
             try {
                 localStorage.setItem(PIPELINE_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
             } catch (e) {}
+        }
+
+        function primaryParcelKey(parcelNumber) {
+            if (!parcelNumber) return '';
+            const first = String(parcelNumber).split(',')[0].trim();
+            return first;
+        }
+
+        function groupCasesByParcel(cases) {
+            const groups = new Map();
+            const ungrouped = [];
+            for (const c of cases) {
+                const key = primaryParcelKey(c.parcelNumber);
+                if (!key) {
+                    ungrouped.push(c);
+                    continue;
+                }
+                const arr = groups.get(key) || [];
+                arr.push(c);
+                groups.set(key, arr);
+            }
+            const out = [];
+            for (const [parcel, members] of groups) {
+                members.sort((a, b) => (b.leadScore || 0) - (a.leadScore || 0));
+                const primary = { ...members[0] };
+                primary._stackParcel = parcel;
+                primary._stackMembers = members;
+                primary._stackSize = members.length;
+                out.push(primary);
+            }
+            for (const c of ungrouped) {
+                const copy = { ...c };
+                copy._stackSize = 1;
+                copy._stackMembers = [c];
+                out.push(copy);
+            }
+            return out;
+        }
+
+        function toggleStack(btn) {
+            const list = btn.parentElement.querySelector('.stack-list');
+            if (!list) return;
+            const isOpen = list.classList.toggle('open');
+            btn.classList.toggle('open', isOpen);
+            const label = btn.querySelector('.stack-label');
+            if (label) label.textContent = isOpen ? 'Hide' : 'Show all';
         }
         
         function toggleSweetSpot() {
@@ -1121,27 +1243,33 @@
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const cityFilter = document.getElementById('cityFilter').value.toLowerCase();
-            
+            const typeFilter = document.getElementById('typeFilter').value;
+
             try {
                 const response = await fetch(`/api/pipeline?sortBy=${sortBy}&sortOrder=desc`, {
                     headers: { 'X-Auth-Token': authToken }
                 });
                 const data = await response.json();
-                
+
                 // Update status
                 if (data.lastUpdated) {
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
                 }
-                
+
                 let cases = data.cases || [];
-                
+
                 // Filter by city if specified
                 if (cityFilter) {
-                    cases = cases.filter(c => 
+                    cases = cases.filter(c =>
                         (c.propertyCity || '').toLowerCase().includes(cityFilter)
                     );
                 }
-                
+
+                // Filter by case type
+                if (typeFilter && typeFilter !== 'all') {
+                    cases = cases.filter(c => (c.caseTypeKind || 'other') === typeFilter);
+                }
+
                 // Filter sweet spot only if enabled
                 if (sweetSpotOnly) {
                     cases = cases.filter(c => c.inSweetSpot);
@@ -1166,21 +1294,24 @@
                     cases.sort((a, b) => (a.propertyCity || '').localeCompare(b.propertyCity || ''));
                 }
                 
+                // Group by parcel number after sorting (preserves sort order — primary of each group is the highest-scoring member)
+                const groupedCases = groupCasesByParcel(cases);
+
                 // Update stats (before filtering for sweet spot only)
                 const allCases = data.cases || [];
-                document.getElementById('totalCases').textContent = cases.length;
+                document.getElementById('totalCases').textContent = `${groupedCases.length} (${cases.length} cases)`;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
                 document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
                 const avgMonths = cases.length > 0 ? Math.round(cases.reduce((sum, c) => sum + (c.monthsOpen || Math.round((c.daysOpen || 0) / 30)), 0) / cases.length) : 0;
                 document.getElementById('avgMonths').textContent = avgMonths;
-                document.getElementById('caseCount').textContent = `(${cases.length})`;
-                
-                if (cases.length === 0) {
+                document.getElementById('caseCount').textContent = `(${groupedCases.length})`;
+
+                if (groupedCases.length === 0) {
                     grid.innerHTML = '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
                     return;
                 }
-                
-                grid.innerHTML = cases.map(c => createPropertyCard(c)).join('');
+
+                grid.innerHTML = groupedCases.map(c => createPropertyCard(c)).join('');
             } catch (error) {
                 grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;
             }
@@ -1234,11 +1365,54 @@
             const monthsOpen = c.monthsOpen || Math.round((c.daysOpen || 0) / 30);
             const sweetSpotClass = c.inSweetSpot ? 'sweet-spot' : '';
             const sweetSpotIcon = c.inSweetSpot ? ' *' : '';
-            
+
+            const typeKind = c.caseTypeKind || '';
+            const typeLabel = typeKind === 'mortgage' ? 'Mortgage'
+                : typeKind === 'lien' ? 'Lien'
+                : typeKind === 'other' ? 'Other'
+                : '';
+            const typeBadgeHtml = typeKind && typeLabel
+                ? `<span class="type-badge ${typeKind}" title="${c.caseType || ''}">${typeLabel}</span>`
+                : '';
+
+            const stackSize = c._stackSize || 1;
+            const stackMembers = c._stackMembers || [];
+            const stackBadgeHtml = stackSize > 1
+                ? `<span class="stack-badge" title="Parcel ${c._stackParcel}">${stackSize} cases</span>`
+                : '';
+            const stackSectionHtml = stackSize > 1
+                ? `<div class="stack-section">
+                        <button class="stack-toggle" type="button" onclick="toggleStack(this)">
+                            <span class="arrow">&gt;</span>
+                            <span class="stack-label">Show all</span>
+                            <span style="opacity:0.7;">${stackSize} cases on parcel ${c._stackParcel}</span>
+                        </button>
+                        <div class="stack-list">
+                            ${stackMembers.map(m => {
+                                const mKind = m.caseTypeKind || 'other';
+                                const mLabel = mKind === 'mortgage' ? 'Mortgage' : mKind === 'lien' ? 'Lien' : 'Other';
+                                const mStatus = (m.status || '').replace(/^[\d]+ - /, '');
+                                const filed = m.commencedDate ? formatDate(m.commencedDate) : '';
+                                const detailLink = m.detailUrl
+                                    ? `<a href="${m.detailUrl}" target="_blank">${m.caseNumber}</a>`
+                                    : (m.caseNumber || '');
+                                return `<div class="stack-row">
+                                    <span class="stack-pill ${mKind}">${mLabel}</span>
+                                    <span class="stack-case-num">${detailLink}</span>
+                                    <span class="stack-meta">${filed}</span>
+                                    <span class="stack-status">${mStatus}</span>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>`
+                : '';
+
             return `
                 <div class="property-card ${sweetSpotClass}">
                     <div class="street-view-container">
                         ${streetViewHtml}
+                        ${typeBadgeHtml}
+                        ${stackBadgeHtml}
                         <span class="days-badge ${sweetSpotClass}">${monthsOpen} mo${sweetSpotIcon}</span>
                     </div>
                     <div class="property-info">
@@ -1334,6 +1508,7 @@
                             ${c.propertyAddress ? `<a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>` : ''}
                         </div>
                     </div>
+                    ${stackSectionHtml}
                 </div>
             `;
         }

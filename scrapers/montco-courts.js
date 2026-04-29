@@ -61,6 +61,8 @@ async function parseCSV(csvPath) {
   const col = {
     caseNumber: header.findIndex(h => h.toLowerCase().includes('casenumber')),
     commenced: header.findIndex(h => h.toLowerCase().includes('commenced')),
+    caseType: header.findIndex(h => h.toLowerCase().includes('casetype')),
+    parcelNumber: header.findIndex(h => h.toLowerCase().includes('parcel')),
     plaintiff: header.findIndex(h => h.toLowerCase().includes('plaintiff')),
     defendant: header.findIndex(h => h.toLowerCase().includes('defendant')),
     judgement: header.findIndex(h => h.toLowerCase().includes('judgement')),
@@ -74,6 +76,8 @@ async function parseCSV(csvPath) {
     cases.push({
       caseNumber: v[col.caseNumber],
       commencedDate: v[col.commenced] || '',
+      caseType: col.caseType >= 0 ? (v[col.caseType] || '') : '',
+      parcelNumber: col.parcelNumber >= 0 ? (v[col.parcelNumber] || '') : '',
       plaintiff: v[col.plaintiff] || '',
       defendant: v[col.defendant] || '',
       hasJudgement: (v[col.judgement] || '').toLowerCase() === 'yes',
@@ -81,6 +85,13 @@ async function parseCSV(csvPath) {
     });
   }
   return cases;
+}
+
+function classifyCaseType(rawType) {
+  const t = (rawType || '').toUpperCase();
+  if (t.includes('LIEN')) return 'lien';
+  if (t.includes('FORECLOSURE') || t.includes('MORTGAGE')) return 'mortgage';
+  return 'other';
 }
 
 function parseCSVLine(line) {
@@ -398,6 +409,17 @@ async function scrapeMontgomeryCourts(options = {}) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
+        // Block non-essential resources — case pages are plain HTML tables
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+          const type = req.resourceType();
+          if (type === 'image' || type === 'stylesheet' || type === 'font' || type === 'media') {
+            req.abort();
+          } else {
+            req.continue();
+          }
+        });
+
         while (true) {
           const i = nextIndex++;
           if (i >= chunkEnd) break;
@@ -406,35 +428,11 @@ async function scrapeMontgomeryCourts(options = {}) {
     try {
       await delay(CONFIG.requestDelay);
 
-      await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+      const caseId = (c.caseNumber || '').replace(/-/g, '');
+      const detailUrl = `https://courtsapp.montcopa.org/psi/v/detail/Case/${caseId}`;
 
-      await page.evaluate((caseNum) => {
-        const inputs = document.querySelectorAll('input[type="text"]');
-        for (const input of inputs) {
-          const label = input.closest('div')?.querySelector('label') ||
-                        input.previousElementSibling ||
-                        document.querySelector('label[for="' + input.id + '"]');
-          if (label?.textContent?.includes('Case #')) {
-            input.value = caseNum;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            return;
-          }
-        }
-      }, c.caseNumber);
-
-      await page.evaluate(() => {
-        const btns = document.querySelectorAll('button, input[type="submit"]');
-        for (const btn of btns) {
-          if (btn.textContent?.toLowerCase().includes('search') ||
-              btn.value?.toLowerCase().includes('search')) {
-            btn.click();
-            return;
-          }
-        }
-      });
-
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
-      await delay(CONFIG.pageLoadWait);
+      await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      if (CONFIG.pageLoadWait > 0) await delay(CONFIG.pageLoadWait);
 
       const currentUrl = page.url();
       if (!currentUrl.includes('/detail/Case/')) {
@@ -622,6 +620,9 @@ async function scrapeMontgomeryCourts(options = {}) {
       results.push({
         caseNumber: c.caseNumber,
         commencedDate: parseDate(c.commencedDate),
+        caseType: c.caseType || '',
+        caseTypeKind: classifyCaseType(c.caseType),
+        parcelNumber: c.parcelNumber || '',
         daysOpen: c.daysOpen,
         monthsOpen: c.monthsOpen,
         inSweetSpot: c.inSweetSpot,
