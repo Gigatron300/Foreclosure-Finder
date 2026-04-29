@@ -25,10 +25,11 @@ const MONTCO_TOWNS = [
 ];
 
 const CONFIG = {
-  requestDelay: 1200,
-  pageLoadWait: 3000,
+  requestDelay: 500,
+  pageLoadWait: 500,
   batchSize: 15,
   batchPause: 4000,
+  concurrency: 3,
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
@@ -379,31 +380,33 @@ async function scrapeMontgomeryCourts(options = {}) {
   }
 
   const results = [];
-  let browser = null;
-  let page = null;
 
-  console.log(`\n🌐 Scraping ${targets.length} cases...`);
+  const concurrency = CONFIG.concurrency || 1;
+  const restartEvery = CONFIG.batchSize;
 
-  for (let i = 0; i < targets.length; i++) {
-    if (i % CONFIG.batchSize === 0) {
-      if (browser) {
-        await browser.close();
-        await delay(1500);
-      }
-      console.log(`   🔄 Browser restart (batch ${Math.floor(i / CONFIG.batchSize) + 1})...`);
-      browser = await launchBrowser();
-      page = await browser.newPage();
+  console.log(`\n🌐 Scraping ${targets.length} cases (concurrency: ${concurrency})...`);
 
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    }
+  for (let chunkStart = 0; chunkStart < targets.length; chunkStart += restartEvery) {
+    const chunkEnd = Math.min(chunkStart + restartEvery, targets.length);
+    console.log(`   🔄 Browser restart (cases ${chunkStart + 1}-${chunkEnd})...`);
+    const browser = await launchBrowser();
 
-    const c = targets[i];
+    let nextIndex = chunkStart;
+    const workers = [];
+    for (let w = 0; w < concurrency; w++) {
+      workers.push((async () => {
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+
+        while (true) {
+          const i = nextIndex++;
+          if (i >= chunkEnd) break;
+          const c = targets[i];
 
     try {
       await delay(CONFIG.requestDelay);
 
       await page.goto(CONFIG.searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-      await delay(1000);
 
       await page.evaluate((caseNum) => {
         const inputs = document.querySelectorAll('input[type="text"]');
@@ -667,6 +670,15 @@ async function scrapeMontgomeryCourts(options = {}) {
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${(err.message || '').slice(0, 60)})`);
     }
+        }
+
+        await page.close().catch(() => {});
+      })());
+    }
+
+    await Promise.all(workers);
+    await browser.close().catch(() => {});
+    await delay(500);
   }
 
   for (const r of results) {
@@ -685,8 +697,6 @@ async function scrapeMontgomeryCourts(options = {}) {
       r.priorCases = priorCases.slice(0, 5);
     }
   }
-
-  if (browser) await browser.close();
 
   results.sort((a, b) => b.leadScore - a.leadScore);
 
