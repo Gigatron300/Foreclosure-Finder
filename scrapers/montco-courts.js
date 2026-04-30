@@ -595,6 +595,23 @@ async function scrapeMontgomeryCourts(options = {}) {
           }
           if (addrIdx === -1) continue;
 
+          // Skip the Plaintiffs section — its address is the bank/municipality, not the property.
+          // Walk up from the table looking for a heading-like sibling labeled "Plaintiffs" or "Defendants".
+          let section = 'unknown';
+          let walker = table;
+          for (let depth = 0; depth < 10 && walker; depth++) {
+            let sib = walker.previousElementSibling;
+            while (sib) {
+              const sibText = (sib.textContent || '').trim();
+              if (/^plaintiffs?\b/i.test(sibText)) { section = 'plaintiff'; break; }
+              if (/^defendants?\b/i.test(sibText)) { section = 'defendant'; break; }
+              sib = sib.previousElementSibling;
+            }
+            if (section !== 'unknown') break;
+            walker = walker.parentElement;
+          }
+          if (section === 'plaintiff') continue;
+
           const rows = table.querySelectorAll('tr');
           for (let ri = 1; ri < rows.length; ri++) {
             const cells = rows[ri].querySelectorAll('td');
