@@ -494,6 +494,7 @@ async function scrapeMontgomeryCourts(options = {}) {
       const data = await page.evaluate((montcoTowns) => {
         const result = {
           addresses: [],
+          judgmentAmount: null,
           docket: {
             entries: 0,
             hasBankruptcy: false,
@@ -588,6 +589,26 @@ async function scrapeMontgomeryCourts(options = {}) {
             continue;
           }
 
+          // Judgments table — has For / Against / Date / Amount columns
+          const amountIdx = headers.findIndex(h => h === 'amount');
+          const againstIdx = headers.findIndex(h => h === 'against');
+          const forIdx = headers.findIndex(h => h === 'for');
+          if (amountIdx >= 0 && againstIdx >= 0 && forIdx >= 0) {
+            const rows = table.querySelectorAll('tr');
+            let latestAmount = null;
+            for (let ri = 1; ri < rows.length; ri++) {
+              const cells = rows[ri].querySelectorAll('td');
+              if (cells.length <= amountIdx) continue;
+              const raw = (cells[amountIdx].textContent || '').trim();
+              const m = raw.match(/[\d,]+\.\d{2}|[\d,]+/);
+              if (!m) continue;
+              const num = parseFloat(m[0].replace(/,/g, ''));
+              if (!isNaN(num)) latestAmount = num;
+            }
+            if (latestAmount !== null) result.judgmentAmount = latestAmount;
+            continue;
+          }
+
           // Address table
           let addrIdx = -1;
           for (let hi = 0; hi < headers.length; hi++) {
@@ -672,6 +693,7 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.propertyZip = bestAddr?.zip || '';
       c.inMontgomeryCounty = bestAddr?.inMontCo || false;
       c.detailUrl = currentUrl;
+      c.judgmentAmount = data.judgmentAmount != null ? data.judgmentAmount : null;
 
       c.docket = data.docket || {};
 
@@ -684,6 +706,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         caseType: c.caseType || '',
         caseTypeKind: classifyCaseType(c.caseType),
         parcelNumber: c.parcelNumber || '',
+        judgmentAmount: c.judgmentAmount != null ? c.judgmentAmount : null,
         daysOpen: c.daysOpen,
         monthsOpen: c.monthsOpen,
         inSweetSpot: c.inSweetSpot,

@@ -1009,15 +1009,34 @@
                 primary._stackParcel = parcel;
                 primary._stackMembers = members;
                 primary._stackSize = members.length;
+                primary._stackTotalAmount = sumJudgmentAmounts(members);
                 out.push(primary);
             }
             for (const c of ungrouped) {
                 const copy = { ...c };
                 copy._stackSize = 1;
                 copy._stackMembers = [c];
+                copy._stackTotalAmount = sumJudgmentAmounts([c]);
                 out.push(copy);
             }
             return out;
+        }
+
+        function sumJudgmentAmounts(members) {
+            let total = 0;
+            let any = false;
+            for (const m of members) {
+                if (typeof m.judgmentAmount === 'number' && !isNaN(m.judgmentAmount)) {
+                    total += m.judgmentAmount;
+                    any = true;
+                }
+            }
+            return any ? total : null;
+        }
+
+        function formatCurrency(n) {
+            if (n == null || isNaN(n)) return '';
+            return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
         function toggleStack(btn) {
@@ -1396,9 +1415,10 @@
                                 const detailLink = m.detailUrl
                                     ? `<a href="${m.detailUrl}" target="_blank">${m.caseNumber}</a>`
                                     : (m.caseNumber || '');
+                                const mAmount = formatCurrency(m.judgmentAmount);
                                 return `<div class="stack-row">
                                     <span class="stack-pill ${mKind}">${mLabel}</span>
-                                    <span class="stack-case-num">${detailLink}</span>
+                                    <span class="stack-case-num">${detailLink}${mAmount ? ` <span style="color:#fde68a;font-weight:600;">${mAmount}</span>` : ''}</span>
                                     <span class="stack-meta">${filed}</span>
                                     <span class="stack-status">${mStatus}</span>
                                 </div>`;
@@ -1434,6 +1454,10 @@
                             <div class="detail-item">
                                 <div class="detail-label">Case #</div>
                                 <div class="detail-value">${c.caseNumber || 'N/A'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">${stackSize > 1 ? `Total (${stackSize})` : 'Amount'}</div>
+                                <div class="detail-value" style="color: var(--benoro-gold); font-weight: 700;">${formatCurrency(c._stackTotalAmount) || 'N/A'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Plaintiff</div>
