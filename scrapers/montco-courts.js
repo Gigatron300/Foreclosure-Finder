@@ -327,10 +327,179 @@ if (!defenseSignals && monthsOpen > 12) {
   };
 }
 
+// Builds a search-results URL using the same shape Montco's UI emits.
+// Pagination is offset-based via Skip=N (page 2 = Skip=20 when Count=20).
+function buildSearchResultsUrl({ caseTypeCode, dateFrom, dateTo, count, skip }) {
+  return `https://courtsapp.montcopa.org/psi/v/search/case`
+    + `?Q=&IncludeSoundsLike=false`
+    + `&Count=${encodeURIComponent(String(count))}`
+    + `&fromAdv=1&CaseNumber=&ParcelNumber=`
+    + `&CaseType=${encodeURIComponent(caseTypeCode)}`
+    + `&DateCommencedFrom=${encodeURIComponent(dateFrom)}`
+    + `&DateCommencedTo=${encodeURIComponent(dateTo)}`
+    + `&IncludeInitialFilings=false&IncludeInitialEFilings=false`
+    + `&FilingType=&FilingDateFrom=&FilingDateTo=`
+    + `&IncludeSubsequentFilings=false&IncludeSubsequentEFilings=false`
+    + `&Court=C&Court=F&JudgeID=&Attorney=&AttorneyID=&Grid=true`
+    + `&Skip=${encodeURIComponent(String(skip))}`;
+}
+
+async function discoverCaseTypeCodes(browser) {
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  try {
+    await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    return await page.evaluate(() => {
+      const select = document.querySelector('select[name="CaseType"]')
+                  || document.querySelector('select#CaseType')
+                  || document.querySelector('select[id*="CaseType" i]');
+      if (!select) return {};
+      const map = {};
+      for (const opt of select.querySelectorAll('option')) {
+        const value = opt.getAttribute('value') || opt.value || '';
+        const label = (opt.textContent || '').trim();
+        if (value && label) map[label.toLowerCase()] = value;
+      }
+      return map;
+    });
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function harvestDetailUrls(browser, { caseTypeCode, dateFrom, dateTo, label = '', pageSize = 200 }) {
+  const map = new Map();
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const t = req.resourceType();
+    if (t === 'image' || t === 'stylesheet' || t === 'font' || t === 'media') req.abort();
+    else req.continue();
+  });
+
+  try {
+    let skip = 0;
+    let pageNum = 0;
+    while (true) {
+      pageNum++;
+      const url = buildSearchResultsUrl({ caseTypeCode, dateFrom, dateTo, count: pageSize, skip });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      const rows = await page.evaluate(() => {
+        const tables = document.querySelectorAll('table');
+        for (const table of tables) {
+          const headerCells = table.querySelectorAll('tr:first-child > *');
+          const headers = Array.from(headerCells).map(h => (h.textContent || '').trim().toLowerCase());
+          const caseIdx = headers.findIndex(h => h.includes('case number'));
+          if (caseIdx === -1) continue;
+
+          const out = [];
+          const trs = table.querySelectorAll('tr');
+          for (let i = 1; i < trs.length; i++) {
+            const tds = trs[i].querySelectorAll('td');
+            if (tds.length <= caseIdx) continue;
+            const caseNumber = (tds[caseIdx].textContent || '').trim();
+            const link = trs[i].querySelector('a[href*="/detail/Case/"]');
+            const href = link ? link.getAttribute('href') || '' : '';
+            if (caseNumber && href) {
+              const detailUrl = href.startsWith('http')
+                ? href
+                : 'https://courtsapp.montcopa.org' + (href.startsWith('/') ? '' : '/') + href;
+              out.push({ caseNumber, detailUrl });
+            }
+          }
+          return out;
+        }
+        return [];
+      });
+
+      if (rows.length === 0) break;
+      for (const r of rows) map.set(r.caseNumber, r.detailUrl);
+      console.log(`   ${label}page ${pageNum} (skip=${skip}): ${rows.length} rows, total ${map.size}`);
+      if (rows.length < pageSize) break;
+      skip += pageSize;
+    }
+  } finally {
+    await page.close().catch(() => {});
+  }
+  return map;
+}
+
+// Resolve a CSV CaseType value to a Montco dropdown code.
+// Tries case-insensitive exact match first, then substring matches in either direction.
+function resolveCaseTypeCode(codes, csvCaseType) {
+  if (!csvCaseType) return null;
+  const target = csvCaseType.toLowerCase().trim();
+  if (codes[target]) return codes[target];
+  for (const [label, value] of Object.entries(codes)) {
+    if (label === target) return value;
+  }
+  for (const [label, value] of Object.entries(codes)) {
+    if (label.includes(target) || target.includes(label)) return value;
+  }
+  return null;
+}
+
+// Group CSV cases by (year, exact CaseType from CSV), then harvest each bucket.
+async function harvestUrlCacheFromCSV(browser, cases) {
+  const codes = await discoverCaseTypeCodes(browser);
+  if (Object.keys(codes).length === 0) {
+    console.log('   ⚠️ Could not discover CaseType codes; skipping harvest');
+    return new Map();
+  }
+
+  // Group cases by (year, exact CaseType string from CSV)
+  const groups = new Map();
+  for (const c of cases) {
+    const m = (c.commencedDate || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) continue;
+    const year = m[3];
+    const caseType = (c.caseType || '').trim();
+    if (!caseType) continue;
+    const key = `${year}|${caseType}`;
+    groups.set(key, (groups.get(key) || 0) + 1);
+  }
+
+  if (groups.size === 0) return new Map();
+  console.log(`🌐 Bulk URL harvest across ${groups.size} (year, case-type) buckets...`);
+
+  const merged = new Map();
+  const unresolved = new Set();
+  for (const [key, count] of groups) {
+    const sep = key.indexOf('|');
+    const year = key.slice(0, sep);
+    const caseType = key.slice(sep + 1);
+    const code = resolveCaseTypeCode(codes, caseType);
+    if (!code) {
+      unresolved.add(caseType);
+      console.log(`   skipping "${caseType}" ${year}: no matching dropdown option (${count} cases)`);
+      continue;
+    }
+    const dateFrom = `01/01/${year}`;
+    const dateTo = `12/31/${year}`;
+    try {
+      const m = await harvestDetailUrls(browser, {
+        caseTypeCode: code,
+        dateFrom, dateTo,
+        label: `"${caseType}" ${year}: `,
+      });
+      for (const [k, v] of m) merged.set(k, v);
+    } catch (err) {
+      console.log(`   harvest failed for "${caseType}" ${year}: ${(err.message || '').slice(0, 80)}`);
+    }
+  }
+  if (unresolved.size > 0) {
+    console.log(`   ⚠️ Unresolved CSV case types: ${Array.from(unresolved).join(', ')} — these will fall back to per-case search`);
+  }
+  return merged;
+}
+
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
   const testMode = options.testMode || false;
   const urlCache = options.urlCache || {};
+  const enableHarvest = options.enableHarvest !== false;
 
   console.log('\n🏛️ Montgomery County Scraper (V3)');
   if (testMode) console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
@@ -347,6 +516,26 @@ async function scrapeMontgomeryCourts(options = {}) {
   } catch (err) {
     console.error(`   Error: ${err.message}`);
     return [];
+  }
+
+  // Bulk URL harvest from search-results pages — populates the URL cache for cases we haven't scraped before
+  if (enableHarvest && !testMode) {
+    const uncached = allCases.filter(c => c.caseNumber && !urlCache[c.caseNumber]);
+    if (uncached.length >= 50) {
+      const harvestBrowser = await launchBrowser();
+      try {
+        const harvested = await harvestUrlCacheFromCSV(harvestBrowser, uncached);
+        let added = 0;
+        for (const [k, v] of harvested) {
+          if (!urlCache[k]) { urlCache[k] = v; added++; }
+        }
+        console.log(`   ✅ Harvest added ${added} URLs to cache (now ${Object.keys(urlCache).length} cached)`);
+      } catch (err) {
+        console.log(`   ⚠️ Harvest error (falling back to per-case search): ${(err.message || '').slice(0, 80)}`);
+      } finally {
+        await harvestBrowser.close().catch(() => {});
+      }
+    }
   }
 
   const now = new Date();
