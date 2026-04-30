@@ -1199,13 +1199,67 @@
             updateMultiFilterButtonText('cityFilterButton', getSelectedCheckboxValues('cityFilterOptions'), 'All cities');
             loadData();
         }
+        // Montco town list — used to recover real city names from pre-fix scraped data
+        // where apartment/unit lines got concatenated into propertyCity.
+        // Sorted longest-first so "WEST CONSHOHOCKEN" matches before "CONSHOHOCKEN".
+        const MONTCO_TOWN_NAMES = [
+            'WEST CONSHOHOCKEN','UPPER PROVIDENCE','LOWER PROVIDENCE','UPPER POTTSGROVE',
+            'LOWER POTTSGROVE','WEST POTTSGROVE','UPPER MORELAND','LOWER MORELAND',
+            'EAST GREENVILLE','UPPER FREDERICK','LOWER FREDERICK','UPPER HANOVER',
+            'UPPER GWYNEDD','LOWER GWYNEDD','EAST NORRITON','WEST NORRITON',
+            'KING OF PRUSSIA','FORT WASHINGTON','UPPER MERION','LOWER MERION',
+            'UPPER SALFORD','LOWER SALFORD','UPPER DUBLIN','WILLOW GROVE',
+            'PLYMOUTH MEETING','ELKINS PARK','BALA CYNWYD','PERKIOMENVILLE',
+            'BRYN ATHYN','BRYN MAWR','BLUE BELL','GREEN LANE','NORTH WALES',
+            'NEW HANOVER','SCHWENKSVILLE','MAPLE GLEN','CONSHOHOCKEN','COLLEGEVILLE',
+            'JENKINTOWN','PENNSBURG','POTTSTOWN','LANSDALE','SOUDERTON',
+            'NORRISTOWN','BRIDGEPORT','CHELTENHAM','TOWAMENCIN','MARLBOROUGH',
+            'WHITEMARSH','SPRINGFIELD','HARLEYSVILLE','ROYERSFORD','HORSHAM',
+            'HATFIELD','HATBORO','LIMERICK','RED HILL','TELFORD','SKIPPACK',
+            'TRAPPE','SALFORD','PERKIOMEN','MONTGOMERY','NARBERTH','ROCKLEDGE',
+            'WHITPAIN','WORCESTER','FRANCONIA','DOUGLASS','ABINGTON','AMBLER',
+            'GLENSIDE','ARDMORE','FLOURTOWN','ORELAND','WYNDMOOR','GLADWYNE',
+            'MERION','WYNNEWOOD','HAVERFORD','DRESHER','PHILADELPHIA','LAFAYETTE HILL'
+        ];
+
+        function cleanCityValue(rawCity) {
+            if (!rawCity) return '';
+            const upper = String(rawCity).toUpperCase().replace(/\s+/g, ' ').trim();
+            if (!upper) return '';
+            // Exact match wins
+            for (const town of MONTCO_TOWN_NAMES) {
+                if (upper === town) return town;
+            }
+            // Suffix match — handles "2ND FLOORCONSHOHOCKEN" -> "CONSHOHOCKEN"
+            for (const town of MONTCO_TOWN_NAMES) {
+                if (upper.endsWith(town)) return town;
+            }
+            // Substring match (cities embedded mid-string)
+            for (const town of MONTCO_TOWN_NAMES) {
+                if (town.length >= 5 && upper.includes(town)) return town;
+            }
+            // No town match — accept only if it looks like a plain city name
+            if (isCleanCityName(rawCity)) return upper;
+            return '';
+        }
+
+        function isCleanCityName(value) {
+            if (!value) return false;
+            const v = String(value).trim();
+            if (v.length === 0 || v.length > 35) return false;
+            if (/\d/.test(v)) return false; // bad parse — contains digits (apt#, zip, house#)
+            // street-suffix tokens mean we're looking at part of an address, not a city
+            if (/\b(STREET|ST|AVENUE|AVE|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|PLACE|PL|TERRACE|TER|BOULEVARD|BLVD|CIRCLE|CIR|HIGHWAY|HWY|TURNPIKE|PARKWAY|PKWY|SUITE|STE|UNIT|APT|FLOOR)\b/i.test(v)) return false;
+            return true;
+        }
+
         function populateCityFilter(cases, selectedCities = []) {
             const container = document.getElementById('cityFilterOptions');
             if (!container) return;
             const counts = new Map();
             for (const c of cases) {
                 const city = (c.propertyCity || '').trim();
-                if (!city) continue;
+                if (!isCleanCityName(city)) continue;
                 counts.set(city, (counts.get(city) || 0) + 1);
             }
             const cities = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
@@ -1566,6 +1620,11 @@
                 }
 
                 let cases = data.cases || [];
+
+                // Recover clean city values from any rows scraped with the old buggy parser
+                for (const c of cases) {
+                    c.propertyCity = cleanCityValue(c.propertyCity);
+                }
 
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);

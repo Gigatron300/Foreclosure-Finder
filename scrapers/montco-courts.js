@@ -27,7 +27,7 @@ const MONTCO_TOWNS = [
 const CONFIG = {
   requestDelay: 500,
   pageLoadWait: 500,
-  batchSize: 15,
+  batchSize: 30,
   batchPause: 4000,
   concurrency: 3,
   maxCasesToProcess: 0,
@@ -845,37 +845,34 @@ async function scrapeMontgomeryCourts(options = {}) {
             if (cells.length <= addrIdx) continue;
 
             const addrCell = cells[addrIdx];
-            const text = (addrCell.textContent || '').trim();
             const html = addrCell.innerHTML || '';
 
-            const paIdx = text.indexOf('PA ');
-            if (paIdx === -1) continue;
+            // Convert <br> to newlines first, then strip remaining HTML.
+            // This preserves line boundaries even with multi-line addresses (apt/unit on its own line).
+            const plain = html
+              .replace(/<br\s*\/?>/gi, '\n')
+              .replace(/<[^>]*>/g, '')
+              .replace(/\r/g, '');
+            const lines = plain.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length === 0) continue;
 
-            const afterPA = text.substring(paIdx + 3);
-            let zip = '';
-            for (let di = 0; di < 5 && di < afterPA.length; di++) {
-              const ch = afterPA.charAt(di);
-              if (ch >= '0' && ch <= '9') zip += ch;
-              else break;
-            }
-            if (zip.length !== 5) continue;
-
-            let street = '';
+            // Find the line containing "PA <zip>" — that's the city/state/zip line.
+            // Anything before it is street (apartment line included).
+            let cityLineIdx = -1;
             let city = '';
-
-            const brIdx = html.toLowerCase().indexOf('<br');
-            if (brIdx > 0) {
-              street = html.substring(0, brIdx).replace(/<[^>]*>/g, '').trim();
-              const afterBr = html.substring(brIdx);
-              const gtIdx = afterBr.indexOf('>');
-              if (gtIdx > 0) {
-                const cityPart = afterBr.substring(gtIdx + 1).replace(/<[^>]*>/g, '').trim();
-                const cityPaIdx = cityPart.indexOf('PA ');
-                if (cityPaIdx > 0) {
-                  city = cityPart.substring(0, cityPaIdx).replace(/,/g, '').trim();
-                }
+            let zip = '';
+            for (let li = lines.length - 1; li >= 0; li--) {
+              const m = lines[li].match(/^(.*?),?\s*PA\s+(\d{5})(?:-\d{4})?\s*(?:UNITED STATES)?\s*$/i);
+              if (m) {
+                city = m[1].replace(/,/g, '').trim();
+                zip = m[2];
+                cityLineIdx = li;
+                break;
               }
             }
+            if (cityLineIdx === -1 || zip.length !== 5) continue;
+
+            const street = lines.slice(0, cityLineIdx).join(' ').trim();
 
             const upperCity = city.toUpperCase();
             let inMontCo = false;
