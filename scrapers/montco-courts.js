@@ -330,9 +330,13 @@ if (!defenseSignals && monthsOpen > 12) {
 async function scrapeMontgomeryCourts(options = {}) {
   const csvPath = options.csvPath || CONFIG.csvPath;
   const testMode = options.testMode || false;
+  const urlCache = options.urlCache || {};
 
   console.log('\n🏛️ Montgomery County Scraper (V3)');
   if (testMode) console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
+  if (Object.keys(urlCache).length > 0) {
+    console.log(`💾 URL cache: ${Object.keys(urlCache).length} known cases (will skip search hop for these)`);
+  }
   console.log('='.repeat(50));
 
   let allCases;
@@ -428,34 +432,50 @@ async function scrapeMontgomeryCourts(options = {}) {
     try {
       await delay(CONFIG.requestDelay);
 
-      await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-      await page.evaluate((caseNum) => {
-        const inputs = document.querySelectorAll('input[type="text"]');
-        for (const input of inputs) {
-          const label = input.closest('div')?.querySelector('label') ||
-                        input.previousElementSibling ||
-                        document.querySelector('label[for="' + input.id + '"]');
-          if (label?.textContent?.includes('Case #')) {
-            input.value = caseNum;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            return;
-          }
+      // Try cached URL first (skips search hop entirely on subsequent runs)
+      let detailLoaded = false;
+      const cachedUrl = urlCache[c.caseNumber];
+      if (cachedUrl && cachedUrl.includes('/detail/Case/')) {
+        try {
+          await page.goto(cachedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          const url = page.url();
+          if (url.includes('/detail/Case/')) detailLoaded = true;
+        } catch (e) {
+          // fall through to search
         }
-      }, c.caseNumber);
+      }
 
-      await page.evaluate(() => {
-        const btns = document.querySelectorAll('button, input[type="submit"]');
-        for (const btn of btns) {
-          if (btn.textContent?.toLowerCase().includes('search') ||
-              btn.value?.toLowerCase().includes('search')) {
-            btn.click();
-            return;
+      if (!detailLoaded) {
+        await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+        await page.evaluate((caseNum) => {
+          const inputs = document.querySelectorAll('input[type="text"]');
+          for (const input of inputs) {
+            const label = input.closest('div')?.querySelector('label') ||
+                          input.previousElementSibling ||
+                          document.querySelector('label[for="' + input.id + '"]');
+            if (label?.textContent?.includes('Case #')) {
+              input.value = caseNum;
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              return;
+            }
           }
-        }
-      });
+        }, c.caseNumber);
 
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        await page.evaluate(() => {
+          const btns = document.querySelectorAll('button, input[type="submit"]');
+          for (const btn of btns) {
+            if (btn.textContent?.toLowerCase().includes('search') ||
+                btn.value?.toLowerCase().includes('search')) {
+              btn.click();
+              return;
+            }
+          }
+        });
+
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      }
+
       if (CONFIG.pageLoadWait > 0) await delay(CONFIG.pageLoadWait);
 
       const currentUrl = page.url();

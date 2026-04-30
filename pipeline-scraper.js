@@ -33,10 +33,27 @@ async function runPipelineScraper(options = {}) {
   console.log('');
   
   let allCases = [];
-  
+
+  // Build URL cache from previous run so we can skip the search hop for known cases
+  const urlCache = {};
+  try {
+    const existing = await fs.readFile(path.join(OUTPUT_DIR, OUTPUT_FILE), 'utf8');
+    const parsed = JSON.parse(existing);
+    for (const prev of (parsed.cases || [])) {
+      if (prev.caseNumber && prev.detailUrl) {
+        urlCache[prev.caseNumber] = prev.detailUrl;
+      }
+    }
+    if (Object.keys(urlCache).length > 0) {
+      console.log(`📂 Loaded ${Object.keys(urlCache).length} cached detail URLs from previous run`);
+    }
+  } catch (e) {
+    // No previous run, or unreadable — first scrape will build the cache
+  }
+
   try {
     // Scrape Montgomery County Courts
-    const montcoCases = await scrapeMontgomeryCourts({ testMode: config.testMode });
+    const montcoCases = await scrapeMontgomeryCourts({ testMode: config.testMode, urlCache });
     allCases.push(...montcoCases);
     
     // Property enrichment for top leads
