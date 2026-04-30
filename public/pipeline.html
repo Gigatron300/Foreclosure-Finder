@@ -262,6 +262,117 @@
         .type-badge.mortgage { background: rgba(212,168,75,0.9); color: #152d42; }
         .type-badge.lien { background: rgba(248,113,113,0.9); color: white; }
         .type-badge.other { background: rgba(96,165,250,0.9); color: white; }
+        .sheriff-flag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            margin-bottom: 4px;
+            border-radius: 999px;
+            border: 1px solid rgba(248,113,113,0.5);
+            background: rgba(248,113,113,0.14);
+            color: #fecaca;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+        .sheriff-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #f87171;
+            box-shadow: 0 0 0 2px rgba(248,113,113,0.22);
+        }
+        .filter-dropdown-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+            min-width: 0;
+        }
+        .filter-dropdown-label {
+            color: var(--benoro-text-muted);
+            font-size: 0.68rem;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+        }
+        .filter-dropdown-button {
+            padding: 10px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--benoro-border);
+            background: var(--benoro-card);
+            color: var(--benoro-text);
+            font-size: 0.8rem;
+            line-height: 1.2;
+            text-align: left;
+            cursor: pointer;
+            white-space: nowrap;
+            width: 100%;
+            height: 40px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .filter-dropdown-button:focus { outline: none; border-color: var(--benoro-gold); }
+        .filter-dropdown-button::after {
+            content: '▼';
+            float: right;
+            font-size: 0.65rem;
+            color: var(--benoro-text-light);
+        }
+        .filter-dropdown-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            width: 280px;
+            max-height: 320px;
+            overflow: hidden;
+            border: 1px solid rgba(184,134,11,0.25);
+            border-radius: 8px;
+            background: #17364d;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+            z-index: 30;
+            display: none;
+        }
+        .filter-dropdown-panel.open { display: block; }
+        .filter-dropdown-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .filter-dropdown-action {
+            border: none;
+            background: transparent;
+            color: var(--benoro-gold);
+            font-size: 0.72rem;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            cursor: pointer;
+            padding: 0;
+        }
+        .filter-dropdown-options {
+            max-height: 240px;
+            overflow-y: auto;
+            padding: 6px 0;
+        }
+        .filter-dropdown-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            color: var(--benoro-text);
+            cursor: pointer;
+        }
+        .filter-dropdown-option:hover { background: rgba(255,255,255,0.05); }
+        .filter-dropdown-option input { accent-color: var(--benoro-gold); }
+        .filter-dropdown-empty {
+            padding: 12px;
+            color: var(--benoro-text-light);
+            font-size: 0.8rem;
+        }
         .stack-badge {
             position: absolute;
             bottom: 10px;
@@ -940,7 +1051,18 @@
                 <option value="other">Other</option>
             </select>
 
-            <input type="text" id="cityFilter" placeholder="Filter by city..." onkeyup="loadData()" style="width: 150px;">
+            <div class="filter-dropdown-group" style="min-width: 200px;">
+                <button type="button" id="cityFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('cityFilterDropdown', event)">All cities</button>
+                <div id="cityFilterDropdown" class="filter-dropdown-panel">
+                    <div class="filter-dropdown-actions">
+                        <button type="button" class="filter-dropdown-action" onclick="setAllCityFilters(true)">Select All</button>
+                        <button type="button" class="filter-dropdown-action" onclick="setAllCityFilters(false)">Clear</button>
+                    </div>
+                    <div id="cityFilterOptions" class="filter-dropdown-options">
+                        <div class="filter-dropdown-empty">Loading cities...</div>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="results-header">
@@ -1010,6 +1132,7 @@
                 primary._stackMembers = members;
                 primary._stackSize = members.length;
                 primary._stackTotalAmount = sumJudgmentAmounts(members);
+                primary._onSheriffSale = members.some(m => m._onSheriffSale);
                 out.push(primary);
             }
             for (const c of ungrouped) {
@@ -1017,6 +1140,7 @@
                 copy._stackSize = 1;
                 copy._stackMembers = [c];
                 copy._stackTotalAmount = sumJudgmentAmounts([c]);
+                copy._onSheriffSale = !!c._onSheriffSale;
                 out.push(copy);
             }
             return out;
@@ -1038,6 +1162,169 @@
             if (n == null || isNaN(n)) return '';
             return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
+
+        // ---- Filter dropdown infrastructure (multi-select pattern from Camden) ----
+        function getSelectedCheckboxValues(containerId) {
+            return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`))
+                .map(input => input.value)
+                .filter(Boolean);
+        }
+        function toggleFilterDropdown(id, event) {
+            if (event) event.stopPropagation();
+            const dropdown = document.getElementById(id);
+            if (!dropdown) return;
+            const isOpen = dropdown.classList.contains('open');
+            closeAllFilterDropdowns();
+            if (!isOpen) dropdown.classList.add('open');
+        }
+        function closeAllFilterDropdowns() {
+            document.querySelectorAll('.filter-dropdown-panel.open').forEach(d => d.classList.remove('open'));
+        }
+        function updateMultiFilterButtonText(buttonId, selectedValues, defaultLabel) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+            if (!selectedValues.length) button.textContent = defaultLabel;
+            else if (selectedValues.length === 1) button.textContent = selectedValues[0];
+            else button.textContent = `${selectedValues.length} selected`;
+        }
+        function setAllMultiFilterOptions(containerId, checked, buttonId, defaultLabel) {
+            document.querySelectorAll(`#${containerId} input[type="checkbox"]`).forEach(i => { i.checked = checked; });
+            updateMultiFilterButtonText(buttonId, getSelectedCheckboxValues(containerId), defaultLabel);
+            loadData();
+        }
+        function setAllCityFilters(checked) {
+            setAllMultiFilterOptions('cityFilterOptions', checked, 'cityFilterButton', 'All cities');
+        }
+        function handleCityFilterChange() {
+            updateMultiFilterButtonText('cityFilterButton', getSelectedCheckboxValues('cityFilterOptions'), 'All cities');
+            loadData();
+        }
+        function populateCityFilter(cases, selectedCities = []) {
+            const container = document.getElementById('cityFilterOptions');
+            if (!container) return;
+            const counts = new Map();
+            for (const c of cases) {
+                const city = (c.propertyCity || '').trim();
+                if (!city) continue;
+                counts.set(city, (counts.get(city) || 0) + 1);
+            }
+            const cities = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
+            if (!cities.length) {
+                container.innerHTML = '<div class="filter-dropdown-empty">No cities yet</div>';
+                updateMultiFilterButtonText('cityFilterButton', [], 'All cities');
+                return;
+            }
+            const selectedSet = new Set(selectedCities.map(s => String(s).toUpperCase().trim()));
+            container.innerHTML = cities.map(city => {
+                const checked = selectedSet.has(city.toUpperCase().trim()) ? ' checked' : '';
+                return `<label class="filter-dropdown-option"><input type="checkbox" value="${city}"${checked} onchange="handleCityFilterChange()"><span>${city} (${counts.get(city)})</span></label>`;
+            }).join('');
+            updateMultiFilterButtonText('cityFilterButton', selectedCities, 'All cities');
+        }
+
+        // ---- Sheriff sale address matching (mirrors Camden) ----
+        function normalizeAddressKey(value) {
+            return String(value || '')
+                .toUpperCase()
+                .replace(/[.,]/g, ' ')
+                .replace(/\b(APT|UNIT|STE|SUITE|FL|FLOOR)\b\s*[A-Z0-9-]*/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+        function normalizeTownRoot(value) {
+            const cleaned = String(value || '')
+                .toUpperCase()
+                .replace(/[.,]/g, ' ')
+                .replace(/\b(TOWNSHIP|TWP|CITY|BOROUGH|BORO)\b/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (!cleaned) return '';
+            return cleaned.split(' ')[0] || '';
+        }
+        function getStreetMatchParts(address) {
+            const raw = normalizeAddressKey(address);
+            if (!raw) return null;
+            const expanded = raw.replace(
+                /\b(AVENUE|AVE|STREET|ST|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|PLACE|PL|TERRACE|TER|BOULEVARD|BLVD|CIRCLE|CIR|WAY)(NORTH|SOUTH|EAST|WEST|N|S|E|W)\b/g,
+                '$1 $2'
+            );
+            const tokens = expanded.split(' ').filter(Boolean);
+            if (!tokens.length) return null;
+            const houseNumber = tokens[0];
+            if (!/^\d+[A-Z]?(?:-\d+[A-Z]?)?$/.test(houseNumber)) return null;
+            const suffixMap = {
+                AVENUE: 'AVE', AVE: 'AVE', STREET: 'ST', ST: 'ST',
+                ROAD: 'RD', RD: 'RD', DRIVE: 'DR', DR: 'DR',
+                LANE: 'LN', LN: 'LN', COURT: 'CT', CT: 'CT',
+                PLACE: 'PL', PL: 'PL', TERRACE: 'TER', TER: 'TER',
+                BOULEVARD: 'BLVD', BLVD: 'BLVD', CIRCLE: 'CIR', CIR: 'CIR'
+            };
+            const directionMap = {
+                NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W'
+            };
+            const streetTokens = tokens
+                .slice(1)
+                .map(t => suffixMap[t] || directionMap[t] || t)
+                .filter(t => t && t !== 'PA' && !/^\d{5}(-\d{4})?$/.test(t));
+            if (!streetTokens.length) return null;
+            const firstStreetToken = streetTokens[0] || '';
+            const stemCandidate = firstStreetToken.replace(
+                /(AVENUE|AVE|STREET|ST|ROAD|RD|DRIVE|DR|LANE|LN|COURT|CT|PLACE|PL|TERRACE|TER|BOULEVARD|BLVD|CIRCLE|CIR|WAY)(NORTH|SOUTH|EAST|WEST|N|S|E|W)?$/g,
+                ''
+            );
+            const streetStem = (stemCandidate || firstStreetToken).trim();
+            return { houseNumber, streetTokens, streetStem };
+        }
+        function getStreetTownMatchKeys(address, town) {
+            const parts = getStreetMatchParts(address);
+            if (!parts) return [];
+            const townRoot = normalizeTownRoot(town);
+            if (!townRoot) return [];
+            const fullStreet = parts.streetTokens.join(' ');
+            const keys = [
+                `${parts.houseNumber}|${fullStreet}|${townRoot}`,
+                `${parts.houseNumber}|${parts.streetStem}|${townRoot}`
+            ];
+            return [...new Set(keys.filter(Boolean))];
+        }
+        function getCaseSheriffKeys(c) {
+            if (!c || !c.propertyAddress) return [];
+            return getStreetTownMatchKeys(c.propertyAddress, c.propertyCity);
+        }
+        let montcoSheriffAddressKeys = null;
+        let montcoSheriffAddressKeysPromise = null;
+        async function getMontcoSheriffAddressKeys() {
+            if (montcoSheriffAddressKeys) return montcoSheriffAddressKeys;
+            if (montcoSheriffAddressKeysPromise) return montcoSheriffAddressKeysPromise;
+            montcoSheriffAddressKeysPromise = (async () => {
+                try {
+                    const r = await fetch('/api/properties?county=Montgomery', {
+                        headers: { 'X-Auth-Token': authToken }
+                    });
+                    const data = await r.json();
+                    const properties = data.properties || [];
+                    const set = new Set();
+                    for (const p of properties) {
+                        const keys = getStreetTownMatchKeys(p.address, p.city || p.township);
+                        for (const k of keys) set.add(k);
+                    }
+                    montcoSheriffAddressKeys = set;
+                    return set;
+                } catch (e) {
+                    console.warn('Unable to load Montgomery sheriff address set:', e.message);
+                    montcoSheriffAddressKeys = new Set();
+                    return montcoSheriffAddressKeys;
+                }
+            })();
+            return montcoSheriffAddressKeysPromise;
+        }
+
+        // Close any open filter dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            const anyGroup = document.querySelector('.filter-dropdown-group');
+            if (!anyGroup) return;
+            if (!event.target.closest('.filter-dropdown-group')) closeAllFilterDropdowns();
+        });
 
         function toggleStack(btn) {
             const list = btn.parentElement.querySelector('.stack-list');
@@ -1261,13 +1548,16 @@
         async function loadData() {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
-            const cityFilter = document.getElementById('cityFilter').value.toLowerCase();
+            const selectedCities = getSelectedCheckboxValues('cityFilterOptions');
             const typeFilter = document.getElementById('typeFilter').value;
 
             try {
-                const response = await fetch(`/api/pipeline?sortBy=${sortBy}&sortOrder=desc`, {
-                    headers: { 'X-Auth-Token': authToken }
-                });
+                const [response, sheriffKeys] = await Promise.all([
+                    fetch(`/api/pipeline?sortBy=${sortBy}&sortOrder=desc`, {
+                        headers: { 'X-Auth-Token': authToken }
+                    }),
+                    getMontcoSheriffAddressKeys()
+                ]);
                 const data = await response.json();
 
                 // Update status
@@ -1277,11 +1567,13 @@
 
                 let cases = data.cases || [];
 
-                // Filter by city if specified
-                if (cityFilter) {
-                    cases = cases.filter(c =>
-                        (c.propertyCity || '').toLowerCase().includes(cityFilter)
-                    );
+                // Populate the city multi-select from the unfiltered data so options stay stable across filtering
+                populateCityFilter(cases, selectedCities);
+
+                // Filter by selected cities (multi-select)
+                if (selectedCities.length > 0) {
+                    const set = new Set(selectedCities.map(s => s.toUpperCase().trim()));
+                    cases = cases.filter(c => set.has((c.propertyCity || '').toUpperCase().trim()));
                 }
 
                 // Filter by case type
@@ -1292,6 +1584,12 @@
                 // Filter sweet spot only if enabled
                 if (sweetSpotOnly) {
                     cases = cases.filter(c => c.inSweetSpot);
+                }
+
+                // Annotate sheriff-sale matches before render
+                for (const c of cases) {
+                    const keys = getCaseSheriffKeys(c);
+                    c._onSheriffSale = keys.some(k => sheriffKeys.has(k));
                 }
                 
                 // Sort based on selection
@@ -1438,6 +1736,7 @@
                     <div class="property-info">
                         <div class="address-row">
                             <div class="property-address">${address}</div>
+                            ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                         </div>
                         <div class="property-location">${location}</div>
