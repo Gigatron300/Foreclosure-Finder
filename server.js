@@ -1535,7 +1535,7 @@ ensureDataDir().then(() => {
     
     // Schedule automatic jobs
     scheduleNightlySheriffScrape();   // 2 AM ET
-    scheduleNightlyPipelineScrape();  // 3 AM ET
+    // scheduleNightlyPipelineScrape();  // 3 AM ET — disabled; pipeline scrape is run manually
   });
 });
 
