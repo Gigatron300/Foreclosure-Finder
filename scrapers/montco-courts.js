@@ -441,7 +441,10 @@ function resolveCaseTypeCode(codes, csvCaseType) {
   return null;
 }
 
-// Group CSV cases by (year, exact CaseType from CSV), then harvest each bucket.
+// Montco's search caps the result set at 1,000 records, so we chunk by month instead of year.
+const MONTCO_RESULT_CAP = 1000;
+
+// Group CSV cases by (year-month, exact CaseType from CSV), then harvest each bucket.
 async function harvestUrlCacheFromCSV(browser, cases) {
   const codes = await discoverCaseTypeCodes(browser);
   if (Object.keys(codes).length === 0) {
@@ -449,48 +452,62 @@ async function harvestUrlCacheFromCSV(browser, cases) {
     return new Map();
   }
 
-  // Group cases by (year, exact CaseType string from CSV)
+  // Group cases by (year-month, exact CaseType string from CSV)
   const groups = new Map();
   for (const c of cases) {
     const m = (c.commencedDate || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (!m) continue;
     const year = m[3];
+    const month = m[1].padStart(2, '0');
     const caseType = (c.caseType || '').trim();
     if (!caseType) continue;
-    const key = `${year}|${caseType}`;
+    const key = `${year}-${month}|${caseType}`;
     groups.set(key, (groups.get(key) || 0) + 1);
   }
 
   if (groups.size === 0) return new Map();
-  console.log(`🌐 Bulk URL harvest across ${groups.size} (year, case-type) buckets...`);
+  console.log(`🌐 Bulk URL harvest across ${groups.size} (month, case-type) buckets...`);
 
   const merged = new Map();
   const unresolved = new Set();
-  for (const [key, count] of groups) {
+  const cappedBuckets = [];
+  for (const [key, csvCount] of groups) {
     const sep = key.indexOf('|');
-    const year = key.slice(0, sep);
+    const ym = key.slice(0, sep); // "2026-04"
     const caseType = key.slice(sep + 1);
     const code = resolveCaseTypeCode(codes, caseType);
     if (!code) {
       unresolved.add(caseType);
-      console.log(`   skipping "${caseType}" ${year}: no matching dropdown option (${count} cases)`);
+      console.log(`   skipping "${caseType}" ${ym}: no matching dropdown option (${csvCount} cases)`);
       continue;
     }
-    const dateFrom = `01/01/${year}`;
-    const dateTo = `12/31/${year}`;
+
+    const [yearStr, monthStr] = ym.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    const lastDay = new Date(year, month, 0).getDate(); // last day of this month
+    const dateFrom = `${monthStr}/01/${yearStr}`;
+    const dateTo = `${monthStr}/${String(lastDay).padStart(2, '0')}/${yearStr}`;
+
     try {
       const m = await harvestDetailUrls(browser, {
         caseTypeCode: code,
         dateFrom, dateTo,
-        label: `"${caseType}" ${year}: `,
+        label: `"${caseType}" ${ym}: `,
       });
       for (const [k, v] of m) merged.set(k, v);
+      if (m.size >= MONTCO_RESULT_CAP) {
+        cappedBuckets.push(`${caseType} ${ym} (${m.size} hits)`);
+      }
     } catch (err) {
-      console.log(`   harvest failed for "${caseType}" ${year}: ${(err.message || '').slice(0, 80)}`);
+      console.log(`   harvest failed for "${caseType}" ${ym}: ${(err.message || '').slice(0, 80)}`);
     }
   }
   if (unresolved.size > 0) {
     console.log(`   ⚠️ Unresolved CSV case types: ${Array.from(unresolved).join(', ')} — these will fall back to per-case search`);
+  }
+  if (cappedBuckets.length > 0) {
+    console.log(`   ⚠️ Hit Montco's ${MONTCO_RESULT_CAP}-result cap on: ${cappedBuckets.join('; ')} — those months may be truncated; affected cases will fall back to per-case search`);
   }
   return merged;
 }
