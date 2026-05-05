@@ -643,6 +643,31 @@ app.get('/api/pipeline/case/:caseNumber', checkAuth, async (req, res) => {
   }
 });
 
+app.post('/api/pipeline/clear', checkAuth, async (req, res) => {
+  const files = [
+    PIPELINE_DATA_FILE,
+    path.join(CONFIG.outputDir, 'url-cache.json')
+  ];
+  const deleted = [];
+
+  for (const file of files) {
+    try {
+      await fs.unlink(file);
+      deleted.push(path.basename(file));
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        return res.status(500).json({ error: error.message, file: path.basename(file) });
+      }
+    }
+  }
+
+  res.json({
+    success: true,
+    message: 'Pipeline data cleared',
+    deleted
+  });
+});
+
 let isPipelineScrapingInProgress = false;
 let lastPipelineScrapeStatus = null;
 

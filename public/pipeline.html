@@ -1032,6 +1032,7 @@
         <div class="actions-bar">
             <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">Process All</button>
             <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
+            <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" style="border-color: var(--benoro-danger); color: var(--benoro-danger);">Clear Pipeline</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
             
@@ -2025,6 +2026,30 @@
             }
         }
         
+        async function clearPipelineData() {
+            if (!confirm('Clear all displayed MontCo pipeline results? Uploaded court CSV will remain.')) return;
+
+            const clearBtn = document.getElementById('clearBtn');
+            clearBtn.disabled = true;
+            clearBtn.innerHTML = 'Clearing...';
+
+            try {
+                const response = await fetch('/api/pipeline/clear', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.error || 'Clear failed');
+                await loadData();
+                alert('Pipeline data cleared.');
+            } catch (error) {
+                alert('Clear failed: ' + error.message);
+            } finally {
+                clearBtn.disabled = false;
+                clearBtn.innerHTML = 'Clear Pipeline';
+            }
+        }
+
         function exportCSV() { window.open('/api/pipeline/export/csv', '_blank'); }
         
         function formatDate(dateStr) {
