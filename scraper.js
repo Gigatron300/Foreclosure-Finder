@@ -57,9 +57,46 @@ async function runScraper() {
       sourceCounts[county.name] = properties.length;
     }
     
-    allProperties.sort((a, b) => a.debtAmount - b.debtAmount);
-    
     const outputPath = path.join(CONFIG.outputDir, CONFIG.outputFile);
+
+    // Merge with previous run so a transient failure (CivilView timeout, parse miss)
+    // can't blank out a known-good debt amount or other detail-page fields.
+    let existingByPropertyId = new Map();
+    try {
+      const prev = JSON.parse(await fs.readFile(outputPath, 'utf8'));
+      for (const p of (prev.properties || [])) {
+        if (p.propertyId) existingByPropertyId.set(p.propertyId, p);
+      }
+    } catch (e) { /* no previous file — fresh run */ }
+
+    let preservedCount = 0;
+    for (const prop of allProperties) {
+      const existing = existingByPropertyId.get(prop.propertyId);
+      if (!existing) continue;
+
+      if (prop.status === 'Unknown') {
+        // Detail-page fetch failed; preserve everything we already knew.
+        if (existing.debtAmount > 0) prop.debtAmount = existing.debtAmount;
+        prop.courtCase = prop.courtCase || existing.courtCase || '';
+        prop.attorney = prop.attorney || existing.attorney || '';
+        prop.attorneyPhone = prop.attorneyPhone || existing.attorneyPhone || '';
+        prop.parcelNumber = prop.parcelNumber || existing.parcelNumber || '';
+        prop.description = prop.description || existing.description || '';
+        if ((!prop.statusHistory || prop.statusHistory.length === 0) && existing.statusHistory?.length) {
+          prop.statusHistory = existing.statusHistory;
+        }
+        if (existing.status && existing.status !== 'Unknown') prop.status = existing.status;
+        preservedCount++;
+      } else if (prop.debtAmount === 0 && existing.debtAmount > 0) {
+        // Detail page loaded but debt label/value was empty this time.
+        prop.debtAmount = existing.debtAmount;
+        preservedCount++;
+      }
+    }
+    if (preservedCount > 0) console.log(`🛡  Preserved fields from prior run for ${preservedCount} properties`);
+
+    allProperties.sort((a, b) => a.debtAmount - b.debtAmount);
+
     await fs.writeFile(outputPath, JSON.stringify({
       lastUpdated: new Date().toISOString(),
       totalProperties: allProperties.length,

@@ -10,6 +10,109 @@ const parseDebtAmount = (text) => {
   return parseFloat(cleaned) || 0;
 };
 
+// Runs in the page context. Pulled out so we can call it twice
+// (initial extraction + retry after a session recovery).
+function extractDetailDataInPage() {
+  const getField = (label) => {
+    const lower = label.toLowerCase();
+    const items = document.querySelectorAll('.sale-detail-item');
+    for (const item of items) {
+      const l = item.querySelector('.sale-detail-label');
+      const v = item.querySelector('.sale-detail-value');
+      if (l && v && l.textContent.toLowerCase().includes(lower)) {
+        return v.textContent.trim().replace(/\s+/g, ' ');
+      }
+    }
+    const tds = document.querySelectorAll('td');
+    for (const td of tds) {
+      if (td.textContent.toLowerCase().includes(lower)) {
+        const next = td.nextElementSibling;
+        if (next && next.tagName === 'TD') {
+          return next.textContent.trim().replace(/\s+/g, ' ');
+        }
+      }
+    }
+    return '';
+  };
+
+  const getStatusHistory = () => {
+    const history = [];
+    document.querySelectorAll('table').forEach(table => {
+      const header = table.querySelector('tr');
+      if (header?.textContent.includes('Status') && header?.textContent.includes('Date')) {
+        table.querySelectorAll('tr').forEach((row, i) => {
+          if (i > 0) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 2) {
+              history.push({ status: cells[0].textContent.trim(), date: cells[1].textContent.trim() });
+            }
+          }
+        });
+      }
+    });
+    return history;
+  };
+
+  const statusHistory = getStatusHistory();
+
+  const skipLabels = ['sheriff', 'date', 'attorney', 'plaintiff', 'defendant', 'address',
+    'parcel', 'township', 'court case', 'description', 'phone', 'status', 'property note'];
+  const findDebtFallback = () => {
+    const items = document.querySelectorAll('.sale-detail-item');
+    for (const item of items) {
+      const l = item.querySelector('.sale-detail-label');
+      const v = item.querySelector('.sale-detail-value');
+      if (!l || !v) continue;
+      const label = l.textContent.toLowerCase();
+      if (skipLabels.some(s => label.includes(s))) continue;
+      const val = v.textContent.trim();
+      if (/\$[\d,]+/.test(val)) return val;
+    }
+    const tds = document.querySelectorAll('td');
+    for (const td of tds) {
+      const label = td.textContent.toLowerCase();
+      if (skipLabels.some(s => label.includes(s))) continue;
+      const next = td.nextElementSibling;
+      if (!next || next.tagName !== 'TD') continue;
+      const val = next.textContent.trim();
+      if (/\$[\d,]+/.test(val)) return val;
+    }
+    return '';
+  };
+
+  const debt = getField('debt amount') || getField('approx') || getField('upset') || getField('judgment amount') || getField('amount') || findDebtFallback();
+
+  const detailItemCount = document.querySelectorAll('.sale-detail-item').length;
+  const tdCount = document.querySelectorAll('td').length;
+
+  return {
+    sheriff: getField('sheriff'),
+    courtCase: getField('court case'),
+    salesDate: getField('sales date'),
+    plaintiff: getField('plaintiff'),
+    defendant: getField('defendant'),
+    address: getField('address'),
+    debt,
+    attorney: getField('attorney'),
+    attorneyPhone: getField('attorney phone'),
+    parcel: getField('parcel'),
+    township: getField('township'),
+    description: getField('description'),
+    status: statusHistory.length > 0 ? statusHistory[statusHistory.length - 1].status : 'Scheduled',
+    statusHistory,
+    detailItemCount,
+    tdCount
+  };
+}
+
+// Both Camden and Montgomery detail pages are built from .sale-detail-item
+// divs. Zero of them means we did NOT land on a real detail page — most likely
+// CivilView bounced us to the search index because the session expired or the
+// rate limit kicked in. Treat the evaluate output as untrusted in that case.
+function isDetailPageEmpty(data) {
+  return data.detailItemCount === 0;
+}
+
 // Known cities/townships for address parsing
 const KNOWN_CITIES = [
   // NJ
@@ -213,124 +316,31 @@ async function scrapeCounty(browser, county) {
         console.log(`  ⏸ Batch pause...`);
         await delay(CONFIG.batchPause);
       }
-      
+
       const listing = listings[i];
-      
+
       try {
         await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
         await delay(500);
-        
-        // Extract detail page data
-        const data = await page.evaluate(() => {
-          const getField = (label) => {
-            const lower = label.toLowerCase();
-            // Try .sale-detail-item structure (Montgomery County)
-            const items = document.querySelectorAll('.sale-detail-item');
-            for (const item of items) {
-              const l = item.querySelector('.sale-detail-label');
-              const v = item.querySelector('.sale-detail-value');
-              if (l && v && l.textContent.toLowerCase().includes(lower)) {
-                return v.textContent.trim().replace(/\s+/g, ' ');
-              }
-            }
-            // Fallback: table row layout (Camden County uses <td> pairs)
-            const tds = document.querySelectorAll('td');
-            for (const td of tds) {
-              if (td.textContent.toLowerCase().includes(lower)) {
-                const next = td.nextElementSibling;
-                if (next && next.tagName === 'TD') {
-                  return next.textContent.trim().replace(/\s+/g, ' ');
-                }
-              }
-            }
-            return '';
-          };
-          
-          const getStatusHistory = () => {
-            const history = [];
-            document.querySelectorAll('table').forEach(table => {
-              const header = table.querySelector('tr');
-              if (header?.textContent.includes('Status') && header?.textContent.includes('Date')) {
-                table.querySelectorAll('tr').forEach((row, i) => {
-                  if (i > 0) {
-                    const cells = row.querySelectorAll('td');
-                    if (cells.length >= 2) {
-                      history.push({ status: cells[0].textContent.trim(), date: cells[1].textContent.trim() });
-                    }
-                  }
-                });
-              }
-            });
-            return history;
-          };
-          
-          const statusHistory = getStatusHistory();
-          
-          // Fallback: scan all label/value pairs for any dollar amount if named fields don't match
-          const skipLabels = ['sheriff', 'date', 'attorney', 'plaintiff', 'defendant', 'address',
-            'parcel', 'township', 'court case', 'description', 'phone', 'status', 'property note'];
-          const findDebtFallback = () => {
-            // Try .sale-detail-item structure
-            const items = document.querySelectorAll('.sale-detail-item');
-            for (const item of items) {
-              const l = item.querySelector('.sale-detail-label');
-              const v = item.querySelector('.sale-detail-value');
-              if (!l || !v) continue;
-              const label = l.textContent.toLowerCase();
-              if (skipLabels.some(s => label.includes(s))) continue;
-              const val = v.textContent.trim();
-              if (/\$[\d,]+/.test(val)) return val;
-            }
-            // Try table cell pairs
-            const tds = document.querySelectorAll('td');
-            for (const td of tds) {
-              const label = td.textContent.toLowerCase();
-              if (skipLabels.some(s => label.includes(s))) continue;
-              const next = td.nextElementSibling;
-              if (!next || next.tagName !== 'TD') continue;
-              const val = next.textContent.trim();
-              if (/\$[\d,]+/.test(val)) return val;
-            }
-            return '';
-          };
 
-          const debt = getField('debt amount') || getField('approx') || getField('upset') || getField('judgment amount') || getField('amount') || findDebtFallback();
+        let data = await page.evaluate(extractDetailDataInPage);
 
-          // DEBUG: capture TD pairs when debt is missing so we can identify the right label
-          const debugLabels = debt ? [] : (() => {
-            const pairs = [];
-            const tds = document.querySelectorAll('td');
-            for (const td of tds) {
-              const next = td.nextElementSibling;
-              if (next && next.tagName === 'TD') {
-                const label = td.textContent.trim().replace(/\s+/g, ' ');
-                const val = next.textContent.trim().replace(/\s+/g, ' ');
-                if (label) pairs.push(`"${label}" => "${val}"`);
-                if (pairs.length >= 10) break;
-              }
-            }
-            return pairs;
-          })();
+        // CivilView occasionally bounces detail requests to the index page
+        // (session expired / rate limited). Page nav succeeds but body has no
+        // detail content, so every field comes back empty and debt = 0.
+        // Re-establish the session by hitting the search URL, then retry once.
+        if (isDetailPageEmpty(data)) {
+          console.log(`    ⚠️  Detail page empty for ${listing.sheriff || i + 1} — refreshing session`);
+          await page.goto(county.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+          await delay(2000);
+          await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
+          await delay(500);
+          data = await page.evaluate(extractDetailDataInPage);
+          if (isDetailPageEmpty(data)) {
+            throw new Error('Detail page still empty after session refresh');
+          }
+        }
 
-          return {
-            sheriff: getField('sheriff'),
-            courtCase: getField('court case'),
-            salesDate: getField('sales date'),
-            plaintiff: getField('plaintiff'),
-            defendant: getField('defendant'),
-            address: getField('address'),
-            debt,
-            attorney: getField('attorney'),
-            attorneyPhone: getField('attorney phone'),
-            parcel: getField('parcel'),
-            township: getField('township'),
-            description: getField('description'),
-            status: statusHistory.length > 0 ? statusHistory[statusHistory.length - 1].status : 'Scheduled',
-            statusHistory,
-            debugLabels
-          };
-        });
-        
         const addr = parseAddress(data.address || listing.address, county.state);
         
         properties.push({
@@ -359,9 +369,6 @@ async function scrapeCounty(browser, county) {
         
         const debt = parseDebtAmount(data.debt);
         console.log(`  ${i + 1}/${listings.length} ✓ ${addr.address || 'Property'} - ${debt > 0 ? '$' + debt.toLocaleString() : 'N/A'}`);
-        if (debt === 0 && data.debugLabels && data.debugLabels.length > 0) {
-          console.log(`    [DEBUG] TD pairs: ${data.debugLabels.slice(0, 5).join(' | ')}`);
-        }
         
       } catch (err) {
         // Use listing data as fallback
