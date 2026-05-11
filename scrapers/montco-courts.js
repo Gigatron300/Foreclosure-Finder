@@ -123,6 +123,55 @@ function parseDate(dateStr) {
   return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
 }
 
+// ===== Montgomery County parcel -> address resolver =====
+// Uses PASDA's public ArcGIS REST endpoint for the county Parcels layer.
+// PARCEL is the 12-digit parcel ID (we strip dashes / non-digits).
+const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/pasda/MontgomeryCounty/MapServer/14/query';
+const parcelAddressCache = new Map();
+
+async function fetchParcelAddress(parcelRaw) {
+  const parcel = String(parcelRaw || '').replace(/\D/g, '');
+  if (!parcel) return null;
+  if (parcelAddressCache.has(parcel)) return parcelAddressCache.get(parcel);
+
+  const params = new URLSearchParams({
+    where: `PARCEL='${parcel}'`,
+    outFields: 'PARCEL,ADDR1,ADDR2,ADDR3,LOC_ZIP1_Z,OWN1,Muni_Name',
+    returnGeometry: 'false',
+    f: 'json'
+  });
+  const url = `${PARCEL_API_BASE}?${params.toString()}`;
+
+  let info = null;
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (resp.ok) {
+      const data = await resp.json();
+      const f = data?.features?.[0]?.attributes;
+      if (f && (f.ADDR1 || f.ADDR3)) {
+        // ADDR3 looks like "HATBORO PA 19040" — split out city + zip.
+        let city = '', zip = (f.LOC_ZIP1_Z || '').trim();
+        const m = (f.ADDR3 || '').match(/^(.+?)\s+PA\s+(\d{5})/i);
+        if (m) { city = m[1].trim(); zip = m[2]; }
+        info = {
+          street: (f.ADDR1 || '').trim(),
+          city,
+          state: 'PA',
+          zip,
+          owner: (f.OWN1 || '').trim(),
+          municipality: (f.Muni_Name || '').trim(),
+          parcel: f.PARCEL
+        };
+      }
+    }
+  } catch (e) {
+    // Network/timeout — fall back to defendant address
+  }
+
+  parcelAddressCache.set(parcel, info);
+  return info;
+}
+
 /* ===========================================================
    ✅ V3 SCORING (4 Pillars)
    - Pressure Stage (0–30)
@@ -887,14 +936,34 @@ async function scrapeMontgomeryCourts(options = {}) {
         return result;
       }, MONTCO_TOWNS);
 
-      const addresses = data.addresses || [];
-      const bestAddr = addresses.find(a => a.inMontCo) || addresses[0] || null;
+      // Prefer parcel-derived address (the property with the lien) over the
+      // defendant's mailing address (which can be a different home entirely).
+      let parcelAddr = null;
+      if (c.parcelNumber) {
+        parcelAddr = await fetchParcelAddress(c.parcelNumber);
+      }
 
-      c.propertyAddress = bestAddr?.street || '';
-      c.propertyCity = bestAddr?.city || '';
-      c.propertyState = bestAddr?.state || 'PA';
-      c.propertyZip = bestAddr?.zip || '';
-      c.inMontgomeryCounty = bestAddr?.inMontCo || false;
+      if (parcelAddr && parcelAddr.street) {
+        c.propertyAddress = parcelAddr.street;
+        c.propertyCity = parcelAddr.city || '';
+        c.propertyState = 'PA';
+        c.propertyZip = parcelAddr.zip || '';
+        c.inMontgomeryCounty = true;
+        c.propertyOwner = parcelAddr.owner || '';
+        c.propertyMunicipality = parcelAddr.municipality || '';
+        c.addressSource = 'parcel';
+      } else {
+        const addresses = data.addresses || [];
+        const bestAddr = addresses.find(a => a.inMontCo) || addresses[0] || null;
+        c.propertyAddress = bestAddr?.street || '';
+        c.propertyCity = bestAddr?.city || '';
+        c.propertyState = bestAddr?.state || 'PA';
+        c.propertyZip = bestAddr?.zip || '';
+        c.inMontgomeryCounty = bestAddr?.inMontCo || false;
+        c.propertyOwner = '';
+        c.propertyMunicipality = '';
+        c.addressSource = c.parcelNumber ? 'defendant-fallback' : 'defendant';
+      }
       c.detailUrl = currentUrl;
       c.judgmentAmount = data.judgmentAmount != null ? data.judgmentAmount : null;
 
@@ -922,6 +991,9 @@ async function scrapeMontgomeryCourts(options = {}) {
         propertyCity: c.propertyCity,
         propertyState: c.propertyState,
         propertyZip: c.propertyZip,
+        propertyOwner: c.propertyOwner || '',
+        propertyMunicipality: c.propertyMunicipality || '',
+        addressSource: c.addressSource || '',
         inMontgomeryCounty: c.inMontgomeryCounty,
         hasJudgement: c.hasJudgement,
         status: c.status,
@@ -993,9 +1065,12 @@ async function scrapeMontgomeryCourts(options = {}) {
 
   const withAddr = results.filter(r => r.propertyAddress).length;
   const inMontCo = results.filter(r => r.inMontgomeryCounty).length;
+  const fromParcel = results.filter(r => r.addressSource === 'parcel').length;
+  const fromDefendant = results.filter(r => r.addressSource === 'defendant' || r.addressSource === 'defendant-fallback').length;
 
   console.log(`\n✅ Done: ${results.length} cases`);
   console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
+  console.log(`   Address source: ${fromParcel} from parcel API, ${fromDefendant} from defendant addr`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
 
   return results;
