@@ -715,7 +715,13 @@ app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isPipelineScrapingInProgress, lastStatus: lastPipelineScrapeStatus });
 });
 
+let isRescanInProgress = false;
+let lastRescanStatus = null;
+
 app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
+  if (isRescanInProgress) {
+    return res.status(429).json({ error: 'A re-scan is already in progress.', status: lastRescanStatus });
+  }
   if (isPipelineScrapingInProgress) {
     return res.status(429).json({ error: 'A scrape is in progress; try again when it finishes.' });
   }
@@ -735,41 +741,69 @@ app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
   );
 
   if (targets.length === 0) {
-    return res.json({ attempted: 0, recovered: 0, stillFailed: 0, message: 'No lien cases with a parcel number found.' });
+    lastRescanStatus = { status: 'completed', total: 0, processed: 0, recovered: 0, stillFailed: 0, completed: new Date().toISOString() };
+    return res.json({ done: true, message: 'No lien cases with a parcel number found.', status: lastRescanStatus });
   }
 
-  const CONCURRENCY = 5;
-  let recovered = 0;
-  let stillFailed = 0;
+  isRescanInProgress = true;
+  lastRescanStatus = {
+    status: 'running',
+    started: new Date().toISOString(),
+    total: targets.length,
+    processed: 0,
+    recovered: 0,
+    stillFailed: 0
+  };
+  res.json({ done: false, message: `Re-scan started for ${targets.length} cases`, status: lastRescanStatus });
 
-  for (let i = 0; i < targets.length; i += CONCURRENCY) {
-    const chunk = targets.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(async (c) => {
-      try {
-        const info = await fetchParcelAddress(c.parcelNumber, { bypassCache: true });
-        if (info && info.street) {
-          c.propertyAddress = info.street;
-          c.propertyCity = info.city || '';
-          c.propertyState = 'PA';
-          c.propertyZip = info.zip || '';
-          c.propertyOwner = info.owner || '';
-          c.propertyMunicipality = info.municipality || '';
-          c.inMontgomeryCounty = true;
-          c.addressSource = 'parcel';
-          recovered++;
-        } else {
-          stillFailed++;
-        }
-      } catch (e) {
-        stillFailed++;
+  // Background processing — response already sent.
+  (async () => {
+    try {
+      const CONCURRENCY = 5;
+      for (let i = 0; i < targets.length; i += CONCURRENCY) {
+        const chunk = targets.slice(i, i + CONCURRENCY);
+        await Promise.all(chunk.map(async (c) => {
+          try {
+            const info = await fetchParcelAddress(c.parcelNumber, { bypassCache: true });
+            if (info && info.street) {
+              c.propertyAddress = info.street;
+              c.propertyCity = info.city || '';
+              c.propertyState = 'PA';
+              c.propertyZip = info.zip || '';
+              c.propertyOwner = info.owner || '';
+              c.propertyMunicipality = info.municipality || '';
+              c.inMontgomeryCounty = true;
+              c.addressSource = 'parcel';
+              lastRescanStatus.recovered++;
+            } else {
+              lastRescanStatus.stillFailed++;
+            }
+          } catch (e) {
+            lastRescanStatus.stillFailed++;
+          }
+          lastRescanStatus.processed++;
+        }));
       }
-    }));
-  }
 
-  pipeline.lastUpdated = new Date().toISOString();
-  await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
+      pipeline.lastUpdated = new Date().toISOString();
+      await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
 
-  res.json({ attempted: targets.length, recovered, stillFailed });
+      lastRescanStatus.status = 'completed';
+      lastRescanStatus.completed = new Date().toISOString();
+      console.log(`[rescan] ✓ Done: attempted=${targets.length} recovered=${lastRescanStatus.recovered} stillFailed=${lastRescanStatus.stillFailed}`);
+    } catch (error) {
+      lastRescanStatus.status = 'error';
+      lastRescanStatus.error = error.message;
+      lastRescanStatus.completed = new Date().toISOString();
+      console.error('[rescan] error:', error);
+    } finally {
+      isRescanInProgress = false;
+    }
+  })();
+});
+
+app.get('/api/pipeline/rescan-parcels/status', checkAuth, (req, res) => {
+  res.json({ inProgress: isRescanInProgress, status: lastRescanStatus });
 });
 
 app.get('/api/pipeline/export/csv', async (req, res) => {

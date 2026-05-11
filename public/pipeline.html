@@ -2170,19 +2170,40 @@
             const btn = document.getElementById('rescanBtn');
             const originalText = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = 'Re-scanning...';
+            btn.innerHTML = 'Starting...';
             try {
-                const response = await fetch('/api/pipeline/rescan-parcels', {
+                const startResp = await fetch('/api/pipeline/rescan-parcels', {
                     method: 'POST',
                     headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' }
                 });
-                const result = await response.json();
-                if (!response.ok) throw new Error(result.error || 'Re-scan failed');
-                if (result.attempted === 0) {
-                    alert(result.message || 'No lien cases needed re-scanning.');
-                } else {
-                    alert(`Re-scanned ${result.attempted} lien case(s):\n  Recovered: ${result.recovered}\n  Still unresolved: ${result.stillFailed}`);
-                    await loadData();
+                const startResult = await startResp.json();
+                if (!startResp.ok) throw new Error(startResult.error || 'Re-scan failed to start');
+
+                if (startResult.done) {
+                    alert(startResult.message || 'Nothing to re-scan.');
+                    return;
+                }
+
+                const total = startResult.status.total;
+                while (true) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const statusResp = await fetch('/api/pipeline/rescan-parcels/status', {
+                        headers: { 'X-Auth-Token': authToken }
+                    });
+                    const statusResult = await statusResp.json();
+                    const s = statusResult.status;
+                    if (s) {
+                        btn.innerHTML = `Re-scanning ${s.processed || 0}/${total}...`;
+                    }
+                    if (!statusResult.inProgress) {
+                        if (s && s.status === 'completed') {
+                            alert(`Re-scanned ${total} lien case(s):\n  Recovered: ${s.recovered}\n  Still unresolved: ${s.stillFailed}`);
+                            await loadData();
+                        } else {
+                            alert('Re-scan failed: ' + ((s && s.error) || 'unknown error'));
+                        }
+                        break;
+                    }
                 }
             } catch (error) {
                 alert('Re-scan failed: ' + error.message);
