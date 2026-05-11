@@ -7,6 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         :root {
             --benoro-navy: #1a3a52;
@@ -999,12 +1000,12 @@
             </div>
         </div>
         
-        <!-- CSV Upload Section -->
+        <!-- CSV / Excel Upload Section -->
         <div class="upload-section" id="uploadSection">
-            <h3>Upload Court Data CSV</h3>
-            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: var(--benoro-gold);">Montgomery County Courts</a></p>
-            <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
-            <label for="csvUpload" class="upload-label">Choose CSV File</label>
+            <h3>Upload Court Data</h3>
+            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: var(--benoro-gold);">Montgomery County Courts</a> (CSV or Excel)</p>
+            <input type="file" id="csvUpload" class="upload-input" accept=".csv,.xlsx,.xls" onchange="handleFileUpload(event)">
+            <label for="csvUpload" class="upload-label">Choose CSV or Excel File</label>
             <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
         </div>
         
@@ -1568,14 +1569,26 @@
         async function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
-            
+
             const statusEl = document.getElementById('csvStatus');
             statusEl.textContent = 'Reading file...';
-            
+
             try {
-                // Read file as text
-                const csvData = await file.text();
-                
+                const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+                let csvData;
+                if (isExcel) {
+                    if (typeof XLSX === 'undefined') {
+                        throw new Error('Excel parser failed to load. Check your internet connection and reload.');
+                    }
+                    const buf = await file.arrayBuffer();
+                    const wb = XLSX.read(buf, { type: 'array' });
+                    const sheet = wb.Sheets[wb.SheetNames[0]];
+                    if (!sheet) throw new Error('Excel file has no sheets.');
+                    csvData = XLSX.utils.sheet_to_csv(sheet);
+                } else {
+                    csvData = await file.text();
+                }
+
                 statusEl.textContent = 'Uploading...';
                 
                 const response = await fetch('/api/pipeline/upload-csv', {
