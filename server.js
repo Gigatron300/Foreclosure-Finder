@@ -714,7 +714,8 @@ app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isPipelineScrapingInProgress, lastStatus: lastPipelineScrapeStatus });
 });
 
-app.get('/api/pipeline/export/csv', checkAuth, async (req, res) => {
+app.get('/api/pipeline/export/csv', async (req, res) => {
+  if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);

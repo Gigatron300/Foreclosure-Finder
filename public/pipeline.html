@@ -1033,7 +1033,8 @@
         <div class="actions-bar">
             <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">Process All</button>
             <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
-            <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" style="border-color: var(--benoro-danger); color: var(--benoro-danger);">Clear Pipeline</button>
+            <button class="btn btn-outline" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="border-color: var(--benoro-danger); color: var(--benoro-danger); padding: 0.5rem 0.75rem;">🔒</button>
+            <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" disabled style="border-color: var(--benoro-danger); color: var(--benoro-danger); opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
             
@@ -1041,6 +1042,7 @@
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
                 <option value="scoreAsc">Sort: Score (Low -> High)</option>
                 <option value="sweetSpot">Sort: Sweet Spot First</option>
+                <option value="debtDesc">Sort: Debt (High -> Low)</option>
                 <option value="daysOpen">Sort: Days Open</option>
                 <option value="commencedDate">Sort: Filed Date</option>
                 <option value="propertyCity">Sort: City</option>
@@ -1682,6 +1684,8 @@
                         if (!a.inSweetSpot && b.inSweetSpot) return 1;
                         return (b.leadScore || 0) - (a.leadScore || 0);
                     });
+                } else if (sortBy === 'debtDesc') {
+                    cases.sort((a, b) => (b.judgmentAmount || 0) - (a.judgmentAmount || 0));
                 } else if (sortBy === 'daysOpen') {
                     cases.sort((a, b) => (b.daysOpen || 0) - (a.daysOpen || 0));
                 } else if (sortBy === 'commencedDate') {
@@ -2045,8 +2049,41 @@
             }
         }
         
+        function lockClearButton() {
+            const clearBtn = document.getElementById('clearBtn');
+            const lockBtn = document.getElementById('clearLockBtn');
+            clearBtn.disabled = true;
+            clearBtn.style.opacity = '0.5';
+            clearBtn.style.cursor = 'not-allowed';
+            lockBtn.innerHTML = '🔒';
+            lockBtn.title = 'Unlock Clear Pipeline';
+        }
+
+        function toggleClearLock() {
+            const clearBtn = document.getElementById('clearBtn');
+            const lockBtn = document.getElementById('clearLockBtn');
+            if (!clearBtn.disabled) {
+                lockClearButton();
+                return;
+            }
+            const entered = prompt('Enter auth token to unlock Clear Pipeline:');
+            if (entered === null) return;
+            if (entered !== authToken) {
+                alert('Incorrect token. Clear Pipeline remains locked.');
+                return;
+            }
+            clearBtn.disabled = false;
+            clearBtn.style.opacity = '1';
+            clearBtn.style.cursor = 'pointer';
+            lockBtn.innerHTML = '🔓';
+            lockBtn.title = 'Lock Clear Pipeline';
+        }
+
         async function clearPipelineData() {
-            if (!confirm('Clear all displayed MontCo pipeline results? Uploaded court CSV will remain.')) return;
+            if (!confirm('Clear all displayed MontCo pipeline results? Uploaded court CSV will remain.')) {
+                lockClearButton();
+                return;
+            }
 
             const clearBtn = document.getElementById('clearBtn');
             clearBtn.disabled = true;
@@ -2064,12 +2101,12 @@
             } catch (error) {
                 alert('Clear failed: ' + error.message);
             } finally {
-                clearBtn.disabled = false;
                 clearBtn.innerHTML = 'Clear Pipeline';
+                lockClearButton();
             }
         }
 
-        function exportCSV() { window.open('/api/pipeline/export/csv', '_blank'); }
+        function exportCSV() { window.open('/api/pipeline/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
         
         function formatDate(dateStr) {
             if (!dateStr) return 'N/A';
