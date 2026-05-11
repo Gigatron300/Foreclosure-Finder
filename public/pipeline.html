@@ -1586,8 +1586,11 @@
                     const wb = XLSX.read(buf, { type: 'array', cellDates: true });
                     const sheet = wb.Sheets[wb.SheetNames[0]];
                     if (!sheet) throw new Error('Excel file has no sheets.');
-                    // dateNF forces dates to M/D/YYYY so the server-side regex (4-digit year) matches
-                    csvData = XLSX.utils.sheet_to_csv(sheet, { dateNF: 'm/d/yyyy' });
+                    // dateNF forces dates to M/D/YYYY so the server-side regex (4-digit year) matches.
+                    // rawNumbers: true emits raw cell values rather than Excel's display string,
+                    // which would otherwise mangle 12-digit parcel IDs into scientific notation
+                    // (e.g. 360007123456 -> "3.60007E+11", losing 6 digits of precision).
+                    csvData = XLSX.utils.sheet_to_csv(sheet, { dateNF: 'm/d/yyyy', rawNumbers: true });
                 } else {
                     csvData = await file.text();
                 }
