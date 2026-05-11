@@ -1581,10 +1581,13 @@
                         throw new Error('Excel parser failed to load. Check your internet connection and reload.');
                     }
                     const buf = await file.arrayBuffer();
-                    const wb = XLSX.read(buf, { type: 'array' });
+                    // cellDates: parse date cells as JS Dates so we can re-format them
+                    // raw: emit raw values (avoids locale-dependent display strings)
+                    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
                     const sheet = wb.Sheets[wb.SheetNames[0]];
                     if (!sheet) throw new Error('Excel file has no sheets.');
-                    csvData = XLSX.utils.sheet_to_csv(sheet);
+                    // dateNF forces dates to M/D/YYYY so the server-side regex (4-digit year) matches
+                    csvData = XLSX.utils.sheet_to_csv(sheet, { dateNF: 'm/d/yyyy' });
                 } else {
                     csvData = await file.text();
                 }

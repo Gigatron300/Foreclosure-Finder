@@ -129,10 +129,49 @@ function normalizeDefendantName(name) {
     .trim();
 }
 
+// Parse a commenced-date value from any common CSV/Excel-export representation.
+// Returns { year, month, day } (numeric) or null. Accepts:
+//   M/D/YYYY, MM/DD/YYYY, M/D/YY (windowed: 50-99 -> 19xx, 00-49 -> 20xx)
+//   YYYY-MM-DD (ISO)
+//   Excel date-serial numbers (days since 1899-12-30)
+function parseCommencedParts(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  // M/D/YYYY or M/D/YY
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (m) {
+    let yr = parseInt(m[3], 10);
+    if (m[3].length === 2) yr = yr >= 50 ? 1900 + yr : 2000 + yr;
+    return { year: yr, month: parseInt(m[1], 10), day: parseInt(m[2], 10) };
+  }
+
+  // ISO YYYY-MM-DD
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    return { year: parseInt(m[1], 10), month: parseInt(m[2], 10), day: parseInt(m[3], 10) };
+  }
+
+  // Excel serial number (days since 1899-12-30). Use a reasonable range.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = parseFloat(s);
+    if (serial > 25000 && serial < 80000) {
+      const ms = Math.round((serial - 25569) * 86400 * 1000);
+      const d = new Date(ms);
+      if (!isNaN(d.getTime())) {
+        return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+      }
+    }
+  }
+
+  return null;
+}
+
 function parseDate(dateStr) {
-  if (!dateStr) return null;
-  const m = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null;
+  const p = parseCommencedParts(dateStr);
+  if (!p) return null;
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
 }
 
 // ===== Montgomery County parcel -> address resolver =====
@@ -516,10 +555,10 @@ async function harvestUrlCacheFromCSV(browser, cases) {
   // Group cases by (year-month, exact CaseType string from CSV)
   const groups = new Map();
   for (const c of cases) {
-    const m = (c.commencedDate || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (!m) continue;
-    const year = m[3];
-    const month = m[1].padStart(2, '0');
+    const parts = parseCommencedParts(c.commencedDate);
+    if (!parts) continue;
+    const year = String(parts.year);
+    const month = String(parts.month).padStart(2, '0');
     const caseType = (c.caseType || '').trim();
     if (!caseType) continue;
     const key = `${year}-${month}|${caseType}`;
@@ -639,15 +678,16 @@ async function scrapeMontgomeryCourts(options = {}) {
   let targets = allCases
     .filter(c => c.status.toUpperCase().includes('OPEN'))
     .map(c => {
-      const m = c.commencedDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      c.daysOpen = m ? Math.ceil((now - new Date(m[3], m[1] - 1, m[2])) / 86400000) : 0;
+      const p = parseCommencedParts(c.commencedDate);
+      c.daysOpen = p ? Math.ceil((now - new Date(p.year, p.month - 1, p.day)) / 86400000) : 0;
       c.monthsOpen = Math.round(c.daysOpen / 30);
       c.inSweetSpot = c.daysOpen >= sweetSpotMinDays && c.daysOpen <= sweetSpotMaxDays;
       return c;
     });
 
   const sweetSpotCount = targets.filter(c => c.inSweetSpot).length;
-  console.log(`   ${targets.length} OPEN cases (${sweetSpotCount} in sweet spot 🎯)`);
+  const withDate = targets.filter(c => c.daysOpen > 0).length;
+  console.log(`   ${targets.length} OPEN cases (${sweetSpotCount} in sweet spot 🎯, ${withDate} with parseable commenced date)`);
 
   targets.sort((a, b) => b.daysOpen - a.daysOpen);
 
