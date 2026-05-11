@@ -185,10 +185,10 @@ const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/
 const parcelAddressCache = new Map();
 let _parcelDebugRemaining = 8; // Log the first N lookups verbosely
 
-async function fetchParcelAddress(parcelRaw) {
+async function fetchParcelAddress(parcelRaw, options = {}) {
   const parcel = String(parcelRaw || '').replace(/\D/g, '');
   if (!parcel) return null;
-  if (parcelAddressCache.has(parcel)) return parcelAddressCache.get(parcel);
+  if (!options.bypassCache && parcelAddressCache.has(parcel)) return parcelAddressCache.get(parcel);
 
   const params = new URLSearchParams({
     where: `PARCEL='${parcel}'`,
@@ -1152,4 +1152,4 @@ async function scrapeMontgomeryCourts(options = {}) {
   return results;
 }
 
-module.exports = { scrapeMontgomeryCourts, parseCSV, CONFIG, MONTCO_TOWNS };
+module.exports = { scrapeMontgomeryCourts, parseCSV, fetchParcelAddress, CONFIG, MONTCO_TOWNS };

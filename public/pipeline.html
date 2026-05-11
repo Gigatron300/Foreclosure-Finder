@@ -471,6 +471,35 @@
             background: #e0bc6a;
             box-shadow: 0 0 0 2px rgba(224,188,106,0.2);
         }
+        .address-warning-flag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            margin-bottom: 4px;
+            border-radius: 999px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+        .address-warning-flag.out-of-county {
+            border: 1px solid rgba(220,68,68,0.55);
+            background: rgba(220,68,68,0.14);
+            color: #fca5a5;
+        }
+        .address-warning-flag.defendant-source {
+            border: 1px solid rgba(245,158,11,0.55);
+            background: rgba(245,158,11,0.14);
+            color: #fcd34d;
+        }
+        .address-warning-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+        .out-of-county .address-warning-dot { background: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.2); }
+        .defendant-source .address-warning-dot { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
         .property-location {
             color: #9ca3af;
             font-size: 0.9rem;
@@ -1035,8 +1064,10 @@
             <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
             <button class="btn btn-outline" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="border-color: var(--benoro-danger); color: var(--benoro-danger); padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" disabled style="border-color: var(--benoro-danger); color: var(--benoro-danger); opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
+            <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Retry the parcel API for lien cases whose original lookup failed (defendant-fallback)">Re-scan Liens</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
+            <button class="btn btn-outline" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel" style="border-color: #f59e0b; color: #f59e0b;">Hide Unreliable</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1089,6 +1120,13 @@
         let streetViewModeUnlocked = false;
         let streetViewModeRequiresPasskey = true;
         let sweetSpotOnly = false;
+        let hideUnreliable = false;
+
+        function isUnreliableAddress(c) {
+            if (c.inMontgomeryCounty === false) return true;
+            const src = c.addressSource;
+            return src === 'defendant' || src === 'defendant-fallback';
+        }
 
         function getLoadedPhotos() {
             try {
@@ -1406,6 +1444,19 @@
             loadData();
         }
 
+        function toggleHideUnreliable() {
+            hideUnreliable = !hideUnreliable;
+            const btn = document.getElementById('hideUnreliableFilter');
+            if (hideUnreliable) {
+                btn.style.background = '#f59e0b';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = '#f59e0b';
+            }
+            loadData();
+        }
+
         function toggleApiDropdown() {
             document.getElementById('apiDropdown').classList.toggle('open');
         }
@@ -1667,6 +1718,11 @@
                     cases = cases.filter(c => c.inSweetSpot);
                 }
 
+                // Hide cases with unreliable address resolution
+                if (hideUnreliable) {
+                    cases = cases.filter(c => !isUnreliableAddress(c));
+                }
+
                 // Annotate sheriff-sale matches before render
                 for (const c of cases) {
                     const keys = getCaseSheriffKeys(c);
@@ -1821,6 +1877,8 @@
                             <div class="property-address">${address}</div>
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
+                            ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
+                            ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="Address came from the defendant's mailing address (parcel lookup ${c.addressSource === 'defendant-fallback' ? 'failed' : 'unavailable'}) — may not be the actual property"><span class="address-warning-dot"></span>Defendant Addr</span>` : ''}
                         </div>
                         <div class="property-location">${location}</div>
                         
@@ -2107,6 +2165,32 @@
         }
 
         function exportCSV() { window.open('/api/pipeline/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
+
+        async function rescanLienParcels() {
+            const btn = document.getElementById('rescanBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Re-scanning...';
+            try {
+                const response = await fetch('/api/pipeline/rescan-parcels', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Re-scan failed');
+                if (result.attempted === 0) {
+                    alert(result.message || 'No lien cases needed re-scanning.');
+                } else {
+                    alert(`Re-scanned ${result.attempted} lien case(s):\n  Recovered: ${result.recovered}\n  Still unresolved: ${result.stillFailed}`);
+                    await loadData();
+                }
+            } catch (error) {
+                alert('Re-scan failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
         
         function formatDate(dateStr) {
             if (!dateStr) return 'N/A';

@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
+const { fetchParcelAddress } = require('./scrapers/montco-courts');
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
 const { containsWholeWords, shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
@@ -712,6 +713,64 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
 
 app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isPipelineScrapingInProgress, lastStatus: lastPipelineScrapeStatus });
+});
+
+app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
+  if (isPipelineScrapingInProgress) {
+    return res.status(429).json({ error: 'A scrape is in progress; try again when it finishes.' });
+  }
+
+  let pipeline;
+  try {
+    const raw = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
+    pipeline = JSON.parse(raw);
+  } catch (e) {
+    return res.status(404).json({ error: 'No pipeline data found.' });
+  }
+
+  const cases = pipeline.cases || [];
+  const targets = cases.filter(c =>
+    c.caseTypeKind === 'lien' &&
+    c.addressSource === 'defendant-fallback' &&
+    c.parcelNumber
+  );
+
+  if (targets.length === 0) {
+    return res.json({ attempted: 0, recovered: 0, stillFailed: 0, message: 'No lien cases with defendant-fallback addresses found.' });
+  }
+
+  const CONCURRENCY = 5;
+  let recovered = 0;
+  let stillFailed = 0;
+
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const chunk = targets.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map(async (c) => {
+      try {
+        const info = await fetchParcelAddress(c.parcelNumber, { bypassCache: true });
+        if (info && info.street) {
+          c.propertyAddress = info.street;
+          c.propertyCity = info.city || '';
+          c.propertyState = 'PA';
+          c.propertyZip = info.zip || '';
+          c.propertyOwner = info.owner || '';
+          c.propertyMunicipality = info.municipality || '';
+          c.inMontgomeryCounty = true;
+          c.addressSource = 'parcel';
+          recovered++;
+        } else {
+          stillFailed++;
+        }
+      } catch (e) {
+        stillFailed++;
+      }
+    }));
+  }
+
+  pipeline.lastUpdated = new Date().toISOString();
+  await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
+
+  res.json({ attempted: targets.length, recovered, stillFailed });
 });
 
 app.get('/api/pipeline/export/csv', async (req, res) => {
