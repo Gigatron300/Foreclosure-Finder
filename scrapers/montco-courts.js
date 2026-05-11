@@ -29,7 +29,7 @@ const CONFIG = {
   pageLoadWait: 500,
   batchSize: 30,
   batchPause: 4000,
-  concurrency: 3,
+  concurrency: 2,
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
