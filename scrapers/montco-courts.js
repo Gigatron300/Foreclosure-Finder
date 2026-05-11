@@ -687,6 +687,13 @@ async function scrapeMontgomeryCourts(options = {}) {
     try {
       await delay(CONFIG.requestDelay);
 
+      // Kick off the parcel API lookup in parallel with the Puppeteer page load.
+      // The parcel number is already known from the CSV, so this lets the
+      // ArcGIS round-trip overlap the (much slower) court page navigation.
+      const parcelPromise = c.parcelNumber
+        ? fetchParcelAddress(c.parcelNumber)
+        : Promise.resolve(null);
+
       // Try cached URL first (skips search hop entirely on subsequent runs)
       let detailLoaded = false;
       const cachedUrl = urlCache[c.caseNumber];
@@ -938,10 +945,8 @@ async function scrapeMontgomeryCourts(options = {}) {
 
       // Prefer parcel-derived address (the property with the lien) over the
       // defendant's mailing address (which can be a different home entirely).
-      let parcelAddr = null;
-      if (c.parcelNumber) {
-        parcelAddr = await fetchParcelAddress(c.parcelNumber);
-      }
+      // The lookup was kicked off in parallel with the page load above.
+      const parcelAddr = await parcelPromise;
 
       if (parcelAddr && parcelAddr.street) {
         c.propertyAddress = parcelAddr.street;
