@@ -58,32 +58,44 @@ async function parseCSV(csvPath) {
   if (lines.length < 2) throw new Error('CSV empty');
 
   const header = parseCSVLine(lines[0]);
+  // Normalize headers so "Case Number", "case_number", "CaseNumber" all match.
+  const normHeaders = header.map(h => h.toLowerCase().replace(/[\s_\-#]+/g, ''));
   const col = {
-    caseNumber: header.findIndex(h => h.toLowerCase().includes('casenumber')),
-    commenced: header.findIndex(h => h.toLowerCase().includes('commenced')),
-    caseType: header.findIndex(h => h.toLowerCase().includes('casetype')),
-    parcelNumber: header.findIndex(h => h.toLowerCase().includes('parcel')),
-    plaintiff: header.findIndex(h => h.toLowerCase().includes('plaintiff')),
-    defendant: header.findIndex(h => h.toLowerCase().includes('defendant')),
-    judgement: header.findIndex(h => h.toLowerCase().includes('judgement')),
-    status: header.findIndex(h => h.toLowerCase().includes('status'))
+    caseNumber: normHeaders.findIndex(h => h.includes('casenumber') || h === 'case' || h === 'caseno' || h === 'caseid'),
+    commenced: normHeaders.findIndex(h => h.includes('commenced') || h.includes('filed') || h.includes('filing')),
+    caseType: normHeaders.findIndex(h => h.includes('casetype') || h === 'type'),
+    parcelNumber: normHeaders.findIndex(h => h.includes('parcel') || h === 'pin'),
+    plaintiff: normHeaders.findIndex(h => h.includes('plaintiff')),
+    defendant: normHeaders.findIndex(h => h.includes('defendant')),
+    judgement: normHeaders.findIndex(h => h.includes('judgement') || h.includes('judgment')),
+    status: normHeaders.findIndex(h => h.includes('status'))
   };
 
+  console.log(`   CSV headers: ${header.join(' | ')}`);
+  console.log(`   Column matches: caseNumber=${col.caseNumber} commenced=${col.commenced} caseType=${col.caseType} parcel=${col.parcelNumber} status=${col.status}`);
+
   const cases = [];
+  let nonEmptyParcels = 0, nonEmptyCaseTypes = 0;
   for (let i = 1; i < lines.length; i++) {
     const v = parseCSVLine(lines[i]);
     if (!v[col.caseNumber]) continue;
+    // Excel sometimes emits leading apostrophes or wraps numerics — strip the apostrophe.
+    const parcel = col.parcelNumber >= 0 ? String(v[col.parcelNumber] || '').replace(/^['"]/, '').trim() : '';
+    const caseType = col.caseType >= 0 ? (v[col.caseType] || '') : '';
+    if (parcel) nonEmptyParcels++;
+    if (caseType) nonEmptyCaseTypes++;
     cases.push({
       caseNumber: v[col.caseNumber],
       commencedDate: v[col.commenced] || '',
-      caseType: col.caseType >= 0 ? (v[col.caseType] || '') : '',
-      parcelNumber: col.parcelNumber >= 0 ? (v[col.parcelNumber] || '') : '',
+      caseType,
+      parcelNumber: parcel,
       plaintiff: v[col.plaintiff] || '',
       defendant: v[col.defendant] || '',
       hasJudgement: (v[col.judgement] || '').toLowerCase() === 'yes',
       status: v[col.status] || ''
     });
   }
+  console.log(`   Populated: ${nonEmptyParcels}/${cases.length} have parcel numbers, ${nonEmptyCaseTypes}/${cases.length} have case types`);
   return cases;
 }
 
@@ -1030,7 +1042,8 @@ async function scrapeMontgomeryCourts(options = {}) {
 
       const gradeEmoji = ls.grade === 'A' ? '🔥' : ls.grade === 'B' ? '⭐' : ls.grade === 'C' ? '📋' : '⚠️';
       const addrStr = c.propertyAddress ? `${c.propertyAddress}, ${c.propertyCity}` : 'No addr';
-      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}] [P:${ls.pillars.pressure} R:${ls.pillars.resistance} M:${ls.pillars.momentum} F:${ls.pillars.fatigue}] - ${addrStr}`);
+      const srcTag = c.addressSource ? ` [src:${c.addressSource}]` : '';
+      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}] [P:${ls.pillars.pressure} R:${ls.pillars.resistance} M:${ls.pillars.momentum} F:${ls.pillars.fatigue}] - ${addrStr}${srcTag}`);
 
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${(err.message || '').slice(0, 60)})`);
