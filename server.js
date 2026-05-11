@@ -731,12 +731,11 @@ app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
   const cases = pipeline.cases || [];
   const targets = cases.filter(c =>
     c.caseTypeKind === 'lien' &&
-    c.addressSource === 'defendant-fallback' &&
     c.parcelNumber
   );
 
   if (targets.length === 0) {
-    return res.json({ attempted: 0, recovered: 0, stillFailed: 0, message: 'No lien cases with defendant-fallback addresses found.' });
+    return res.json({ attempted: 0, recovered: 0, stillFailed: 0, message: 'No lien cases with a parcel number found.' });
   }
 
   const CONCURRENCY = 5;

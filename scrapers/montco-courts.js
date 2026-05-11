@@ -185,6 +185,29 @@ const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/
 const parcelAddressCache = new Map();
 let _parcelDebugRemaining = 8; // Log the first N lookups verbosely
 
+function buildPropertyLocationAddress(f) {
+  // LOC_* fields hold the actual property location.
+  // ADDR1/ADDR3 hold the OWNER mailing address, which is wrong whenever
+  // the owner doesn't live at the property (common for liens, rentals).
+  const streetName = (f.LOC_STR || '').trim();
+  if (!streetName) return '';
+  const num = (f.LOC_NO !== null && f.LOC_NO !== undefined && f.LOC_NO !== 0) ? String(f.LOC_NO) : '';
+  const parts = [
+    num,
+    (f.LOC_DIR || '').trim(),
+    streetName,
+    (f.LOC_SUF || '').trim(),
+    (f.LOC_SUF2 || '').trim()
+  ].filter(Boolean);
+  let street = parts.join(' ');
+  const unitDe = (f.LOC_UNITDE || '').trim();
+  const unitNo = (f.LOC_UNITNO || '').trim();
+  if (unitDe || unitNo) {
+    street += ' ' + [unitDe, unitNo].filter(Boolean).join(' ');
+  }
+  return street;
+}
+
 async function fetchParcelAddress(parcelRaw, options = {}) {
   const parcel = String(parcelRaw || '').replace(/\D/g, '');
   if (!parcel) return null;
@@ -192,7 +215,7 @@ async function fetchParcelAddress(parcelRaw, options = {}) {
 
   const params = new URLSearchParams({
     where: `PARCEL='${parcel}'`,
-    outFields: 'PARCEL,ADDR1,ADDR2,ADDR3,LOC_ZIP1_Z,OWN1,Muni_Name',
+    outFields: 'PARCEL,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,ADDR1,ADDR3,OWN1,Muni_Name',
     returnGeometry: 'false',
     f: 'json'
   });
@@ -208,20 +231,31 @@ async function fetchParcelAddress(parcelRaw, options = {}) {
       const data = await resp.json();
       debugFeatures = data?.features?.length ?? 0;
       const f = data?.features?.[0]?.attributes;
-      if (f && (f.ADDR1 || f.ADDR3)) {
-        // ADDR3 looks like "HATBORO PA 19040" — split out city + zip.
-        let city = '', zip = (f.LOC_ZIP1_Z || '').trim();
-        const m = (f.ADDR3 || '').match(/^(.+?)\s+PA\s+(\d{5})/i);
-        if (m) { city = m[1].trim(); zip = m[2]; }
-        info = {
-          street: (f.ADDR1 || '').trim(),
-          city,
-          state: 'PA',
-          zip,
-          owner: (f.OWN1 || '').trim(),
-          municipality: (f.Muni_Name || '').trim(),
-          parcel: f.PARCEL
-        };
+      if (f) {
+        const muni = (f.Muni_Name || '').trim();
+        // Strip municipal suffix for the city display ("Pottstown Borough" -> "Pottstown")
+        let city = muni.replace(/\s+(borough|township|city|town)\s*$/i, '').trim();
+        let zip = (f.LOC_ZIP1_Z || '').trim();
+        let street = buildPropertyLocationAddress(f);
+
+        // Fallback: if LOC_* fields are empty (rare), use owner mailing as last resort
+        if (!street && f.ADDR1) {
+          street = (f.ADDR1 || '').trim();
+          const m = (f.ADDR3 || '').match(/^(.+?)\s+PA\s+(\d{5})/i);
+          if (m) { if (!city) city = m[1].trim(); if (!zip) zip = m[2]; }
+        }
+
+        if (street) {
+          info = {
+            street,
+            city,
+            state: 'PA',
+            zip,
+            owner: (f.OWN1 || '').trim(),
+            municipality: muni,
+            parcel: f.PARCEL
+          };
+        }
       }
     }
   } catch (e) {

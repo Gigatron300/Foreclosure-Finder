@@ -1064,7 +1064,7 @@
             <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
             <button class="btn btn-outline" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="border-color: var(--benoro-danger); color: var(--benoro-danger); padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" disabled style="border-color: var(--benoro-danger); color: var(--benoro-danger); opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
-            <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Retry the parcel API for lien cases whose original lookup failed (defendant-fallback)">Re-scan Liens</button>
+            <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
             <button class="btn btn-outline" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel" style="border-color: #f59e0b; color: #f59e0b;">Hide Unreliable</button>
