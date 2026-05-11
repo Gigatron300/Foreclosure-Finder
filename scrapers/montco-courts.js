@@ -76,14 +76,17 @@ async function parseCSV(csvPath) {
 
   const cases = [];
   let nonEmptyParcels = 0, nonEmptyCaseTypes = 0;
+  const parcelSamples = [];
   for (let i = 1; i < lines.length; i++) {
     const v = parseCSVLine(lines[i]);
     if (!v[col.caseNumber]) continue;
+    const rawParcel = col.parcelNumber >= 0 ? (v[col.parcelNumber] || '') : '';
     // Excel sometimes emits leading apostrophes or wraps numerics — strip the apostrophe.
-    const parcel = col.parcelNumber >= 0 ? String(v[col.parcelNumber] || '').replace(/^['"]/, '').trim() : '';
+    const parcel = String(rawParcel).replace(/^['"]/, '').trim();
     const caseType = col.caseType >= 0 ? (v[col.caseType] || '') : '';
     if (parcel) nonEmptyParcels++;
     if (caseType) nonEmptyCaseTypes++;
+    if (parcel && parcelSamples.length < 5) parcelSamples.push(JSON.stringify(rawParcel));
     cases.push({
       caseNumber: v[col.caseNumber],
       commencedDate: v[col.commenced] || '',
@@ -96,6 +99,7 @@ async function parseCSV(csvPath) {
     });
   }
   console.log(`   Populated: ${nonEmptyParcels}/${cases.length} have parcel numbers, ${nonEmptyCaseTypes}/${cases.length} have case types`);
+  if (parcelSamples.length) console.log(`   Parcel samples: ${parcelSamples.join(', ')}`);
   return cases;
 }
 
@@ -179,6 +183,7 @@ function parseDate(dateStr) {
 // PARCEL is the 12-digit parcel ID (we strip dashes / non-digits).
 const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/pasda/MontgomeryCounty/MapServer/14/query';
 const parcelAddressCache = new Map();
+let _parcelDebugRemaining = 8; // Log the first N lookups verbosely
 
 async function fetchParcelAddress(parcelRaw) {
   const parcel = String(parcelRaw || '').replace(/\D/g, '');
@@ -194,10 +199,14 @@ async function fetchParcelAddress(parcelRaw) {
   const url = `${PARCEL_API_BASE}?${params.toString()}`;
 
   let info = null;
+  let debugStatus = '';
+  let debugFeatures = -1;
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    debugStatus = `HTTP ${resp.status}`;
     if (resp.ok) {
       const data = await resp.json();
+      debugFeatures = data?.features?.length ?? 0;
       const f = data?.features?.[0]?.attributes;
       if (f && (f.ADDR1 || f.ADDR3)) {
         // ADDR3 looks like "HATBORO PA 19040" — split out city + zip.
@@ -216,10 +225,19 @@ async function fetchParcelAddress(parcelRaw) {
       }
     }
   } catch (e) {
+    debugStatus = `ERROR: ${(e.message || '').slice(0, 80)}`;
     // Network/timeout — fall back to defendant address
   }
 
   parcelAddressCache.set(parcel, info);
+
+  if (_parcelDebugRemaining > 0) {
+    _parcelDebugRemaining--;
+    const rawDisplay = JSON.stringify(String(parcelRaw)); // shows quotes / hidden chars
+    const matched = info ? `MATCH "${info.street}, ${info.city}"` : 'NO MATCH';
+    console.log(`   [parcel-debug] raw=${rawDisplay} norm="${parcel}" (${parcel.length}d) ${debugStatus} features=${debugFeatures} -> ${matched}`);
+  }
+
   return info;
 }
 
