@@ -1753,6 +1753,12 @@
                 // Group by parcel number after sorting (preserves sort order — primary of each group is the highest-scoring member)
                 const groupedCases = groupCasesByParcel(cases);
 
+                // Debt sort needs to compare stack totals, not individual judgments —
+                // 18 × $1k liens on one parcel should outrank a single $17k lien.
+                if (sortBy === 'debtDesc') {
+                    groupedCases.sort((a, b) => (b._stackTotalAmount || 0) - (a._stackTotalAmount || 0));
+                }
+
                 // Update stats (before filtering for sweet spot only)
                 const allCases = data.cases || [];
                 document.getElementById('totalCases').textContent = `${groupedCases.length} (${cases.length} cases)`;
