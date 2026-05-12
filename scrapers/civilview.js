@@ -226,27 +226,34 @@ function parseAddress(fullAddress, defaultState = 'NJ') {
   return { address, city, state, zipCode };
 }
 
+// Each call returns a fresh BrowserContext + Page with isolated cookies.
+// We rebuild this on the fly when CivilView flags a session (see recovery
+// logic in scrapeCounty) — re-navigating within the same page keeps the
+// same cookie jar, so the flag persists and detail pages stay empty.
+async function createScraperContext(browser) {
+  const context = await browser.createBrowserContext();
+  const page = await context.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await page.setViewport({ width: 1920, height: 1080 });
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const type = req.resourceType();
+    if (type === 'image' || type === 'font' || type === 'media') {
+      req.abort();
+    } else {
+      req.continue();
+    }
+  });
+  return { context, page };
+}
+
 // Main scraper function for a single county
 async function scrapeCounty(browser, county) {
   console.log(`\n🔍 Scraping ${county.name} County, ${county.state}...`);
   const properties = [];
-  const page = await browser.newPage();
-  
-  try {
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    await page.setViewport({ width: 1920, height: 1080 });
+  let { context, page } = await createScraperContext(browser);
 
-    // Block images, fonts, and stylesheets to reduce memory usage
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const type = req.resourceType();
-      if (type === 'image' || type === 'font' || type === 'media') {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-    
+  try {
     // Load search page
     console.log('  Loading listings...');
     await page.goto(county.searchUrl, { waitUntil: 'networkidle2', timeout: 90000 });
@@ -309,10 +316,13 @@ async function scrapeCounty(browser, county) {
     });
     
     console.log(`  Found ${listings.length} properties`);
-    
+
+    let consecutiveEmpty = 0;
+    let aborted = false;
+
     // Scrape each detail page
     for (let i = 0; i < listings.length; i++) {
-      if (i > 0 && i % CONFIG.batchSize === 0) {
+      if (i > 0 && i % CONFIG.batchSize === 0 && !aborted) {
         console.log(`  ⏸ Batch pause...`);
         await delay(CONFIG.batchPause);
       }
@@ -320,27 +330,49 @@ async function scrapeCounty(browser, county) {
       const listing = listings[i];
 
       try {
+        // Once a county is aborted we stop hitting detail pages but still
+        // record fallback rows so scraper.js's prior-run merge can carry
+        // forward yesterday's debt / parcel / etc. for those listings.
+        if (aborted) throw new Error('county aborted; skipping detail fetch');
+
         await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
         await delay(500);
 
         let data = await page.evaluate(extractDetailDataInPage);
 
-        // CivilView occasionally bounces detail requests to the index page
-        // (session expired / rate limited). Page nav succeeds but body has no
-        // detail content, so every field comes back empty and debt = 0.
-        // Re-establish the session by hitting the search URL, then retry once.
+        // CivilView bounces detail requests to the index page once a session
+        // is flagged (session expired / rate limited). Re-navigating within
+        // the same page does nothing because the flag is on the cookies —
+        // we must spin up a fresh BrowserContext to get a clean jar. Escalate
+        // the wait each time, and bail on the county after 4 in a row so we
+        // don't burn 100+ requests against a hard block (Camden 2026-05-12).
         if (isDetailPageEmpty(data)) {
-          console.log(`    ⚠️  Detail page empty for ${listing.sheriff || i + 1} — refreshing session`);
-          await page.goto(county.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-          await delay(2000);
+          consecutiveEmpty++;
+          let backoffSec;
+          if (consecutiveEmpty === 1) backoffSec = 30;
+          else if (consecutiveEmpty === 2) backoffSec = 90;
+          else if (consecutiveEmpty === 3) backoffSec = 300;
+          else {
+            console.log(`  🛑 ${consecutiveEmpty} consecutive empty pages — aborting ${county.name}, remaining listings will fall back to listing-page data`);
+            aborted = true;
+            throw new Error('CivilView blocking detail requests; giving up on county');
+          }
+
+          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — fresh context, waiting ${backoffSec}s`);
+          try { await context.close(); } catch (e) { /* swallow */ }
+          ({ context, page } = await createScraperContext(browser));
+          await delay(backoffSec * 1000);
+
           await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
           await delay(500);
           data = await page.evaluate(extractDetailDataInPage);
+
           if (isDetailPageEmpty(data)) {
-            throw new Error('Detail page still empty after session refresh');
+            throw new Error('Detail page still empty after fresh session');
           }
         }
 
+        consecutiveEmpty = 0;
         const addr = parseAddress(data.address || listing.address, county.state);
         
         properties.push({
@@ -403,9 +435,9 @@ async function scrapeCounty(browser, county) {
   } catch (error) {
     console.error(`  Error: ${error.message}`);
   } finally {
-    await page.close();
+    try { await context.close(); } catch (e) { /* swallow */ }
   }
-  
+
   console.log(`  ✅ ${county.name}: ${properties.length} properties`);
   return properties;
 }
