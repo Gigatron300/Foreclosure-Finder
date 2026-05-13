@@ -226,13 +226,12 @@ function parseAddress(fullAddress, defaultState = 'NJ') {
   return { address, city, state, zipCode };
 }
 
-// Each call returns a fresh BrowserContext + Page with isolated cookies.
-// We rebuild this on the fly when CivilView flags a session (see recovery
-// logic in scrapeCounty) — re-navigating within the same page keeps the
-// same cookie jar, so the flag persists and detail pages stay empty.
-async function createScraperContext(browser) {
-  const context = await browser.createBrowserContext();
-  const page = await context.newPage();
+// Creates a fresh Page in the default browser context. We deliberately avoid
+// browser.createBrowserContext() because Render runs Chromium with
+// --single-process (memory cap), and creating contexts under that flag
+// crashes Chromium immediately with "Target closed".
+async function createScraperPage(browser) {
+  const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
   await page.setViewport({ width: 1920, height: 1080 });
   await page.setRequestInterception(true);
@@ -244,14 +243,26 @@ async function createScraperContext(browser) {
       req.continue();
     }
   });
-  return { context, page };
+  return page;
+}
+
+// Wipes the browser's cookie jar via CDP. Used in the recovery path to
+// drop whatever session token CivilView flagged, without needing a new
+// browser context (which --single-process forbids).
+async function clearBrowserCookies(page) {
+  const client = await page.target().createCDPSession();
+  try {
+    await client.send('Network.clearBrowserCookies');
+  } finally {
+    await client.detach().catch(() => {});
+  }
 }
 
 // Main scraper function for a single county
 async function scrapeCounty(browser, county) {
   console.log(`\n🔍 Scraping ${county.name} County, ${county.state}...`);
   const properties = [];
-  let { context, page } = await createScraperContext(browser);
+  let page = await createScraperPage(browser);
 
   try {
     // Load search page
@@ -343,9 +354,10 @@ async function scrapeCounty(browser, county) {
         // CivilView bounces detail requests to the index page once a session
         // is flagged (session expired / rate limited). Re-navigating within
         // the same page does nothing because the flag is on the cookies —
-        // we must spin up a fresh BrowserContext to get a clean jar. Escalate
-        // the wait each time, and bail on the county after 4 in a row so we
-        // don't burn 100+ requests against a hard block (Camden 2026-05-12).
+        // recreate the page and wipe the cookie jar to get a clean session.
+        // Escalate the wait each time, and bail on the county after 4 in a
+        // row so we don't burn 100+ requests against a hard block
+        // (Camden 2026-05-12).
         if (isDetailPageEmpty(data)) {
           consecutiveEmpty++;
           let backoffSec;
@@ -358,9 +370,10 @@ async function scrapeCounty(browser, county) {
             throw new Error('CivilView blocking detail requests; giving up on county');
           }
 
-          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — fresh context, waiting ${backoffSec}s`);
-          try { await context.close(); } catch (e) { /* swallow */ }
-          ({ context, page } = await createScraperContext(browser));
+          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — fresh page + cleared cookies, waiting ${backoffSec}s`);
+          try { await page.close(); } catch (e) { /* swallow */ }
+          page = await createScraperPage(browser);
+          await clearBrowserCookies(page);
           await delay(backoffSec * 1000);
 
           await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
@@ -435,7 +448,7 @@ async function scrapeCounty(browser, county) {
   } catch (error) {
     console.error(`  Error: ${error.message}`);
   } finally {
-    try { await context.close(); } catch (e) { /* swallow */ }
+    try { await page.close(); } catch (e) { /* swallow */ }
   }
 
   console.log(`  ✅ ${county.name}: ${properties.length} properties`);
