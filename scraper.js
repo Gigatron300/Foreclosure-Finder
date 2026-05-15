@@ -1,8 +1,16 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs').promises;
 const path = require('path');
 const CONFIG = require('./config');
 const { scrapeCounty } = require('./scrapers/civilview');
+
+// Camden's CivilView appears to fingerprint headless Chrome — fresh cookies
+// + 5min cooldown didn't unstick the detail-page block, but the same code
+// path works for Montgomery on the same IP. Stealth masks the usual
+// headless tells (navigator.webdriver, WebGL vendor, missing plugins, etc.)
+// to see whether the wall is fingerprint-based rather than IP rate limit.
+puppeteer.use(StealthPlugin());
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
