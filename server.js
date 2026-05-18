@@ -1743,33 +1743,36 @@ function scheduleNightlyPipelineScrape() {
 }
 
 function scheduleNightlySheriffScrape() {
-  const SCRAPE_HOUR = 2;  // 2 AM
+  // Camden's CivilView throttles overnight traffic — 2 AM ET cron consistently
+  // walls at ~50–65 detail pages while manual mid-day scrapes complete all 200+.
+  // Run at 8 AM ET instead, well past the overnight window where Camden's
+  // WAF appears to clamp down.
+  const SCRAPE_HOUR = 8;
   const TIMEZONE_OFFSET = -5;  // Eastern Time (adjust for daylight saving if needed: -4 for EDT, -5 for EST)
-  
+
   function getNextScrapeTime() {
     const now = new Date();
-    const targetUTCHour = SCRAPE_HOUR - TIMEZONE_OFFSET;  // Convert 2 AM ET to UTC
-    
+    const targetUTCHour = SCRAPE_HOUR - TIMEZONE_OFFSET;
+
     let next = new Date(now);
     next.setUTCHours(targetUTCHour, 0, 0, 0);
-    
-    // If we've passed 2 AM today, schedule for tomorrow
+
     if (now >= next) {
       next.setDate(next.getDate() + 1);
     }
-    
+
     return next;
   }
-  
+
   function scheduleNext() {
     const nextScrape = getNextScrapeTime();
     const msUntilScrape = nextScrape.getTime() - Date.now();
-    
+
     console.log(`📅 Next scheduled sheriff scrape: ${nextScrape.toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`);
     console.log(`   (in ${Math.round(msUntilScrape / 1000 / 60 / 60 * 10) / 10} hours)`);
-    
+
     setTimeout(async () => {
-      console.log(`\n⏰ Starting scheduled 2 AM sheriff scrape...`);
+      console.log(`\n⏰ Starting scheduled ${SCRAPE_HOUR} ET sheriff scrape...`);
       
       // Check if scrape is already in progress
       if (isScrapingInProgress) {
