@@ -246,16 +246,17 @@ async function createScraperPage(browser) {
   return page;
 }
 
-// Wipes the browser's cookie jar via CDP. Used in the recovery path to
-// drop whatever session token CivilView flagged, without needing a new
-// browser context (which --single-process forbids).
-async function clearBrowserCookies(page) {
-  const client = await page.target().createCDPSession();
-  try {
-    await client.send('Network.clearBrowserCookies');
-  } finally {
-    await client.detach().catch(() => {});
-  }
+// Re-establish the "browsing Camden" session by re-hitting the search URL.
+// CivilView's detail URLs are session-dependent — without a session that
+// previously hit /Sales/SalesSearch?countyId=N, the detail URL silently
+// serves the county directory landing page instead of property data.
+// (Confirmed 2026-05-19 by hitting the detail URL fresh: returns the
+// directory page, not an error.) Mirrors the wait sequence we use on
+// initial load so the session is fully bound before we try details again.
+async function reestablishCountySession(page, county) {
+  await page.goto(county.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+  await page.waitForSelector('a[href*="SaleDetails"]', { timeout: 30000 });
+  await delay(3000);
 }
 
 // Main scraper function for a single county
@@ -351,29 +352,30 @@ async function scrapeCounty(browser, county) {
 
         let data = await page.evaluate(extractDetailDataInPage);
 
-        // CivilView bounces detail requests to the index page once a session
-        // is flagged (session expired / rate limited). Re-navigating within
-        // the same page does nothing because the flag is on the cookies —
-        // recreate the page and wipe the cookie jar to get a clean session.
-        // Escalate the wait each time, and bail on the county after 4 in a
-        // row so we don't burn 100+ requests against a hard block
-        // (Camden 2026-05-12).
+        // CivilView's detail URL is session-dependent: if the session hasn't
+        // recently hit /Sales/SalesSearch?countyId=N, the detail URL serves
+        // the county directory landing page (which has zero .sale-detail-item
+        // divs, so isDetailPageEmpty fires). Recovery is to re-hit the search
+        // URL ON THE SAME PAGE to refresh the session, then retry the detail
+        // URL. Escalating waits give the server breathing room; abort after 4
+        // in a row so we don't burn 100+ requests against a stuck session.
         if (isDetailPageEmpty(data)) {
           consecutiveEmpty++;
+          const landedUrl = page.url();
+          const landedTitle = await page.title().catch(() => '');
+
           let backoffSec;
-          if (consecutiveEmpty === 1) backoffSec = 30;
-          else if (consecutiveEmpty === 2) backoffSec = 90;
-          else if (consecutiveEmpty === 3) backoffSec = 300;
+          if (consecutiveEmpty === 1) backoffSec = 10;
+          else if (consecutiveEmpty === 2) backoffSec = 30;
+          else if (consecutiveEmpty === 3) backoffSec = 90;
           else {
             console.log(`  🛑 ${consecutiveEmpty} consecutive empty pages — aborting ${county.name}, remaining listings will fall back to listing-page data`);
             aborted = true;
             throw new Error('CivilView blocking detail requests; giving up on county');
           }
 
-          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — fresh page + cleared cookies, waiting ${backoffSec}s`);
-          try { await page.close(); } catch (e) { /* swallow */ }
-          page = await createScraperPage(browser);
-          await clearBrowserCookies(page);
+          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — landed at ${landedUrl} (title: "${landedTitle}"), re-establishing session and waiting ${backoffSec}s`);
+          await reestablishCountySession(page, county);
           await delay(backoffSec * 1000);
 
           await page.goto(listing.url, { waitUntil: 'networkidle2', timeout: CONFIG.pageTimeout });
@@ -381,7 +383,7 @@ async function scrapeCounty(browser, county) {
           data = await page.evaluate(extractDetailDataInPage);
 
           if (isDetailPageEmpty(data)) {
-            throw new Error('Detail page still empty after fresh session');
+            throw new Error('Detail page still empty after session refresh');
           }
         }
 
