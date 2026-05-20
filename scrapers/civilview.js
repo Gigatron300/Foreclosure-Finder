@@ -246,13 +246,25 @@ async function createScraperPage(browser) {
   return page;
 }
 
-// Re-establish the "browsing Camden" session by re-hitting the search URL.
-// CivilView's detail URLs are session-dependent — without a session that
-// previously hit /Sales/SalesSearch?countyId=N, the detail URL silently
-// serves the county directory landing page instead of property data.
-// (Confirmed 2026-05-19 by hitting the detail URL fresh: returns the
-// directory page, not an error.) Mirrors the wait sequence we use on
-// initial load so the session is fully bound before we try details again.
+// Wipe the cookie jar via CDP. Used in the recovery path to force Camden
+// to issue a new session ID. Re-hitting the search URL alone keeps the
+// same session, which stays in the bad bucket on the server.
+async function clearBrowserCookies(page) {
+  const client = await page.target().createCDPSession();
+  try {
+    await client.send('Network.clearBrowserCookies');
+  } finally {
+    await client.detach().catch(() => {});
+  }
+}
+
+// Re-bind the (post-cookie-wipe) session to the county by hitting the
+// search URL. CivilView's detail URLs need both a valid session ID AND a
+// session that previously hit /Sales/SalesSearch?countyId=N — without
+// the second, the server's detail handler throws and ASP.NET redirects
+// us to /Home/Index?aspxerrorpath=/Sales/SaleDetails. Mirrors the wait
+// sequence we use on initial load so the session is fully bound before
+// we try details again.
 async function reestablishCountySession(page, county) {
   await page.goto(county.searchUrl, { waitUntil: 'networkidle2', timeout: 60000 });
   await page.waitForSelector('a[href*="SaleDetails"]', { timeout: 30000 });
@@ -352,13 +364,15 @@ async function scrapeCounty(browser, county) {
 
         let data = await page.evaluate(extractDetailDataInPage);
 
-        // CivilView's detail URL is session-dependent: if the session hasn't
-        // recently hit /Sales/SalesSearch?countyId=N, the detail URL serves
-        // the county directory landing page (which has zero .sale-detail-item
-        // divs, so isDetailPageEmpty fires). Recovery is to re-hit the search
-        // URL ON THE SAME PAGE to refresh the session, then retry the detail
-        // URL. Escalating waits give the server breathing room; abort after 4
-        // in a row so we don't burn 100+ requests against a stuck session.
+        // CivilView's detail handler throws server-side after some N requests
+        // in the same session — ASP.NET redirects us to
+        // /Home/Index?aspxerrorpath=/Sales/SaleDetails (no .sale-detail-item
+        // divs, so isDetailPageEmpty fires). Re-hitting search on the same
+        // session doesn't recover because the session ID is still in the bad
+        // bucket on the server. Recovery: wipe cookies (new session ID),
+        // re-hit search to bind the new session to Camden, then retry detail.
+        // If the budget is per-IP rather than per-session this won't help and
+        // we'll wall immediately again — diagnostics will tell us.
         if (isDetailPageEmpty(data)) {
           consecutiveEmpty++;
           const landedUrl = page.url();
@@ -374,7 +388,8 @@ async function scrapeCounty(browser, county) {
             throw new Error('CivilView blocking detail requests; giving up on county');
           }
 
-          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — landed at ${landedUrl} (title: "${landedTitle}"), re-establishing session and waiting ${backoffSec}s`);
+          console.log(`    ⚠️  Empty detail #${consecutiveEmpty} for ${listing.sheriff || i + 1} — landed at ${landedUrl} (title: "${landedTitle}"), wiping cookies + new session, waiting ${backoffSec}s`);
+          await clearBrowserCookies(page);
           await reestablishCountySession(page, county);
           await delay(backoffSec * 1000);
 
