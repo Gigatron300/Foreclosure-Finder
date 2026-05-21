@@ -1743,25 +1743,32 @@ function scheduleNightlyPipelineScrape() {
 }
 
 function scheduleNightlySheriffScrape() {
-  // Camden's CivilView throttles overnight traffic — 2 AM ET cron consistently
-  // walls at ~50–65 detail pages while manual mid-day scrapes complete all 200+.
-  // Run at 8 AM ET instead, well past the overnight window where Camden's
-  // WAF appears to clamp down.
-  const SCRAPE_HOUR = 8;
-  const TIMEZONE_OFFSET = -5;  // Eastern Time (adjust for daylight saving if needed: -4 for EDT, -5 for EST)
+  // Camden's CivilView appears to throttle our Render IP outside business
+  // hours — overnight (2 AM ET) and early morning (9 AM EDT) crons wall
+  // at #15–60 with ASP.NET errors, while manual mid-day clicks complete
+  // all 200+. Cookie wipes + new sessions don't help (proven 2026-05-21),
+  // so the budget is per-IP and time-of-day-sensitive. Run at 1 PM ET,
+  // squarely in the window we've repeatedly confirmed works.
+  const SCRAPE_HOUR = 13;
 
+  // Compute the next instance of SCRAPE_HOUR in America/New_York,
+  // returning a UTC Date. Handles DST automatically by deriving the
+  // current NY local time from Intl rather than a hard-coded offset.
   function getNextScrapeTime() {
     const now = new Date();
-    const targetUTCHour = SCRAPE_HOUR - TIMEZONE_OFFSET;
-
-    let next = new Date(now);
-    next.setUTCHours(targetUTCHour, 0, 0, 0);
-
-    if (now >= next) {
-      next.setDate(next.getDate() + 1);
-    }
-
-    return next;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(now);
+    const part = (type) => parseInt(parts.find(p => p.type === type).value, 10);
+    const nyNowSec = part('hour') * 3600 + part('minute') * 60 + part('second');
+    const targetSec = SCRAPE_HOUR * 3600;
+    let waitSec = targetSec - nyNowSec;
+    if (waitSec <= 0) waitSec += 24 * 3600;
+    return new Date(now.getTime() + waitSec * 1000);
   }
 
   function scheduleNext() {
@@ -1772,7 +1779,9 @@ function scheduleNightlySheriffScrape() {
     console.log(`   (in ${Math.round(msUntilScrape / 1000 / 60 / 60 * 10) / 10} hours)`);
 
     setTimeout(async () => {
-      console.log(`\n⏰ Starting scheduled ${SCRAPE_HOUR} ET sheriff scrape...`);
+      const hour12 = ((SCRAPE_HOUR + 11) % 12) + 1;
+      const ampm = SCRAPE_HOUR < 12 ? 'AM' : 'PM';
+      console.log(`\n⏰ Starting scheduled ${hour12} ${ampm} ET sheriff scrape...`);
       
       // Check if scrape is already in progress
       if (isScrapingInProgress) {
