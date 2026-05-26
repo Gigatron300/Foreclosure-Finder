@@ -543,6 +543,53 @@ app.get('/api/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isScrapingInProgress, lastStatus: lastScrapeStatus });
 });
 
+// One-shot seed endpoint. Bootstrap path for Camden — its CivilView walls
+// our Render IP at 24–120 detail fetches/day, but a residential IP can hit
+// all 206 in 30s. The browser fetches + parses missing details from
+// salesweb.civilview.com, then POSTs them here so properties.json starts
+// out fully enriched. From then on, the cron's skip-known logic keeps each
+// day's fetch count well under Camden's per-IP budget.
+//
+// Updates only — does not insert new listings (that's the scraper's job).
+// Only touches detail-page fields; preserves anything else on the row.
+const DETAIL_FIELDS = [
+  'sheriffNumber', 'courtCase', 'salesDate', 'plaintiff', 'defendant',
+  'address', 'city', 'state', 'zipCode', 'debtAmount', 'attorney',
+  'attorneyPhone', 'parcelNumber', 'description', 'status', 'statusHistory',
+  'township', 'detailUrl'
+];
+app.post('/api/sheriff/upload-details', checkAuth, async (req, res) => {
+  try {
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates : null;
+    if (!updates) return res.status(400).json({ error: 'Body must be { updates: [...] }' });
+
+    const raw = await fs.readFile(DATA_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    const byId = new Map((data.properties || []).map(p => [p.propertyId, p]));
+
+    let updated = 0;
+    let notFound = 0;
+    for (const u of updates) {
+      if (!u.propertyId) continue;
+      const target = byId.get(u.propertyId);
+      if (!target) { notFound++; continue; }
+      for (const f of DETAIL_FIELDS) {
+        if (u[f] === undefined) continue;
+        if (typeof u[f] === 'string' && u[f].trim() === '') continue;
+        target[f] = u[f];
+      }
+      updated++;
+    }
+
+    data.properties.sort((a, b) => (a.debtAmount || 0) - (b.debtAmount || 0));
+    data.lastUpdated = new Date().toISOString();
+    await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2));
+    res.json({ updated, notFound, total: data.properties.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/export/csv', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
@@ -1743,13 +1790,12 @@ function scheduleNightlyPipelineScrape() {
 }
 
 function scheduleNightlySheriffScrape() {
-  // Camden's CivilView appears to throttle our Render IP outside business
-  // hours — overnight (2 AM ET) and early morning (9 AM EDT) crons wall
-  // at #15–60 with ASP.NET errors, while manual mid-day clicks complete
-  // all 200+. Cookie wipes + new sessions don't help (proven 2026-05-21),
-  // so the budget is per-IP and time-of-day-sensitive. Run at 1 PM ET,
-  // squarely in the window we've repeatedly confirmed works.
-  const SCRAPE_HOUR = 13;
+  // Camden's CivilView blocks the Render datacenter IP after 24–120 detail
+  // fetches/day (per-IP, confirmed 2026-05-26 by a 206/206 control run from
+  // a residential IP). Mitigation lives in scrapers/civilview.js: Camden
+  // skips detail fetches for listings already enriched in prior runs, so
+  // each cron only fetches ~0–15 new listings/day. Cron runs at 5 AM ET.
+  const SCRAPE_HOUR = 5;
 
   // Compute the next instance of SCRAPE_HOUR in America/New_York,
   // returning a UTC Date. Handles DST automatically by deriving the

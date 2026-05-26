@@ -271,8 +271,35 @@ async function reestablishCountySession(page, county) {
   await delay(3000);
 }
 
+function buildFallbackProperty(listing, county, i) {
+  const addr = parseAddress(listing.address, county.state);
+  return {
+    source: 'CivilView',
+    propertyId: `CV-${county.name}-${listing.sheriff || i}`,
+    sheriffNumber: listing.sheriff,
+    courtCase: '',
+    salesDate: listing.salesDate,
+    plaintiff: listing.plaintiff,
+    defendant: listing.defendant,
+    address: addr.address || listing.address,
+    city: addr.city,
+    state: addr.state,
+    zipCode: addr.zipCode,
+    debtAmount: 0,
+    attorney: '',
+    attorneyPhone: '',
+    parcelNumber: '',
+    description: '',
+    status: 'Unknown',
+    statusHistory: [],
+    county: county.name,
+    township: listing.township || addr.city,
+    detailUrl: listing.url
+  };
+}
+
 // Main scraper function for a single county
-async function scrapeCounty(browser, county) {
+async function scrapeCounty(browser, county, { existingPropertyIds = new Set() } = {}) {
   console.log(`\n🔍 Scraping ${county.name} County, ${county.state}...`);
   const properties = [];
   let page = await createScraperPage(browser);
@@ -343,15 +370,29 @@ async function scrapeCounty(browser, county) {
 
     let consecutiveEmpty = 0;
     let aborted = false;
+    let detailFetchCount = 0;
+    let skippedCount = 0;
 
     // Scrape each detail page
     for (let i = 0; i < listings.length; i++) {
-      if (i > 0 && i % CONFIG.batchSize === 0 && !aborted) {
+      const listing = listings[i];
+
+      // Skip detail fetches for listings we already have data for (Camden
+      // only — see config.js). The merge in scraper.js restores the prior
+      // detail-page fields onto the fallback row we push here, so the user
+      // sees no difference except on listings new to today's listing page.
+      const expectedPropertyId = `CV-${county.name}-${listing.sheriff || i}`;
+      if (county.skipKnownDetailFetches && existingPropertyIds.has(expectedPropertyId)) {
+        properties.push(buildFallbackProperty(listing, county, i));
+        skippedCount++;
+        continue;
+      }
+
+      if (detailFetchCount > 0 && detailFetchCount % CONFIG.batchSize === 0 && !aborted) {
         console.log(`  ⏸ Batch pause...`);
         await delay(CONFIG.batchPause);
       }
-
-      const listing = listings[i];
+      detailFetchCount++;
 
       try {
         // Once a county is aborted we stop hitting detail pages but still
@@ -433,35 +474,15 @@ async function scrapeCounty(browser, county) {
         console.log(`  ${i + 1}/${listings.length} ✓ ${addr.address || 'Property'} - ${debt > 0 ? '$' + debt.toLocaleString() : 'N/A'}`);
         
       } catch (err) {
-        // Use listing data as fallback
-        const addr = parseAddress(listing.address, county.state);
-        properties.push({
-          source: 'CivilView',
-          propertyId: `CV-${county.name}-${listing.sheriff || i}`,
-          sheriffNumber: listing.sheriff,
-          courtCase: '',
-          salesDate: listing.salesDate,
-          plaintiff: listing.plaintiff,
-          defendant: listing.defendant,
-          address: addr.address || listing.address,
-          city: addr.city,
-          state: addr.state,
-          zipCode: addr.zipCode,
-          debtAmount: 0,
-          attorney: '',
-          attorneyPhone: '',
-          parcelNumber: '',
-          description: '',
-          status: 'Unknown',
-          statusHistory: [],
-          county: county.name,
-          township: listing.township || addr.city,
-          detailUrl: listing.url
-        });
-        console.log(`  ${i + 1}/${listings.length} ~ ${addr.address || listing.sheriff} (fallback)`);
+        const fallback = buildFallbackProperty(listing, county, i);
+        properties.push(fallback);
+        console.log(`  ${i + 1}/${listings.length} ~ ${fallback.address || listing.sheriff} (fallback)`);
       }
     }
-    
+
+    if (skippedCount > 0) {
+      console.log(`  ⏭  Skipped ${skippedCount} detail fetches for listings already in prior run (under-budget mode)`);
+    }
   } catch (error) {
     console.error(`  Error: ${error.message}`);
   } finally {

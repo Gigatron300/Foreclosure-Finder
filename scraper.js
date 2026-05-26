@@ -50,32 +50,42 @@ async function runScraper() {
   
   let allProperties = [];
   const sourceCounts = {};
-  
+
+  // Load prior run up front so we can both (a) tell counties which listings
+  // they already have detail data for (Camden skips those to stay under its
+  // per-IP daily budget), and (b) restore prior detail-page fields after the
+  // scrape if a listing fell back this time.
+  const outputPath = path.join(CONFIG.outputDir, CONFIG.outputFile);
+  const existingByPropertyId = new Map();
+  try {
+    const prev = JSON.parse(await fs.readFile(outputPath, 'utf8'));
+    for (const p of (prev.properties || [])) {
+      if (p.propertyId) existingByPropertyId.set(p.propertyId, p);
+    }
+  } catch (e) { /* no previous file — fresh run */ }
+
   try {
     for (let i = 0; i < CONFIG.counties.length; i++) {
       const county = CONFIG.counties[i];
-      
+
       if (i > 0) {
         console.log(`\n⏸ Pausing ${CONFIG.countyPause / 1000}s before next county...`);
         await delay(CONFIG.countyPause);
       }
-      
-      const properties = await scrapeCounty(browser, county);
+
+      // Only skip detail fetches for listings whose prior record was actually
+      // enriched. A listing that landed as a fallback yesterday (status
+      // 'Unknown', no debt) gets retried today — otherwise it'd stay
+      // un-enriched forever.
+      const existingPropertyIds = new Set(
+        [...existingByPropertyId.entries()]
+          .filter(([id, p]) => id.startsWith(`CV-${county.name}-`) && p.status !== 'Unknown' && p.debtAmount > 0)
+          .map(([id]) => id)
+      );
+      const properties = await scrapeCounty(browser, county, { existingPropertyIds });
       allProperties = allProperties.concat(properties);
       sourceCounts[county.name] = properties.length;
     }
-    
-    const outputPath = path.join(CONFIG.outputDir, CONFIG.outputFile);
-
-    // Merge with previous run so a transient failure (CivilView timeout, parse miss)
-    // can't blank out a known-good debt amount or other detail-page fields.
-    let existingByPropertyId = new Map();
-    try {
-      const prev = JSON.parse(await fs.readFile(outputPath, 'utf8'));
-      for (const p of (prev.properties || [])) {
-        if (p.propertyId) existingByPropertyId.set(p.propertyId, p);
-      }
-    } catch (e) { /* no previous file — fresh run */ }
 
     let preservedCount = 0;
     for (const prop of allProperties) {
