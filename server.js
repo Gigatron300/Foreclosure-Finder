@@ -453,7 +453,11 @@ app.get('/api/pipeline/csv-status', checkAuth, async (req, res) => {
 
 // ============== PROPERTIES API ==============
 
-app.get('/api/properties', checkAuth, async (req, res) => {
+app.options('/api/properties', cors());
+app.get('/api/properties', cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'X-Auth-Token']
+}), checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
@@ -558,7 +562,11 @@ const DETAIL_FIELDS = [
   'attorneyPhone', 'parcelNumber', 'description', 'status', 'statusHistory',
   'township', 'detailUrl'
 ];
-app.post('/api/sheriff/upload-details', checkAuth, async (req, res) => {
+app.options('/api/sheriff/upload-details', cors());
+app.post('/api/sheriff/upload-details', cors({
+  origin: '*',
+  allowedHeaders: ['Content-Type', 'X-Auth-Token']
+}), checkAuth, async (req, res) => {
   try {
     const updates = Array.isArray(req.body?.updates) ? req.body.updates : null;
     if (!updates) return res.status(400).json({ error: 'Body must be { updates: [...] }' });
