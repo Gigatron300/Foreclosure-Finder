@@ -33,6 +33,9 @@ const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
 const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
 const CAMDEN_COURT_REFRESH_BATCH_FILE = path.join(CONFIG.outputDir, 'camden-court-refresh-batch.json');
 const CAMDEN_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'camden-annotations.json');
+// Persistent enrichment cache keyed by parcel (town|block|lot), NOT by instrumentNumber.
+// Survives any CSV upload order so resolved addresses are never lost or re-resolved.
+const CAMDEN_ENRICH_CACHE_FILE = path.join(CONFIG.outputDir, 'camden-enrichment-cache.json');
 const STREETVIEW_CACHE_DIR = path.join(CONFIG.outputDir, 'streetview-cache');
 const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '4000', 10);
 const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(30 * 24 * 60 * 60 * 1000), 10);
@@ -920,6 +923,71 @@ function pushScoreHistory(caseObj, annotations) {
   }
 }
 
+// ---- Parcel-keyed enrichment cache ----
+// Enrichment fields that are tied to the physical parcel (not the filing).
+const CAMDEN_ENRICH_FIELDS = [
+  'propertyAddress', 'assessedValue', 'landValue', 'improvementValue',
+  'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
+  'propertyClass', 'ownerOfRecord', 'dwellingUnits', 'enrichmentSource', 'enrichedAt'
+];
+
+// Identity of a parcel: town + block + lot. Same property = same key regardless of CSV/filing.
+function camdenParcelKey(c) {
+  const town = String(c.town || '').trim().toLowerCase();
+  const block = String(c.block || '').trim();
+  const lot = String(c.lot || '').trim();
+  if (!town || !block || !lot) return null;
+  return `${town}|${block}|${lot}`;
+}
+
+async function readEnrichCache() {
+  return readJsonFileSafe(CAMDEN_ENRICH_CACHE_FILE, {});
+}
+
+async function writeEnrichCache(cache) {
+  await ensureDataDir();
+  const tmp = CAMDEN_ENRICH_CACHE_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(cache, null, 2));
+  await fs.rename(tmp, CAMDEN_ENRICH_CACHE_FILE);
+}
+
+// Store each resolved case's enrichment into the cache, keyed by parcel. Deduped: one entry per parcel.
+async function updateEnrichCache(cases) {
+  const cache = await readEnrichCache();
+  let changed = false;
+  for (const c of cases || []) {
+    if (!c.propertyAddress) continue; // only cache successfully-resolved parcels
+    const key = camdenParcelKey(c);
+    if (!key) continue;
+    const entry = {};
+    for (const f of CAMDEN_ENRICH_FIELDS) {
+      if (c[f] !== undefined && c[f] !== null) entry[f] = c[f];
+    }
+    cache[key] = entry;
+    changed = true;
+  }
+  if (changed) await writeEnrichCache(cache);
+  return cache;
+}
+
+// Fill in enrichment on cases that don't have an address yet, from the parcel cache.
+// Returns the number of cases restored.
+function restoreFromEnrichCache(cases, cache) {
+  let restored = 0;
+  for (const c of cases || []) {
+    if (c.propertyAddress) continue; // already enriched in this dataset
+    const key = camdenParcelKey(c);
+    if (!key) continue;
+    const entry = cache[key];
+    if (!entry || !entry.propertyAddress) continue;
+    for (const f of CAMDEN_ENRICH_FIELDS) {
+      if (entry[f] !== undefined && entry[f] !== null) c[f] = entry[f];
+    }
+    restored++;
+  }
+  return restored;
+}
+
 app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
     try {
       const { instrumentNumber, address } = req.body;
@@ -940,6 +1008,7 @@ app.post('/api/camden/manual-address', checkAuth, async (req, res) => {
 
       await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
       await writeAnnotations(annForAddr);
+      await updateEnrichCache([found]);
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -1005,6 +1074,9 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
     // Merge court status + enrichment data from existing file for cases that already exist
     const existingData = await readJsonFileSafe(CAMDEN_DATA_FILE, null);
     if (existingData && Array.isArray(existingData.cases)) {
+      // Capture any already-resolved parcels from the live file into the persistent
+      // cache before we overwrite it — protects work done before this cache existed.
+      await updateEnrichCache(existingData.cases);
       const existingByInstrument = new Map(existingData.cases.map(c => [c.instrumentNumber, c]));
       const importMeta = parsed.importMetadata || {};
       const hasCourtStatusColumn = importMeta.hasCourtStatusColumn === true;
@@ -1048,6 +1120,15 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
       });
     }
 
+    // Restore resolved addresses from the persistent parcel cache. This is keyed by
+    // parcel (town|block|lot), so it works no matter which CSV was uploaded last —
+    // unlike the instrumentNumber merge above, which only covers the previous CSV.
+    const enrichCache = await readEnrichCache();
+    const restoredCount = restoreFromEnrichCache(parsed.cases, enrichCache);
+    if (restoredCount > 0) {
+      parsed.cases = parsed.cases.map(c => (c.propertyAddress ? scoreCamdenCase(c) : c));
+    }
+
     // Save parsed JSON
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(parsed, null, 2));
 
@@ -1056,6 +1137,7 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
       filename: filename || 'camden-lis-pendens.csv',
       totalRows: parsed.totalRows,
       uniqueCases: parsed.totalCases,
+      addressesRestoredFromCache: restoredCount,
       summary: parsed.summary
     });
   } catch (error) {
@@ -1178,6 +1260,9 @@ app.post('/api/camden/enrich', checkAuth, async (req, res) => {
     data = await enrichCamdenCases(data, { testMode, testLimit: 10 });
 
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
+
+    // Persist resolved parcels to the cache so they survive future CSV uploads.
+    await updateEnrichCache(data.cases);
 
     const withAddress = data.cases.filter(c => c.propertyAddress).length;
     lastCamdenEnrichStatus = {
