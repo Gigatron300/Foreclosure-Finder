@@ -1702,11 +1702,22 @@
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);
 
-                // Filter by selected cities (multi-select)
-                if (selectedCities.length > 0) {
-                    const set = new Set(selectedCities.map(s => s.toUpperCase().trim()));
-                    cases = cases.filter(c => set.has((c.propertyCity || '').toUpperCase().trim()));
+                // Default to showing nothing — the full dataset is too large to render at once and
+                // times out the page. Require the user to pick towns from the dropdown first.
+                if (selectedCities.length === 0) {
+                    const allCases = data.cases || [];
+                    document.getElementById('totalCases').textContent = `0 (${allCases.length} cases total)`;
+                    document.getElementById('withAddress').textContent = '0';
+                    document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
+                    document.getElementById('avgMonths').textContent = '0';
+                    document.getElementById('caseCount').textContent = '(0)';
+                    grid.innerHTML = '<div class="no-results"><p>Select one or more towns from the city filter above to view properties.</p></div>';
+                    return;
                 }
+
+                // Filter by selected cities (multi-select)
+                const set = new Set(selectedCities.map(s => s.toUpperCase().trim()));
+                cases = cases.filter(c => set.has((c.propertyCity || '').toUpperCase().trim()));
 
                 // Filter by case type
                 if (typeFilter && typeFilter !== 'all') {
