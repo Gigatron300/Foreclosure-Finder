@@ -275,6 +275,15 @@
 
         /* Property Cards */
         .cases-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 25px; }
+        .cases-load-more { grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 30px; }
+        .load-more-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            padding: 12px 28px; border-radius: 8px; cursor: pointer;
+            font-size: 0.9rem; font-weight: 600;
+        }
+        .load-more-btn:hover { background: rgba(212,168,75,0.25); }
 
         .property-card {
             background: var(--benoro-card); border-radius: 8px; overflow: hidden;
@@ -1403,6 +1412,54 @@
             return [...cases].sort(sorter);
         }
 
+        // Render cases in pages so a large filtered set doesn't freeze the tab.
+        // Filtering/sorting still happens over the full dataset in loadData();
+        // only the DOM painting is chunked here.
+        const CAMDEN_PAGE_SIZE = 48;
+        let camdenRenderState = null;
+        let camdenRenderCursor = 0;
+        let camdenLoadMoreObserver = null;
+
+        function renderNextCasePage() {
+            const grid = document.getElementById('casesGrid');
+            if (!grid || !camdenRenderState) return;
+            const { cases, addressCounts, sheriffKeys } = camdenRenderState;
+
+            const existingSentinel = document.getElementById('casesLoadMore');
+            if (existingSentinel) existingSentinel.remove();
+
+            const end = Math.min(camdenRenderCursor + CAMDEN_PAGE_SIZE, cases.length);
+            const html = cases.slice(camdenRenderCursor, end).map(c => {
+                const key = getAddressRepeatKey(c);
+                const repeatCount = key ? (addressCounts.get(key) || 1) : 1;
+                const caseSheriffKeys = getCaseSheriffKeys(c);
+                const onSheriffSale = caseSheriffKeys.some(k => sheriffKeys.has(k));
+                return createCard(c, repeatCount, onSheriffSale);
+            }).join('');
+            grid.insertAdjacentHTML('beforeend', html);
+            camdenRenderCursor = end;
+
+            if (camdenRenderCursor < cases.length) {
+                const remaining = cases.length - camdenRenderCursor;
+                grid.insertAdjacentHTML('beforeend',
+                    `<div id="casesLoadMore" class="cases-load-more">
+                        <button class="load-more-btn" onclick="renderNextCasePage()">Show more (${remaining} remaining)</button>
+                    </div>`);
+                observeLoadMore();
+            }
+        }
+
+        function observeLoadMore() {
+            const sentinel = document.getElementById('casesLoadMore');
+            if (!sentinel) return;
+            if (!('IntersectionObserver' in window)) return; // button-only fallback
+            if (camdenLoadMoreObserver) camdenLoadMoreObserver.disconnect();
+            camdenLoadMoreObserver = new IntersectionObserver((entries) => {
+                if (entries.some(e => e.isIntersecting)) renderNextCasePage();
+            }, { rootMargin: '600px' });
+            camdenLoadMoreObserver.observe(sentinel);
+        }
+
         async function loadData(forceRefresh = false) {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
@@ -1499,15 +1556,14 @@
                 }
                 const sheriffKeys = await getCamdenSheriffAddressKeys();
 
-                grid.innerHTML = cases
-                    .map(c => {
-                        const key = getAddressRepeatKey(c);
-                        const repeatCount = key ? (addressCounts.get(key) || 1) : 1;
-                        const caseSheriffKeys = getCaseSheriffKeys(c);
-                        const onSheriffSale = caseSheriffKeys.some(k => sheriffKeys.has(k));
-                        return createCard(c, repeatCount, onSheriffSale);
-                    })
-                    .join('');
+                // Paint in pages (see renderNextCasePage) so large result sets
+                // don't lock the browser. The full filtered/sorted list is held
+                // in camdenRenderState; only a slice is in the DOM at a time.
+                if (camdenLoadMoreObserver) camdenLoadMoreObserver.disconnect();
+                camdenRenderState = { cases, addressCounts, sheriffKeys };
+                camdenRenderCursor = 0;
+                grid.innerHTML = '';
+                renderNextCasePage();
             } catch (e) {
                 grid.innerHTML = `<div class="no-results"><p>Error: ${e.message}</p></div>`;
             }
