@@ -795,10 +795,6 @@
 
             <!-- Actions -->
             <div class="actions-bar">
-                <div class="case-search-group">
-                    <input type="search" id="caseSearch" class="case-search" placeholder="Search address, town, name, docket, instrument #..."
-                        oninput="onCaseSearchInput()" autocomplete="off">
-                </div>
                 <button class="btn btn-outline" onclick="exportOpenAddresses()">Export Addresses</button>
                 <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
@@ -929,6 +925,11 @@
                             <div class="filter-dropdown-empty">Loading towns...</div>
                         </div>
                     </div>
+                </div>
+
+                <div class="case-search-group">
+                    <input type="search" id="caseSearch" class="case-search" placeholder="Search address, town, name, docket, instrument #..."
+                        oninput="onCaseSearchInput()" autocomplete="off">
                 </div>
             </div>
 
