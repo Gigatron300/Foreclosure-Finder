@@ -275,6 +275,15 @@
 
         /* Property Cards */
         .cases-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 25px; }
+        .case-search-group { flex: 1 1 320px; min-width: 220px; }
+        .case-search {
+            width: 100%; box-sizing: border-box;
+            padding: 9px 14px; border-radius: 8px;
+            border: 1px solid var(--benoro-border, rgba(212,168,75,0.35));
+            background: var(--benoro-card, #1a1a1a); color: var(--benoro-text, #e2e8f0);
+            font-size: 0.9rem;
+        }
+        .case-search:focus { outline: none; border-color: var(--benoro-gold, #d4a84b); }
         .cases-load-more { grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 30px; }
         .load-more-btn {
             border: 1px solid rgba(212,168,75,0.7);
@@ -786,6 +795,10 @@
 
             <!-- Actions -->
             <div class="actions-bar">
+                <div class="case-search-group">
+                    <input type="search" id="caseSearch" class="case-search" placeholder="Search address, town, name, docket, instrument #..."
+                        oninput="onCaseSearchInput()" autocomplete="off">
+                </div>
                 <button class="btn btn-outline" onclick="exportOpenAddresses()">Export Addresses</button>
                 <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
 
@@ -1460,6 +1473,26 @@
             camdenLoadMoreObserver.observe(sentinel);
         }
 
+        // Free-text search across the FULL dataset (not just rendered cards),
+        // so a property that lives further down the paginated list still surfaces.
+        let caseSearchDebounce = null;
+        function getCaseSearchTerms() {
+            const input = document.getElementById('caseSearch');
+            const raw = input ? input.value.trim().toLowerCase() : '';
+            return raw ? raw.split(/\s+/) : [];
+        }
+        function caseMatchesSearch(c, terms) {
+            const haystack = [
+                c.propertyAddress, c.town, c.primaryPlaintiff, c.primaryDefendant,
+                c.instrumentNumber, c.courtDocketNumber, c.block, c.lot
+            ].filter(Boolean).join(' ').toLowerCase();
+            return terms.every(t => haystack.includes(t));
+        }
+        function onCaseSearchInput() {
+            if (caseSearchDebounce) clearTimeout(caseSearchDebounce);
+            caseSearchDebounce = setTimeout(() => loadData(false), 200);
+        }
+
         async function loadData(forceRefresh = false) {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
@@ -1470,6 +1503,7 @@
             const selectedTowns = getSelectedTownValues();
             const selectedCourtStatuses = getSelectedCheckboxValues('courtStatusFilterOptions');
             const selectedUnits = getSelectedCheckboxValues('unitsFilterOptions');
+            const searchTerms = getCaseSearchTerms();
 
             try {
                 const data = await fetchCamdenData(forceRefresh);
@@ -1528,6 +1562,10 @@
                         if (tagSet.has('__untagged__')) return tags.length === 0;
                         return selectedTags.every(t => tags.includes(t));
                     });
+                }
+
+                if (searchTerms.length) {
+                    cases = cases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
 
                 cases = sortCases(cases, sortBy);
