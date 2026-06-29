@@ -1393,6 +1393,14 @@
             }
         }
 
+        // Keep the in-memory cache in sync after a tag/note save so that a later
+        // sort/filter re-render (which reads from cache) doesn't revert the change.
+        function patchCachedCase(instrumentNumber, patch) {
+            if (!camdenDataCache || !Array.isArray(camdenDataCache.cases)) return;
+            const c = camdenDataCache.cases.find(x => x.instrumentNumber === instrumentNumber);
+            if (c) Object.assign(c, patch);
+        }
+
         async function fetchCamdenData(forceRefresh = false) {
             if (!forceRefresh && camdenDataCache) return camdenDataCache;
             if (!forceRefresh && camdenDataCachePromise) return camdenDataCachePromise;
@@ -2292,7 +2300,10 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 });
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
-                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(true);
+                else {
+                    patchCachedCase(instrumentNumber, { userTags: newTags });
+                    if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
+                }
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
@@ -2312,7 +2323,10 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 });
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
-                else if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(true);
+                else {
+                    patchCachedCase(instrumentNumber, { userTags: newTags });
+                    if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
+                }
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);
                 alert('Error: ' + e.message);
@@ -2321,13 +2335,20 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
 
         async function saveNotes(instrumentNumber, notes) {
             try {
-                await fetch('/api/camden/notes', {
+                const r = await fetch('/api/camden/notes', {
                     method: 'POST',
                     headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ instrumentNumber, notes })
                 });
+                const result = await r.json().catch(() => ({}));
+                if (result && result.success === false) {
+                    alert('Error saving notes: ' + (result.error || 'Unknown error'));
+                    return;
+                }
+                patchCachedCase(instrumentNumber, { userNotes: notes });
             } catch (e) {
                 console.error('Error saving notes:', e);
+                alert('Error saving notes: ' + e.message);
             }
         }
 
