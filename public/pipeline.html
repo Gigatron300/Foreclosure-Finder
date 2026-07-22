@@ -172,7 +172,25 @@
             flex-wrap: wrap;
             align-items: center;
         }
-        
+        .case-search-group { flex: 1 1 260px; min-width: 200px; }
+        .case-search {
+            width: 100%; box-sizing: border-box;
+            padding: 10px 15px; border-radius: 8px;
+            border: 1px solid var(--benoro-border);
+            background: var(--benoro-card); color: var(--benoro-white);
+            font-size: 0.9rem;
+        }
+        .case-search:focus { outline: none; border-color: var(--benoro-gold); }
+        .cases-load-more { grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 30px; }
+        .load-more-btn {
+            border: 1px solid rgba(212,168,75,0.7);
+            background: rgba(212,168,75,0.15);
+            color: #f5d89b;
+            padding: 12px 28px; border-radius: 8px; cursor: pointer;
+            font-size: 0.9rem; font-weight: 600;
+        }
+        .load-more-btn:hover { background: rgba(212,168,75,0.25); }
+
         .stats-summary {
             background: rgba(255,255,255,0.05);
             border-radius: 12px;
@@ -1098,8 +1116,13 @@
                     </div>
                 </div>
             </div>
+
+            <div class="case-search-group">
+                <input type="search" id="caseSearch" class="case-search" placeholder="Search address, city, name, case #, parcel..."
+                    oninput="onCaseSearchInput()" autocomplete="off">
+            </div>
         </div>
-        
+
         <div class="results-header">
             <h2>Properties <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
@@ -1672,11 +1695,75 @@
             }
         }
         
+        // Render grouped cases in pages so a large filtered set doesn't freeze the tab.
+        // Filtering/sorting/grouping still happens over the full dataset in loadData();
+        // only the DOM painting is chunked here.
+        const MONTCO_PAGE_SIZE = 48;
+        let montcoRenderState = null;
+        let montcoRenderCursor = 0;
+        let montcoLoadMoreObserver = null;
+
+        function renderNextCasePage() {
+            const grid = document.getElementById('casesGrid');
+            if (!grid || !montcoRenderState) return;
+            const { cases } = montcoRenderState;
+
+            const existingSentinel = document.getElementById('casesLoadMore');
+            if (existingSentinel) existingSentinel.remove();
+
+            const end = Math.min(montcoRenderCursor + MONTCO_PAGE_SIZE, cases.length);
+            const html = cases.slice(montcoRenderCursor, end).map(c => createPropertyCard(c)).join('');
+            grid.insertAdjacentHTML('beforeend', html);
+            montcoRenderCursor = end;
+
+            if (montcoRenderCursor < cases.length) {
+                const remaining = cases.length - montcoRenderCursor;
+                grid.insertAdjacentHTML('beforeend',
+                    `<div id="casesLoadMore" class="cases-load-more">
+                        <button class="load-more-btn" onclick="renderNextCasePage()">Show more (${remaining} remaining)</button>
+                    </div>`);
+                observeLoadMore();
+            }
+        }
+
+        function observeLoadMore() {
+            const sentinel = document.getElementById('casesLoadMore');
+            if (!sentinel) return;
+            if (!('IntersectionObserver' in window)) return; // button-only fallback
+            if (montcoLoadMoreObserver) montcoLoadMoreObserver.disconnect();
+            montcoLoadMoreObserver = new IntersectionObserver((entries) => {
+                if (entries.some(e => e.isIntersecting)) renderNextCasePage();
+            }, { rootMargin: '600px' });
+            montcoLoadMoreObserver.observe(sentinel);
+        }
+
+        // Free-text search across the FULL dataset (not just rendered cards),
+        // so a property that lives further down the paginated list still surfaces.
+        let caseSearchDebounce = null;
+        function getCaseSearchTerms() {
+            const input = document.getElementById('caseSearch');
+            const raw = input ? input.value.trim().toLowerCase() : '';
+            return raw ? raw.split(/\s+/) : [];
+        }
+        function caseMatchesSearch(c, terms) {
+            const members = c._stackMembers && c._stackMembers.length ? c._stackMembers : [c];
+            const haystack = members.flatMap(m => [
+                m.propertyAddress, m.propertyCity, m.defendant, m.plaintiff,
+                m.caseNumber, m.parcelNumber
+            ]).filter(Boolean).join(' ').toLowerCase();
+            return terms.every(t => haystack.includes(t));
+        }
+        function onCaseSearchInput() {
+            if (caseSearchDebounce) clearTimeout(caseSearchDebounce);
+            caseSearchDebounce = setTimeout(() => loadData(), 200);
+        }
+
         async function loadData() {
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const selectedCities = getSelectedCheckboxValues('cityFilterOptions');
             const typeFilter = document.getElementById('typeFilter').value;
+            const searchTerms = getCaseSearchTerms();
 
             try {
                 const [response, sheriffKeys] = await Promise.all([
@@ -1702,22 +1789,14 @@
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);
 
-                // Default to showing nothing — the full dataset is too large to render at once and
-                // times out the page. Require the user to pick towns from the dropdown first.
-                if (selectedCities.length === 0) {
-                    const allCases = data.cases || [];
-                    document.getElementById('totalCases').textContent = `0 (${allCases.length} cases total)`;
-                    document.getElementById('withAddress').textContent = '0';
-                    document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
-                    document.getElementById('avgMonths').textContent = '0';
-                    document.getElementById('caseCount').textContent = '(0)';
-                    grid.innerHTML = '<div class="no-results"><p>Select one or more towns from the city filter above to view properties.</p></div>';
-                    return;
+                // Filter by selected cities (multi-select). When no cities are chosen, show
+                // every town — pagination caps how much paints at once, so the full dataset
+                // no longer stalls the tab. Search runs after this, so it always obeys the
+                // active city/type filters.
+                if (selectedCities.length) {
+                    const set = new Set(selectedCities.map(s => s.toUpperCase().trim()));
+                    cases = cases.filter(c => set.has((c.propertyCity || '').toUpperCase().trim()));
                 }
-
-                // Filter by selected cities (multi-select)
-                const set = new Set(selectedCities.map(s => s.toUpperCase().trim()));
-                cases = cases.filter(c => set.has((c.propertyCity || '').toUpperCase().trim()));
 
                 // Filter by case type
                 if (typeFilter && typeFilter !== 'all') {
@@ -1770,21 +1849,38 @@
                     groupedCases.sort((a, b) => (b._stackTotalAmount || 0) - (a._stackTotalAmount || 0));
                 }
 
+                // Free-text search across the full grouped dataset (matches the primary
+                // card or any case stacked on its parcel).
+                let visibleCases = groupedCases;
+                if (searchTerms.length) {
+                    visibleCases = groupedCases.filter(c => caseMatchesSearch(c, searchTerms));
+                }
+
                 // Update stats (before filtering for sweet spot only)
                 const allCases = data.cases || [];
-                document.getElementById('totalCases').textContent = `${groupedCases.length} (${cases.length} cases)`;
+                const visibleCaseCount = visibleCases.reduce((sum, c) => sum + (c._stackSize || 1), 0);
+                document.getElementById('totalCases').textContent = `${visibleCases.length} (${visibleCaseCount} cases)`;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
                 document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
                 const avgMonths = cases.length > 0 ? Math.round(cases.reduce((sum, c) => sum + (c.monthsOpen || Math.round((c.daysOpen || 0) / 30)), 0) / cases.length) : 0;
                 document.getElementById('avgMonths').textContent = avgMonths;
-                document.getElementById('caseCount').textContent = `(${groupedCases.length})`;
+                document.getElementById('caseCount').textContent = `(${visibleCases.length})`;
 
-                if (groupedCases.length === 0) {
-                    grid.innerHTML = '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
+                if (visibleCases.length === 0) {
+                    grid.innerHTML = searchTerms.length
+                        ? '<div class="no-results"><p>No properties match your search.</p></div>'
+                        : '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
                     return;
                 }
 
-                grid.innerHTML = groupedCases.map(c => createPropertyCard(c)).join('');
+                // Paint in pages (see renderNextCasePage) so large result sets don't lock
+                // the browser. The full filtered/sorted list is held in montcoRenderState;
+                // only a slice is in the DOM at a time.
+                if (montcoLoadMoreObserver) montcoLoadMoreObserver.disconnect();
+                montcoRenderState = { cases: visibleCases };
+                montcoRenderCursor = 0;
+                grid.innerHTML = '';
+                renderNextCasePage();
             } catch (error) {
                 grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;
             }
