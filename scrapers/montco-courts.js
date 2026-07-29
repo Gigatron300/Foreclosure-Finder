@@ -6,6 +6,11 @@ const path = require('path');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// One UA used everywhere: the session-solve browser and every scraper page.
+// Cloudflare/Turnstile can bind the pass token to the UA, so it must match
+// between the manual solve and the headless reuse.
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
 const MONTCO_TOWNS = [
   'ABINGTON', 'AMBLER', 'BRIDGEPORT', 'BRYN ATHYN', 'CHELTENHAM', 'COLLEGEVILLE',
   'CONSHOHOCKEN', 'DOUGLASS', 'EAST GREENVILLE', 'EAST NORRITON', 'FRANCONIA',
@@ -38,8 +43,11 @@ const CONFIG = {
   sweetSpotMaxMonths: 18,
 
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
-  csvPath: path.join(process.env.DATA_DIR || './data', 'montco-cases.csv')
+  csvPath: path.join(process.env.DATA_DIR || './data', 'montco-cases.csv'),
+  sessionPath: path.join(process.env.DATA_DIR || './data', 'montco-session.json')
 };
+
+const COURT_ORIGIN = 'https://courtsapp.montcopa.org';
 
 async function launchBrowser() {
   return puppeteer.launch({
@@ -50,6 +58,114 @@ async function launchBrowser() {
       '--js-flags=--max-old-space-size=256'
     ]
   });
+}
+
+// ===== Cloudflare/Turnstile session handling =====
+// The court site (courtsapp.montcopa.org) now gates /psi/v/search/case and every
+// case-detail page behind a Cloudflare Turnstile "verify you are human" check.
+// Headless Puppeteer can't clear it silently. Instead we solve it ONCE in a
+// visible browser, capture the resulting session cookies, and replay them on
+// every headless page for the rest of the run (and future runs, until they expire).
+
+// Trim a raw cookie object (from page.cookies()/CDP) down to the fields
+// page.setCookie() accepts, so replaying it doesn't throw on extra keys.
+function sanitizeCookies(cookies) {
+  return (cookies || []).map(c => {
+    const o = { name: c.name, value: c.value, domain: c.domain, path: c.path || '/' };
+    if (typeof c.expires === 'number' && c.expires > 0) o.expires = c.expires;
+    if (c.httpOnly != null) o.httpOnly = c.httpOnly;
+    if (c.secure != null) o.secure = c.secure;
+    if (c.sameSite && ['Strict', 'Lax', 'None'].includes(c.sameSite)) o.sameSite = c.sameSite;
+    return o;
+  }).filter(c => c.name && c.value != null);
+}
+
+// Set the shared UA and (if we have one) replay the saved session cookies.
+// MUST be called after newPage() and before the first goto().
+async function applySession(page, session) {
+  await page.setUserAgent((session && session.userAgent) || USER_AGENT);
+  const cookies = sanitizeCookies(session && session.cookies);
+  if (cookies.length) {
+    try { await page.setCookie(...cookies); } catch (e) { /* stale cookie shape — ignore */ }
+  }
+}
+
+async function loadMontcoSession(sessionPath = CONFIG.sessionPath) {
+  try {
+    const session = JSON.parse(await fs.readFile(sessionPath, 'utf8'));
+    if (!session || !Array.isArray(session.cookies) || session.cookies.length === 0) return null;
+    return session;
+  } catch (e) {
+    return null; // no session file yet, or unreadable
+  }
+}
+
+// Open a VISIBLE browser, let the human clear the Turnstile check, then capture
+// the session cookies. Detects success by watching for the real search page
+// (the CaseType dropdown) to appear once we're no longer on the /psi/auth gate.
+async function establishMontcoSession(options = {}) {
+  const sessionPath = options.sessionPath || CONFIG.sessionPath;
+  const maxWaitMs = options.maxWaitMs || 5 * 60 * 1000;
+
+  console.log('\n🔓 Montco session setup');
+  console.log('   A Chrome window will open to the court search page.');
+  console.log('   Complete the Cloudflare "Verify you are human" check.');
+  console.log('   As soon as the real search page loads, your session is saved automatically.\n');
+
+  const browser = await puppeteer.launch({
+    headless: false,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    defaultViewport: null,
+    args: [
+      '--no-sandbox', '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1200,900'
+    ]
+  });
+
+  try {
+    const page = (await browser.pages())[0] || await browser.newPage();
+    await page.setUserAgent(USER_AGENT);
+    await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+
+    const start = Date.now();
+    let ready = false;
+    while (Date.now() - start < maxWaitMs) {
+      await delay(2000);
+      const state = await page.evaluate(() => ({
+        url: location.href,
+        onAuth: /\/psi\/auth/i.test(location.href),
+        onSearch: /\/psi\/v\/search\/case/i.test(location.href),
+        hasSearchForm: !!document.querySelector('select[name="CaseType"], select#CaseType, select[id*="CaseType" i]')
+      })).catch(() => null);
+      // Past the gate = back on a /psi/v/ page (not /psi/auth), ideally with the search form.
+      if (state && !state.onAuth && (state.onSearch || state.hasSearchForm)) { ready = true; break; }
+    }
+
+    // Capture ALL cookies for the court origin via CDP (covers HttpOnly + path-scoped ones).
+    let cookies = [];
+    try {
+      const client = await page.target().createCDPSession();
+      const all = (await client.send('Network.getAllCookies')).cookies || [];
+      cookies = all.filter(c => (c.domain || '').replace(/^\./, '').endsWith('montcopa.org'));
+    } catch (e) {
+      cookies = await page.cookies(COURT_ORIGIN).catch(() => []);
+    }
+
+    if (!ready) {
+      console.log('   ⚠️ Timed out waiting for the search page to load.');
+      console.log('      Saving whatever cookies exist anyway — but the scrape may still be gated.');
+    }
+
+    const session = { savedAt: new Date().toISOString(), userAgent: USER_AGENT, cookies: sanitizeCookies(cookies) };
+    await fs.mkdir(path.dirname(sessionPath), { recursive: true }).catch(() => {});
+    await fs.writeFile(sessionPath, JSON.stringify(session, null, 2));
+    console.log(`\n   ✅ Saved ${session.cookies.length} cookies → ${sessionPath}`);
+    console.log('   Now run the normal scrape; it will reuse this session automatically.\n');
+    return session;
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 async function parseCSV(csvPath) {
@@ -496,9 +612,9 @@ function buildSearchResultsUrl({ caseTypeCode, dateFrom, dateTo, count, skip }) 
     + `&Skip=${encodeURIComponent(String(skip))}`;
 }
 
-async function discoverCaseTypeCodes(browser) {
+async function discoverCaseTypeCodes(browser, session) {
   const page = await browser.newPage();
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await applySession(page, session);
   try {
     await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     return await page.evaluate(() => {
@@ -519,10 +635,10 @@ async function discoverCaseTypeCodes(browser) {
   }
 }
 
-async function harvestDetailUrls(browser, { caseTypeCode, dateFrom, dateTo, label = '', pageSize = 200 }) {
+async function harvestDetailUrls(browser, { caseTypeCode, dateFrom, dateTo, label = '', pageSize = 200, session = null }) {
   const map = new Map();
   const page = await browser.newPage();
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+  await applySession(page, session);
   await page.setRequestInterception(true);
   page.on('request', (req) => {
     const t = req.resourceType();
@@ -597,8 +713,8 @@ function resolveCaseTypeCode(codes, csvCaseType) {
 const MONTCO_RESULT_CAP = 1000;
 
 // Group CSV cases by (year-month, exact CaseType from CSV), then harvest each bucket.
-async function harvestUrlCacheFromCSV(browser, cases) {
-  const codes = await discoverCaseTypeCodes(browser);
+async function harvestUrlCacheFromCSV(browser, cases, session) {
+  const codes = await discoverCaseTypeCodes(browser, session);
   if (Object.keys(codes).length === 0) {
     console.log('   ⚠️ Could not discover CaseType codes; skipping harvest');
     return new Map();
@@ -646,6 +762,7 @@ async function harvestUrlCacheFromCSV(browser, cases) {
         caseTypeCode: code,
         dateFrom, dateTo,
         label: `"${caseType}" ${ym}: `,
+        session,
       });
       for (const [k, v] of m) merged.set(k, v);
       if (m.size >= MONTCO_RESULT_CAP) {
@@ -670,10 +787,24 @@ async function scrapeMontgomeryCourts(options = {}) {
   const urlCache = options.urlCache || {};
   const enableHarvest = options.enableHarvest !== false;
 
+  // Session cookies clear the Cloudflare/Turnstile gate. Prefer an explicit
+  // option, fall back to the saved session file on disk.
+  let session = options.session || null;
+  if (!session && options.sessionCookies) session = { userAgent: USER_AGENT, cookies: options.sessionCookies };
+  if (!session) session = await loadMontcoSession();
+
   console.log('\n🏛️ Montgomery County Scraper (V3)');
   if (testMode) console.log('⚡ TEST MODE - Limited to ' + CONFIG.testModeLimit + ' cases');
   if (Object.keys(urlCache).length > 0) {
     console.log(`💾 URL cache: ${Object.keys(urlCache).length} known cases (will skip search hop for these)`);
+  }
+  if (session) {
+    console.log(`🔓 Court session: ${session.cookies.length} cookies loaded (saved ${session.savedAt || 'unknown'})`);
+  } else {
+    console.log('⚠️ No court session found — courtsapp.montcopa.org is behind a Cloudflare check.');
+    console.log('   Court pages will be blocked. Run this once to clear it:');
+    console.log('     node scrapers/montco-courts.js --login');
+    console.log('   (Parcel-address lookups still work without a session.)');
   }
   console.log('='.repeat(50));
 
@@ -693,7 +824,7 @@ async function scrapeMontgomeryCourts(options = {}) {
     if (uncached.length >= 50) {
       const harvestBrowser = await launchBrowser();
       try {
-        const harvested = await harvestUrlCacheFromCSV(harvestBrowser, uncached);
+        const harvested = await harvestUrlCacheFromCSV(harvestBrowser, uncached, session);
         let added = 0;
         for (const [k, v] of harvested) {
           if (!urlCache[k]) { urlCache[k] = v; added++; }
@@ -760,6 +891,8 @@ async function scrapeMontgomeryCourts(options = {}) {
 
   console.log(`\n🌐 Scraping ${targets.length} cases (concurrency: ${concurrency})...`);
 
+  let authGateHits = 0; // court pages redirected to the Cloudflare gate (session missing/expired)
+
   for (let chunkStart = 0; chunkStart < targets.length; chunkStart += restartEvery) {
     const chunkEnd = Math.min(chunkStart + restartEvery, targets.length);
     console.log(`   🔄 Browser restart (cases ${chunkStart + 1}-${chunkEnd})...`);
@@ -770,7 +903,7 @@ async function scrapeMontgomeryCourts(options = {}) {
     for (let w = 0; w < concurrency; w++) {
       workers.push((async () => {
         const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        await applySession(page, session);
 
         // Block non-essential resources — case pages are plain HTML tables
         await page.setRequestInterception(true);
@@ -846,7 +979,15 @@ async function scrapeMontgomeryCourts(options = {}) {
 
       const currentUrl = page.url();
       if (!currentUrl.includes('/detail/Case/')) {
-        console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
+        if (/\/psi\/auth/i.test(currentUrl)) {
+          authGateHits++;
+          if (authGateHits === 1) {
+            console.log('   🔒 Blocked by Cloudflare gate — session missing or expired. Re-run: node scrapers/montco-courts.js --login');
+          }
+          console.log(`   ${i + 1}/${targets.length} 🔒 ${c.caseNumber} (gated)`);
+        } else {
+          console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
+        }
         continue;
       }
 
@@ -1182,8 +1323,70 @@ async function scrapeMontgomeryCourts(options = {}) {
   console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
   console.log(`   Address source: ${fromParcel} from parcel API, ${fromDefendant} from defendant addr`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
+  if (authGateHits > 0) {
+    console.log(`\n   🔒 ${authGateHits} case(s) were blocked by the Cloudflare gate.`);
+    console.log('      Your session is missing or expired. Refresh it with:');
+    console.log('        node scrapers/montco-courts.js --login');
+  }
 
   return results;
 }
 
-module.exports = { scrapeMontgomeryCourts, parseCSV, fetchParcelAddress, CONFIG, MONTCO_TOWNS };
+// Upload the locally-saved session to a running server so its headless scrape
+// can replay the cookies. Auth uses the same x-auth-token/SITE_PASSWORD as the app.
+async function pushSession({ url, token, sessionPath = CONFIG.sessionPath } = {}) {
+  if (!url) throw new Error('push URL required (pass --push <url> or set MONTCO_PUSH_URL)');
+  if (!token) throw new Error('auth token required (pass --token <pw> or set SITE_PASSWORD)');
+  const session = await loadMontcoSession(sessionPath);
+  if (!session) throw new Error(`no session at ${sessionPath} — run --login first`);
+  const endpoint = url.replace(/\/+$/, '') + '/api/montco/session';
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+    body: JSON.stringify(session)
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`push failed HTTP ${resp.status}: ${text.slice(0, 200)}`);
+  console.log(`   ⬆️ Pushed ${session.cookies.length} cookies to ${endpoint}`);
+  console.log(`      ${text}`);
+}
+
+module.exports = {
+  scrapeMontgomeryCourts, parseCSV, fetchParcelAddress, CONFIG, MONTCO_TOWNS,
+  establishMontcoSession, loadMontcoSession, pushSession
+};
+
+// CLI: solve the Cloudflare check locally and/or push the session to a server.
+if (require.main === module) {
+  try { require('dotenv').config(); } catch (e) { /* dotenv optional */ }
+
+  const argv = process.argv.slice(2);
+  const has = (f) => argv.includes(f);
+  const val = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+
+  const wantLogin = has('--login') || has('login') || has('--session');
+  const wantPush = has('--push') || has('push');
+  const pushUrl = val('--push') || process.env.MONTCO_PUSH_URL;
+  const token = val('--token') || process.env.SITE_PASSWORD;
+
+  (async () => {
+    if (!wantLogin && !wantPush) {
+      console.log('Usage:');
+      console.log('  node scrapers/montco-courts.js --login                  solve Turnstile, save session locally');
+      console.log('  node scrapers/montco-courts.js --login --push <url>     solve, then upload session to your server');
+      console.log('  node scrapers/montco-courts.js --push <url>             upload the already-saved session');
+      console.log('');
+      console.log('  auth token: --token <pw> or SITE_PASSWORD (local .env is loaded automatically)');
+      console.log('  server url: positional after --push, or MONTCO_PUSH_URL');
+      process.exit(0);
+    }
+    try {
+      if (wantLogin) await establishMontcoSession();
+      if (wantPush) await pushSession({ url: pushUrl, token });
+      process.exit(0);
+    } catch (err) {
+      console.error('❌', err.message || err);
+      process.exit(1);
+    }
+  })();
+}

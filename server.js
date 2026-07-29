@@ -29,6 +29,10 @@ app.use(express.text({ limit: '10mb', type: 'text/csv' }));
 const DATA_FILE = path.join(CONFIG.outputDir, CONFIG.outputFile);
 const PIPELINE_DATA_FILE = path.join(CONFIG.outputDir, PIPELINE_FILE);
 const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
+// Court session cookies (solved locally past the Cloudflare/Turnstile gate),
+// uploaded here so the headless scrape can reuse them. Path matches
+// montco-courts.js CONFIG.sessionPath so the scraper reads the same file.
+const MONTCO_SESSION_FILE = path.join(CONFIG.outputDir, 'montco-session.json');
 const CAMDEN_CSV_FILE = path.join(CONFIG.outputDir, 'camden-lis-pendens.csv');
 const CAMDEN_DATA_FILE = path.join(CONFIG.outputDir, 'camden-pipeline.json');
 const CAMDEN_COURT_REFRESH_BATCH_FILE = path.join(CONFIG.outputDir, 'camden-court-refresh-batch.json');
@@ -771,6 +775,54 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
 
 app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isPipelineScrapingInProgress, lastStatus: lastPipelineScrapeStatus });
+});
+
+// ---- Montco court session (Cloudflare/Turnstile gate) ----
+// courtsapp.montcopa.org gates search + case-detail pages behind a Turnstile
+// "verify you are human" check that headless Chromium can't clear. The check is
+// solved once in a local visible browser (node scrapers/montco-courts.js --login),
+// and the resulting session cookies are uploaded here for the headless scrape to replay.
+app.get('/api/montco/session', checkAuth, async (req, res) => {
+  try {
+    const s = JSON.parse(await fs.readFile(MONTCO_SESSION_FILE, 'utf8'));
+    const savedAt = s.savedAt || null;
+    const ageHours = savedAt
+      ? Math.round((Date.now() - new Date(savedAt).getTime()) / 36e5 * 10) / 10
+      : null;
+    // Never return cookie values — just enough to confirm a session is present/fresh.
+    res.json({ exists: true, savedAt, ageHours, cookieCount: Array.isArray(s.cookies) ? s.cookies.length : 0 });
+  } catch (e) {
+    res.json({ exists: false });
+  }
+});
+
+app.post('/api/montco/session', checkAuth, async (req, res) => {
+  const s = req.body;
+  if (!s || !Array.isArray(s.cookies) || s.cookies.length === 0) {
+    return res.status(400).json({ error: 'Body must be a session object with a non-empty "cookies" array' });
+  }
+  const session = {
+    savedAt: s.savedAt || new Date().toISOString(),
+    userAgent: s.userAgent || '',
+    cookies: s.cookies
+  };
+  try {
+    await ensureDataDir();
+    await fs.writeFile(MONTCO_SESSION_FILE, JSON.stringify(session, null, 2));
+    res.json({ success: true, cookieCount: session.cookies.length, savedAt: session.savedAt });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/montco/session', checkAuth, async (req, res) => {
+  try {
+    await fs.unlink(MONTCO_SESSION_FILE);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'ENOENT') return res.json({ success: true, note: 'no session present' });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 let isRescanInProgress = false;
