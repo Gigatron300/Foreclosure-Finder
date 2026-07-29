@@ -797,14 +797,38 @@ app.get('/api/montco/session', checkAuth, async (req, res) => {
 });
 
 app.post('/api/montco/session', checkAuth, async (req, res) => {
-  const s = req.body;
-  if (!s || !Array.isArray(s.cookies) || s.cookies.length === 0) {
-    return res.status(400).json({ error: 'Body must be a session object with a non-empty "cookies" array' });
+  const b = req.body || {};
+  let cookies = Array.isArray(b.cookies) ? b.cookies : null;
+
+  const mkCookie = (name, value) => ({
+    name, value,
+    domain: 'courtsapp.montcopa.org', path: '/',
+    httpOnly: true, secure: true, sameSite: 'Lax'
+  });
+
+  // Convenience inputs from the browser paste box:
+  //  - sessionId:   just the ASP.NET_SessionId value
+  //  - cookieString: a raw "name=value; name2=value2" string (multiple cookies)
+  if (!cookies && typeof b.sessionId === 'string' && b.sessionId.trim()) {
+    cookies = [mkCookie('ASP.NET_SessionId', b.sessionId.trim())];
+  }
+  if (!cookies && typeof b.cookieString === 'string' && b.cookieString.trim()) {
+    cookies = b.cookieString.split(';').map(part => {
+      const i = part.indexOf('=');
+      if (i < 0) return null;
+      const name = part.slice(0, i).trim();
+      const value = part.slice(i + 1).trim();
+      return name ? mkCookie(name, value) : null;
+    }).filter(Boolean);
+  }
+
+  if (!cookies || cookies.length === 0) {
+    return res.status(400).json({ error: 'Provide "sessionId", "cookieString", or a non-empty "cookies" array' });
   }
   const session = {
-    savedAt: s.savedAt || new Date().toISOString(),
-    userAgent: s.userAgent || '',
-    cookies: s.cookies
+    savedAt: b.savedAt || new Date().toISOString(),
+    userAgent: b.userAgent || '',
+    cookies
   };
   try {
     await ensureDataDir();

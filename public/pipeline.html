@@ -1055,7 +1055,25 @@
             <label for="csvUpload" class="upload-label">Choose CSV or Excel File</label>
             <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
         </div>
-        
+
+        <!-- Court Session (Cloudflare "verify you are human" gate) -->
+        <div class="upload-section" id="sessionSection">
+            <h3>Court Session</h3>
+            <p>The court site now shows a "verify you are human" check that the server can't clear on its own. Paste a fresh session so scrapes can read case dockets. (Property addresses work without this; dockets and scores do not.)</p>
+            <ol style="text-align:left; max-width:660px; margin:0 auto 0.85rem; font-size:0.85rem; line-height:1.55; color:#94a3b8;">
+                <li>Open the <a href="https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1" target="_blank" style="color: var(--benoro-gold);">court search page</a> and complete the "Verify you are human" check so the real search page loads.</li>
+                <li>Press <b>F12</b> → click the <b>Application</b> tab → in the left sidebar under <b>Cookies</b> click <b>https://courtsapp.montcopa.org</b>.</li>
+                <li>Find the row named <b>ASP.NET_SessionId</b>, double-click its <b>Value</b> cell, and copy it (Ctrl+C).</li>
+                <li>Paste it below and click <b>Save Session</b>, then start a scrape right away (sessions go stale after ~20 min idle).</li>
+            </ol>
+            <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
+                <input type="text" id="sessionInput" placeholder="Paste ASP.NET_SessionId value" autocomplete="off" spellcheck="false"
+                    style="flex:1; min-width:260px; max-width:420px; padding:0.5rem 0.75rem; border:1px solid var(--benoro-border, #334155); border-radius:6px; background:var(--benoro-navy-light, #1e293b); color:var(--benoro-white, #fff);">
+                <button class="btn btn-primary" onclick="saveCourtSession()" id="saveSessionBtn">Save Session</button>
+            </div>
+            <div class="csv-status" id="sessionStatus" style="margin-top:0.75rem;">Checking session…</div>
+        </div>
+
         <!-- Stats Summary -->
         <div class="stats-summary">
             <div class="stat-item">
@@ -1574,6 +1592,7 @@
                             document.getElementById('mainContent').style.display = 'block';
                             initStreetViewModeControls().finally(() => loadData());
                             checkCsvStatus();
+                            checkCourtSession();
                         }
                     });
             } else {
@@ -1619,6 +1638,7 @@
                     document.getElementById('mainContent').style.display = 'block';
                     initStreetViewModeControls().finally(() => loadData());
                     checkCsvStatus();
+                    checkCourtSession();
                 } else {
                     document.getElementById('loginError').style.display = 'block';
                 }
@@ -1641,7 +1661,64 @@
                 console.error('Error checking CSV:', e);
             }
         }
-        
+
+        async function checkCourtSession() {
+            const el = document.getElementById('sessionStatus');
+            if (!el) return;
+            try {
+                const res = await fetch('/api/montco/session', { headers: { 'X-Auth-Token': authToken } });
+                const d = await res.json();
+                if (d.exists) {
+                    const age = (d.ageHours != null) ? `${d.ageHours}h ago` : 'recently';
+                    el.className = 'csv-status has-file';
+                    el.textContent = `✓ Session saved ${age} (${d.cookieCount} cookie${d.cookieCount === 1 ? '' : 's'}). If a scrape shows "gated" lines, paste a fresh one.`;
+                } else {
+                    el.className = 'csv-status no-file';
+                    el.textContent = '⚠ No session saved — court dockets will be blocked until you paste one.';
+                }
+            } catch (e) {
+                el.className = 'csv-status no-file';
+                el.textContent = 'Could not check session status.';
+            }
+        }
+
+        async function saveCourtSession() {
+            const input = document.getElementById('sessionInput');
+            const btn = document.getElementById('saveSessionBtn');
+            const el = document.getElementById('sessionStatus');
+            const val = (input.value || '').trim();
+            if (!val) {
+                el.className = 'csv-status no-file';
+                el.textContent = 'Paste the ASP.NET_SessionId value first.';
+                return;
+            }
+            btn.disabled = true;
+            const prevLabel = btn.textContent;
+            btn.textContent = 'Saving…';
+            try {
+                const res = await fetch('/api/montco/session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+                    body: JSON.stringify({ sessionId: val })
+                });
+                const d = await res.json();
+                if (res.ok && d.success) {
+                    input.value = '';
+                    el.className = 'csv-status has-file';
+                    el.textContent = `✓ Session saved (${d.cookieCount} cookie${d.cookieCount === 1 ? '' : 's'}). Start a scrape now while it's fresh.`;
+                } else {
+                    el.className = 'csv-status no-file';
+                    el.textContent = 'Save failed: ' + (d.error || ('HTTP ' + res.status));
+                }
+            } catch (e) {
+                el.className = 'csv-status no-file';
+                el.textContent = 'Save failed: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = prevLabel;
+            }
+        }
+
         async function handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
