@@ -3,6 +3,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -44,7 +45,8 @@ const CONFIG = {
 
   searchUrl: 'https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1',
   csvPath: path.join(process.env.DATA_DIR || './data', 'montco-cases.csv'),
-  sessionPath: path.join(process.env.DATA_DIR || './data', 'montco-session.json')
+  sessionPath: path.join(process.env.DATA_DIR || './data', 'montco-session.json'),
+  progressPath: path.join(process.env.DATA_DIR || './data', 'montco-progress.json')
 };
 
 const COURT_ORIGIN = 'https://courtsapp.montcopa.org';
@@ -166,6 +168,44 @@ async function establishMontcoSession(options = {}) {
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+// ===== Incremental save + resume =====
+// The scrape runs inside the web-service process on a small Render instance, so
+// an OOM/restart can kill it mid-run. We checkpoint progress after every browser
+// batch: a restart then costs at most one batch, and re-triggering resumes.
+
+// Fingerprint the CSV (row count + every case number) so a checkpoint is only
+// reused for the SAME dataset — uploading a new CSV invalidates it.
+function csvSignature(cases) {
+  const h = crypto.createHash('md5');
+  h.update(String(cases.length));
+  for (const c of cases) h.update('|' + (c.caseNumber || ''));
+  return h.digest('hex');
+}
+
+async function loadCheckpoint(progressPath, csvSig) {
+  try {
+    const cp = JSON.parse(await fs.readFile(progressPath, 'utf8'));
+    if (!cp || cp.csvSig !== csvSig || !Array.isArray(cp.results)) return null;
+    return cp;
+  } catch (e) {
+    return null; // no checkpoint, unreadable, or stale
+  }
+}
+
+async function saveCheckpoint(progressPath, data) {
+  try {
+    const tmp = progressPath + '.tmp';
+    await fs.writeFile(tmp, JSON.stringify(data));
+    await fs.rename(tmp, progressPath); // atomic swap so a kill mid-write can't corrupt it
+  } catch (e) {
+    console.log(`   ⚠️ Could not save progress checkpoint: ${(e.message || '').slice(0, 80)}`);
+  }
+}
+
+async function clearCheckpoint(progressPath) {
+  try { await fs.unlink(progressPath); } catch (e) { /* already gone */ }
 }
 
 async function parseCSV(csvPath) {
@@ -818,6 +858,24 @@ async function scrapeMontgomeryCourts(options = {}) {
     return [];
   }
 
+  // Resume from a prior interrupted run (same CSV). Restores already-scraped
+  // results + the harvested URL cache so we skip both re-scraping and re-harvest.
+  const csvSig = csvSignature(allCases);
+  let resumeResults = [];
+  const doneSet = new Set();
+  if (!testMode) {
+    const cp = await loadCheckpoint(CONFIG.progressPath, csvSig);
+    if (cp) {
+      resumeResults = cp.results || [];
+      for (const r of resumeResults) doneSet.add(r.caseNumber);
+      let restored = 0;
+      for (const [k, v] of Object.entries(cp.urlCache || {})) {
+        if (!urlCache[k]) { urlCache[k] = v; restored++; }
+      }
+      console.log(`   ⏩ Resuming prior run: ${resumeResults.length} cases already scraped, ${restored} cached URLs restored`);
+    }
+  }
+
   // Bulk URL harvest from search-results pages — populates the URL cache for cases we haven't scraped before
   if (enableHarvest && !testMode) {
     const uncached = allCases.filter(c => c.caseNumber && !urlCache[c.caseNumber]);
@@ -884,7 +942,14 @@ async function scrapeMontgomeryCourts(options = {}) {
     console.log(`   Processing ALL ${targets.length} cases`);
   }
 
-  const results = [];
+  // Seed results with anything already scraped in a prior run, and drop those
+  // cases from the work list so we only scrape what's left.
+  const results = resumeResults;
+  if (!testMode && doneSet.size > 0) {
+    const before = targets.length;
+    targets = targets.filter(c => !doneSet.has(c.caseNumber));
+    console.log(`   ⏩ Skipping ${before - targets.length} already-scraped cases; ${targets.length} remaining this run`);
+  }
 
   const concurrency = CONFIG.concurrency || 1;
   const restartEvery = CONFIG.batchSize;
@@ -1289,8 +1354,21 @@ async function scrapeMontgomeryCourts(options = {}) {
 
     await Promise.all(workers);
     await browser.close().catch(() => {});
+
+    // Checkpoint after each batch so a restart resumes instead of starting over.
+    if (!testMode) {
+      await saveCheckpoint(CONFIG.progressPath, {
+        savedAt: new Date().toISOString(),
+        csvSig,
+        results,
+        urlCache
+      });
+    }
     await delay(500);
   }
+
+  // Run finished cleanly — drop the checkpoint so the next trigger is a fresh run.
+  if (!testMode) await clearCheckpoint(CONFIG.progressPath);
 
   for (const r of results) {
     const key = normalizeDefendantName(r.defendant);

@@ -709,7 +709,8 @@ app.get('/api/pipeline/case/:caseNumber', checkAuth, async (req, res) => {
 app.post('/api/pipeline/clear', checkAuth, async (req, res) => {
   const files = [
     PIPELINE_DATA_FILE,
-    path.join(CONFIG.outputDir, 'url-cache.json')
+    path.join(CONFIG.outputDir, 'url-cache.json'),
+    path.join(CONFIG.outputDir, 'montco-progress.json')
   ];
   const deleted = [];
 
