@@ -35,7 +35,9 @@ const CONFIG = {
   pageLoadWait: 500,
   batchSize: 30,
   batchPause: 4000,
-  concurrency: 2,
+  // One browser page at a time. Two concurrent Chromium contexts blew past the
+  // 512MB Render instance and triggered OOM restarts; 1 roughly halves peak memory.
+  concurrency: 1,
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
