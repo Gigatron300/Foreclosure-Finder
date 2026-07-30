@@ -1104,6 +1104,7 @@
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
             <button class="btn btn-outline" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel" style="border-color: #f59e0b; color: #f59e0b;">Hide Unreliable</button>
+            <button class="btn btn-outline" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)" style="border-color: #ef4444; color: #ef4444;">Hide Closed</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1162,6 +1163,7 @@
         let streetViewModeRequiresPasskey = true;
         let sweetSpotOnly = false;
         let hideUnreliable = false;
+        let hideClosed = false;
 
         function isUnreliableAddress(c) {
             if (c.inMontgomeryCounty === false) return true;
@@ -1494,6 +1496,19 @@
             } else {
                 btn.style.background = 'transparent';
                 btn.style.color = '#f59e0b';
+            }
+            loadData();
+        }
+
+        function toggleHideClosed() {
+            hideClosed = !hideClosed;
+            const btn = document.getElementById('hideClosedFilter');
+            if (hideClosed) {
+                btn.style.background = '#ef4444';
+                btn.style.color = 'white';
+            } else {
+                btn.style.background = 'transparent';
+                btn.style.color = '#ef4444';
             }
             loadData();
         }
@@ -1890,6 +1905,11 @@
                     cases = cases.filter(c => !isUnreliableAddress(c));
                 }
 
+                // Hide cases that read CLOSED on the court page today
+                if (hideClosed) {
+                    cases = cases.filter(c => !c.liveClosed);
+                }
+
                 // Annotate sheriff-sale matches before render
                 for (const c of cases) {
                     const keys = getCaseSheriffKeys(c);
@@ -2065,6 +2085,7 @@
                     <div class="property-info">
                         <div class="address-row">
                             <div class="property-address">${address}</div>
+                            ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV" style="display:inline-flex;align-items:center;gap:4px;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">CLOSED NOW</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}

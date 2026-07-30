@@ -1069,6 +1069,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         const result = {
           addresses: [],
           judgmentAmount: null,
+          liveStatus: '',
           docket: {
             entries: 0,
             hasBankruptcy: false,
@@ -1087,6 +1088,18 @@ async function scrapeMontgomeryCourts(options = {}) {
         };
 
         const tables = document.querySelectorAll('table');
+
+        // Live case status from the summary table (e.g. "1 - OPEN", "2 - CLOSED").
+        // It's a 2-cell label/value row; matching only 2-cell rows avoids the
+        // "Status" column headers in the Plaintiffs/Defendants/Docket tables.
+        const summaryRows = document.querySelectorAll('tr');
+        for (let ri = 0; ri < summaryRows.length; ri++) {
+          const rc = summaryRows[ri].querySelectorAll('td, th');
+          if (rc.length === 2) {
+            const label = (rc[0].textContent || '').trim().replace(/:$/, '').toLowerCase();
+            if (label === 'status') { result.liveStatus = (rc[1].textContent || '').trim(); break; }
+          }
+        }
 
         for (let ti = 0; ti < tables.length; ti++) {
           const table = tables[ti];
@@ -1284,6 +1297,13 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.detailUrl = currentUrl;
       c.judgmentAmount = data.judgmentAmount != null ? data.judgmentAmount : null;
 
+      // Live status read off the court page today (the CSV status can be stale).
+      // Closed = a closed-type keyword and no open-type keyword.
+      c.liveStatus = data.liveStatus || '';
+      const _ls = c.liveStatus.toUpperCase();
+      c.liveClosed = /CLOS|DISPOS|SETTL|TERMINAT|DISMISS|INACTIV|COMPLET|WITHDRAW/.test(_ls)
+                     && !/OPEN|ACTIVE|PENDING/.test(_ls);
+
       c.docket = data.docket || {};
 
       // ✅ V3 SCORING HERE
@@ -1314,6 +1334,8 @@ async function scrapeMontgomeryCourts(options = {}) {
         inMontgomeryCounty: c.inMontgomeryCounty,
         hasJudgement: c.hasJudgement,
         status: c.status,
+        liveStatus: c.liveStatus || '',
+        liveClosed: !!c.liveClosed,
 
         // Score output
         leadScore: ls.score,
@@ -1343,7 +1365,8 @@ async function scrapeMontgomeryCourts(options = {}) {
       const gradeEmoji = ls.grade === 'A' ? '🔥' : ls.grade === 'B' ? '⭐' : ls.grade === 'C' ? '📋' : '⚠️';
       const addrStr = c.propertyAddress ? `${c.propertyAddress}, ${c.propertyCity}` : 'No addr';
       const srcTag = c.addressSource ? ` [src:${c.addressSource}]` : '';
-      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}] [P:${ls.pillars.pressure} R:${ls.pillars.resistance} M:${ls.pillars.momentum} F:${ls.pillars.fatigue}] - ${addrStr}${srcTag}`);
+      const closedTag = c.liveClosed ? ` 🔴CLOSED(${c.liveStatus})` : '';
+      console.log(`   ${i + 1}/${targets.length} ${gradeEmoji} ${c.caseNumber} [${ls.grade}:${ls.score}] [P:${ls.pillars.pressure} R:${ls.pillars.resistance} M:${ls.pillars.momentum} F:${ls.pillars.fatigue}] - ${addrStr}${srcTag}${closedTag}`);
 
     } catch (err) {
       console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (${(err.message || '').slice(0, 60)})`);
@@ -1398,10 +1421,12 @@ async function scrapeMontgomeryCourts(options = {}) {
   const inMontCo = results.filter(r => r.inMontgomeryCounty).length;
   const fromParcel = results.filter(r => r.addressSource === 'parcel').length;
   const fromDefendant = results.filter(r => r.addressSource === 'defendant' || r.addressSource === 'defendant-fallback').length;
+  const closedNow = results.filter(r => r.liveClosed).length;
 
   console.log(`\n✅ Done: ${results.length} cases`);
   console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
   console.log(`   Address source: ${fromParcel} from parcel API, ${fromDefendant} from defendant addr`);
+  if (closedNow > 0) console.log(`   🔴 ${closedNow} case(s) now show CLOSED on the court page (were OPEN in the CSV)`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
   if (authGateHits > 0) {
     console.log(`\n   🔒 ${authGateHits} case(s) were blocked by the Cloudflare gate.`);
