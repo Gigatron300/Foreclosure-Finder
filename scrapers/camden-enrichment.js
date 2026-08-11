@@ -133,6 +133,87 @@ function normalizeTownName(value) {
     .replace(/\s+/g, ' ');
 }
 
+// ============================================================
+// Locality / mailing-address aliases
+// ------------------------------------------------------------
+// The County Clerk "Town" column is not always the legal municipality - it is
+// often the USPS place name on the deed (SICKLERVILLE, ATCO, WEST BERLIN...),
+// and neighbouring towns get mislabelled outright. Each alias maps to an
+// ORDERED list of municipality codes used to rank parcel matches.
+// ============================================================
+const LOCALITY_TO_MUN_CODES = {
+  // Gloucester Twp mailing names
+  'GLENDORA': ['0415'],
+  'BLACKWOOD': ['0415'],
+  'ERIAL': ['0415', '0436'],
+  'GRENLOCH': ['0415'],
+  'ALBION': ['0415'],
+  // Winslow Twp mailing names
+  'SICKLERVILLE': ['0436', '0415'],
+  'CEDAR BROOK': ['0436'],
+  'BLUE ANCHOR': ['0436', '0435'],
+  'BRADDOCK': ['0436'],
+  // Waterford Twp mailing names
+  'ATCO': ['0435', '0436'],
+  'WATERFORD WORKS': ['0435', '0436'],
+  'TANSBORO': ['0435', '0406'],
+  // Haddon Twp mailing name
+  'WESTMONT': ['0416'],
+  // Bare names shared by a boro and the township that surrounds it
+  'BERLIN': ['0405', '0406', '0436', '0435'],
+  'WEST BERLIN': ['0406', '0405', '0436'],
+  'CLEMENTON': ['0411', '0415', '0428', '0422'],
+  'LAUREL SPRINGS': ['0420', '0415', '0422', '0431'],
+  'GLOUCESTER': ['0414', '0415'],
+  'HADDONFIELD': ['0417', '0416', '0403', '0409'],
+  'HADDON TWP': ['0416', '0417'],
+  'HI-NELLA': ['0419'],
+  // Pine Valley (0429) merged into Pine Hill in 2022; parcels still carry 0429
+  'PINE VALLEY': ['0429', '0428'],
+  'PINE HILL': ['0428', '0429'],
+};
+
+// Scope county-wide lookups by municipality-code prefix, NOT by COUNTY.
+// MOD-IV leaves COUNTY null on incomplete records - the same ones that have a
+// null PROP_LOC - so COUNTY='CAMDEN' silently drops them and lets a
+// neighbouring town's parcel win instead. Camden County is 04xx.
+const CAMDEN_MUN_FILTER = "PCL_MUN LIKE '04%'";
+
+// Ordered spellings to look up for a raw town string, most specific first, so
+// "BERLIN TWP" resolves to 0406 before the bare-"BERLIN" fallbacks apply.
+function townNameVariants(raw) {
+  const base = normalizeTownName(raw).replace(/[^A-Z0-9\- ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!base) return [];
+
+  const expanded = base
+    .replace(/\bTOWNSHIP\b/g, 'TWP')
+    .replace(/\bBOROUGH\b/g, 'BORO')
+    .replace(/\bMOUNT\b/g, 'MT');
+  // NB: "COUNTY" is deliberately not stripped - a "CAMDEN COUNTY" label is a
+  // county-wide placeholder, not the City of Camden.
+  const stripped = expanded.replace(/\b(TWP|BORO|CITY|TOWN)\b/g, '');
+
+  const variants = [];
+  for (const v of [base, expanded, expanded.replace(/-/g, ' '), stripped, stripped.replace(/-/g, ' ')]) {
+    const clean = v.replace(/\s+/g, ' ').trim();
+    if (clean && !variants.includes(clean)) variants.push(clean);
+  }
+  return variants;
+}
+
+// Ordered, de-duplicated candidate municipality codes for a town label.
+// Empty means "no idea" - the caller falls back to a county-wide match.
+function resolveMunCodes(rawTown) {
+  const codes = [];
+  const push = (code) => { if (code && !codes.includes(code)) codes.push(code); };
+
+  for (const variant of townNameVariants(rawTown)) {
+    push(TOWN_TO_MUN_CODE[variant]);
+    for (const code of LOCALITY_TO_MUN_CODES[variant] || []) push(code);
+  }
+  return codes;
+}
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
@@ -624,32 +705,50 @@ function parseCamdenCSV(csvText) {
 // ============================================================
 // ArcGIS REST API Query
 // ============================================================
-function httpsGet(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PropertyResearch/1.0)' } }, (res) => {
+// Resolves { features } on success or { failed, reason } on any transport,
+// HTTP or API-level error. These MUST stay distinguishable: an error that
+// looks like an empty result silently turns a real property into
+// "No parcel match found", and concurrency makes those errors routine.
+function httpsGetOnce(url) {
+  return new Promise((resolve) => {
+    const req = https.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PropertyResearch/1.0)' },
+      timeout: 45000,
+    }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (res.statusCode !== 200) {
+          resolve({ failed: true, reason: `HTTP ${res.statusCode}` });
+          return;
+        }
         try {
           const parsed = JSON.parse(data);
-          // ArcGIS returns { error: { ... } } on bad queries
+          // ArcGIS reports query problems as { error: { ... } } with HTTP 200.
           if (parsed.error) {
-            console.log(`     API error: ${parsed.error.message || JSON.stringify(parsed.error)}`);
-            resolve({ features: [] });
+            resolve({ failed: true, reason: `API: ${parsed.error.message || JSON.stringify(parsed.error)}` });
             return;
           }
-          resolve(parsed);
-        }
-        catch (e) {
-          console.log(`     JSON parse error. Response starts with: ${data.substring(0, 200)}`);
-          resolve({ features: [] });
+          resolve({ features: parsed.features || [] });
+        } catch (e) {
+          resolve({ failed: true, reason: `bad JSON: ${data.substring(0, 120)}` });
         }
       });
-    }).on('error', (err) => {
-      console.log(`     HTTP error: ${err.message}`);
-      resolve({ features: [] });
     });
+    req.on('timeout', () => { req.destroy(); resolve({ failed: true, reason: 'timeout' }); });
+    req.on('error', (err) => resolve({ failed: true, reason: err.message }));
   });
+}
+
+async function httpsGet(url, attempts = 3) {
+  let last = { failed: true, reason: 'no attempt' };
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await delay(1000 * i);   // linear backoff: 1s, 2s
+    last = await httpsGetOnce(url);
+    if (!last.failed) return last;
+  }
+  console.log(`     query failed after ${attempts} attempts: ${last.reason}`);
+  return last;
 }
 
 function buildQueryUrl(where) {
@@ -662,34 +761,192 @@ function buildQueryUrl(where) {
   return `${ARCGIS_URL}?${params.toString()}`;
 }
 
-async function queryParcel(munCode, block, lot) {
-  // Try exact match first
-  const where1 = `PCL_MUN='${munCode}' AND PCLBLOCK='${block}' AND PCLLOT='${lot}'`;
-  let data = await httpsGet(buildQueryUrl(where1));
-  let features = (data && data.features) || [];
+// ArcGIS string literals are single-quoted; escape any embedded quote.
+function sqlQuote(value) {
+  return String(value == null ? '' : value).replace(/'/g, "''");
+}
 
-  // Fallback: strip leading zeros
-  if (!features.length) {
-    const blockStripped = block.replace(/^0+/, '') || '0';
-    const lotStripped = lot.replace(/^0+/, '') || '0';
-    if (blockStripped !== block || lotStripped !== lot) {
-      const where2 = `PCL_MUN='${munCode}' AND PCLBLOCK='${blockStripped}' AND PCLLOT='${lotStripped}'`;
-      await delay(300);
-      data = await httpsGet(buildQueryUrl(where2));
-      features = (data && data.features) || [];
+// The Clerk's Lot column concatenates the lot with its condo/unit qualifier
+// (e.g. "2C505A" = lot 2, qualifier C505A), but MOD-IV keeps them in separate
+// PCLLOT / PCLQCODE fields.
+function splitLotQualifier(lot) {
+  const m = String(lot || '').trim().match(/^(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9\-.\/]*)$/);
+  if (!m) return null;
+  return { lot: m[1], qualifier: m[2].toUpperCase() };
+}
+
+// MOD-IV writes block/lot decimals with two digits ("339.30", "21.01"). When
+// the Clerk sheet round-trips through Excel the value becomes a number, so
+// "339.30" loses its trailing zero and arrives as "339.3" while "21.01" is
+// left alone. A single decimal digit is therefore ambiguous - try both, and
+// let the caller flag it when both turn out to be real parcels.
+function decimalPadVariants(value) {
+  const raw = String(value == null ? '' : value).trim();
+  const m = raw.match(/^(\d+)\.(\d)$/);
+  if (!m) return [raw];
+  return [raw, `${m[1]}.${m[2]}0`, `${m[1]}.0${m[2]}`];
+}
+
+function sqlInList(values) {
+  return values.map(v => `'${sqlQuote(v)}'`).join(', ');
+}
+
+// Ordered lookup strategies, most exact first, so the common case still costs
+// a single request.
+function buildWhereClauses(munFilter, rawBlock, rawLot) {
+  // Callers may hand us numbers straight out of the pipeline JSON.
+  const block = String(rawBlock == null ? '' : rawBlock).trim();
+  const lot = String(rawLot == null ? '' : rawLot).trim();
+  const b = sqlQuote(block);
+  const l = sqlQuote(lot);
+  const clauses = [`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${l}'`];
+
+  const blockStripped = block.replace(/^0+/, '') || '0';
+  const lotStripped = lot.replace(/^0+/, '') || '0';
+  if (blockStripped !== block || lotStripped !== lot) {
+    clauses.push(`${munFilter} AND PCLBLOCK='${sqlQuote(blockStripped)}' AND PCLLOT='${sqlQuote(lotStripped)}'`);
+  }
+
+  const split = splitLotQualifier(lot);
+  if (split) {
+    const sl = sqlQuote(split.lot);
+    const sq = sqlQuote(split.qualifier);
+    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${sl}' AND PCLQCODE='${sq}'`);
+    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${sl}' AND PCLQCODE LIKE '${sq}%'`);
+  } else if (/^[A-Za-z]/.test(lot.trim())) {
+    // Qualifier with no lot prefix, e.g. lot "C2020".
+    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLQCODE='${sqlQuote(lot.trim().toUpperCase())}'`);
+  }
+
+  // Excel-mangled decimals; one query covers every padding combination so a
+  // genuine tie is visible in a single result set.
+  const blockVars = decimalPadVariants(block);
+  const lotVars = decimalPadVariants(lot);
+  if (blockVars.length > 1 || lotVars.length > 1) {
+    clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLLOT IN (${sqlInList(lotVars)})`);
+  }
+
+  if (!block.includes('.')) {
+    clauses.push(`${munFilter} AND PCLBLOCK LIKE '${b}%' AND PCLLOT='${l}'`);
+  }
+  return clauses;
+}
+
+// Throws on a genuine query failure so the caller records an error rather than
+// mistaking a throttled request for "this parcel does not exist".
+async function runClauses(clauses) {
+  for (let i = 0; i < clauses.length; i++) {
+    if (i > 0) await delay(300);
+    const data = await httpsGet(buildQueryUrl(clauses[i]));
+    if (data.failed) throw new Error(`Parcel lookup failed (${data.reason})`);
+    if (data.features.length) return data.features;
+  }
+  return [];
+}
+
+// All features belonging to the highest-priority candidate municipality.
+function pickByCandidate(features, candidates) {
+  for (const code of candidates) {
+    const matches = features.filter(f => ((f.attributes || {}).PCL_MUN || '').trim() === code);
+    if (matches.length) return { code, matches };
+  }
+  return null;
+}
+
+const parcelKey = (f) => {
+  const a = f.attributes || {};
+  return [a.PCLBLOCK, a.PCLLOT, a.PCLQCODE, (a.PROP_LOC || '').trim()].join('|');
+};
+
+// Search the whole county by block/lot in one pass and let the candidate
+// municipalities *rank* the results, rather than querying each town in turn.
+// Costs the same single request in the common case, and still finds the parcel
+// when the Clerk's town label is wrong.
+async function queryParcel(munCodes, block, lot) {
+  const candidates = (Array.isArray(munCodes) ? munCodes : [munCodes]).filter(Boolean);
+
+  // Fast path: an exact PCL_MUN match runs ~25% quicker than the LIKE '04%'
+  // scan, and the labelled town is right the overwhelming majority of the
+  // time. Only widen when it misses.
+  if (candidates.length) {
+    const primary = await runClauses(buildWhereClauses(`PCL_MUN='${sqlQuote(candidates[0])}'`, block, lot));
+    const addressedPrimary = primary.filter(f => ((f.attributes || {}).PROP_LOC || '').trim());
+    // A single clean hit needs no county-wide confirmation; anything else
+    // (nothing, no address, or a tie) falls through to the full search.
+    if (addressedPrimary.length && new Set(addressedPrimary.map(parcelKey)).size === 1) {
+      const result = toParcelResult(addressedPrimary);
+      result.matchedVia = 'primary';
+      return result;
     }
   }
 
-  // Fallback: LIKE query for decimal qualifiers
-  if (!features.length && !block.includes('.')) {
-    const where3 = `PCL_MUN='${munCode}' AND PCLBLOCK LIKE '${block}%' AND PCLLOT='${lot}'`;
-    await delay(300);
-    data = await httpsGet(buildQueryUrl(where3));
-    features = (data && data.features) || [];
-  }
-
+  const features = await runClauses(buildWhereClauses(CAMDEN_MUN_FILTER, block, lot));
   if (!features.length) return null;
 
+  const hit = pickByCandidate(features, candidates);
+  let scoped, matchedVia;
+  if (hit) {
+    scoped = hit.matches;
+    matchedVia = hit.code === candidates[0] ? 'primary' : 'alias';
+  } else {
+    // No candidate town matched. Block/lot pairs repeat across municipalities,
+    // so only accept a county-wide hit when it points at a single town.
+    const distinctMuns = new Set(features.map(f => ((f.attributes || {}).PCL_MUN || '').trim()));
+    if (distinctMuns.size > 1) {
+      return {
+        ambiguous: true,
+        reason: 'multiple municipalities',
+        candidates: [...new Set(features.map(f => ((f.attributes || {}).MUN_NAME || '').trim()))],
+        matchCount: features.length,
+      };
+    }
+    scoped = features;
+    matchedVia = 'county-wide';
+  }
+
+  // MOD-IV carries plenty of parcels with a blank PROP_LOC. That is a missing
+  // address, not a failed match - the valuation fields are still usable.
+  const addressed = scoped.filter(f => ((f.attributes || {}).PROP_LOC || '').trim());
+  if (!addressed.length) {
+    const result = toParcelResult(scoped);
+    result.matchedVia = matchedVia;
+    result.noAddressOnFile = true;
+    return result;
+  }
+
+  // A padding tie (block 21.01 vs 21.10) or an unqualified condo lot resolves
+  // to several real addresses. Guessing would put a wrong address on a lead.
+  const distinctParcels = new Set(addressed.map(parcelKey));
+  if (distinctParcels.size > 1) {
+    return {
+      ambiguous: true,
+      reason: 'multiple parcels',
+      candidates: addressed.slice(0, 4).map(f => {
+        const a = f.attributes || {};
+        return `blk ${a.PCLBLOCK} lot ${a.PCLLOT}${a.PCLQCODE ? ' q' + a.PCLQCODE : ''} = ${(a.PROP_LOC || '').trim()}`;
+      }),
+      matchCount: distinctParcels.size,
+    };
+  }
+
+  const result = toParcelResult(addressed);
+  result.matchedVia = matchedVia;
+
+  // The Clerk named a town but the only parcel with this block/lot sits
+  // somewhere else entirely - usually a corrupt block number rather than a
+  // mislabelled town (real mislabels resolve through the alias list above).
+  // Suggest it for review instead of asserting it.
+  if (matchedVia === 'county-wide' && candidates.length) {
+    return {
+      needsReview: true,
+      reason: 'block/lot found outside the labelled town',
+      suggestion: result,
+    };
+  }
+  return result;
+}
+
+function toParcelResult(features) {
   const attrs = features[0].attributes || {};
   return {
     propertyAddress: (attrs.PROP_LOC || '').trim(),
@@ -706,6 +963,8 @@ async function queryParcel(munCode, block, lot) {
     dwellingUnits: attrs.DWELL != null ? attrs.DWELL : null,
     matchedBlock: attrs.PCLBLOCK,
     matchedLot: attrs.PCLLOT,
+    matchedQualifier: (attrs.PCLQCODE || '').trim(),
+    matchedMunCode: (attrs.PCL_MUN || '').trim(),
     matchCount: features.length,
   };
 }
@@ -724,65 +983,89 @@ async function enrichCamdenCases(data, options = {}) {
 
   const total = cases.length;
   let found = 0, notFound = 0, skipped = 0, errors = 0;
+  // Non-success outcomes worth telling apart on a full-county run.
+  let ambiguous = 0, needsReview = 0, noAddressOnFile = 0;
 
   console.log(`\n🏠 Camden County Address Enrichment`);
   console.log(`${'='.repeat(50)}`);
   console.log(`Cases: ${total}`);
   console.log(`API: NJ MOD-IV ArcGIS REST\n`);
 
-  for (let i = 0; i < cases.length; i++) {
-    const c = cases[i];
+  // The NJ ArcGIS service costs ~6s per query, so a full county re-resolve is
+  // hours long when run one at a time. Three in flight keeps this feature
+  // usable without the memory footprint that forced the scrapers to 1.
+  const ADDRESS_CONCURRENCY = 1;
+
+  async function processCase(c, i) {
     const prefix = `  ${i + 1}/${total}`;
 
     if (c.propertyAddress) {
       // Backfill missing fields from already-enriched cases
       const needsBackfill = (!c.lastSaleDate || c.dwellingUnits == null) && c.town && c.block && c.lot;
       if (needsBackfill) {
-        const munCode = TOWN_TO_MUN_CODE[normalizeTownName(c.town)];
-        if (munCode) {
-          await delay(400);
-          try {
-            const result = await queryParcel(munCode, c.block, c.lot);
-            if (result) {
-              if (!c.lastSaleDate && result.saleDate) {
-                c.lastSaleDate = result.saleDate;
-              }
-              if (c.dwellingUnits == null && result.dwellingUnits != null) {
-                c.dwellingUnits = result.dwellingUnits;
-              }
+        await delay(400);
+        try {
+          const result = await queryParcel(resolveMunCodes(c.town), c.block, c.lot);
+          if (result && !result.ambiguous) {
+            if (!c.lastSaleDate && result.saleDate) {
+              c.lastSaleDate = result.saleDate;
             }
-          } catch (e) {}
-        }
+            if (c.dwellingUnits == null && result.dwellingUnits != null) {
+              c.dwellingUnits = result.dwellingUnits;
+            }
+          }
+        } catch (e) {}
       }
       skipped++;
-      continue;
+      return;
     }
 
     const town = normalizeTownName(c.town);
     const block = (c.block || '').trim();
     const lot = (c.lot || '').trim();
-    const munCode = TOWN_TO_MUN_CODE[town];
+    const munCodes = resolveMunCodes(town);
 
-    if (!munCode) {
-      console.log(`${prefix} ⚠ ${c.instrumentNumber} - Unknown town: '${town}'`);
-      c.enrichmentError = `Unknown town: ${town}`;
-      errors++;
-      continue;
+    if (!munCodes.length) {
+      // Not fatal - queryParcel still searches the whole county by block/lot.
+      console.log(`${prefix} ℹ ${c.instrumentNumber} - Unmapped town '${town}', searching county-wide`);
     }
 
     if (!block || !lot) {
       console.log(`${prefix} ⚠ ${c.instrumentNumber} - Missing block/lot`);
       c.enrichmentError = 'Missing block or lot';
       errors++;
-      continue;
+      return;
     }
 
     await delay(400);
 
     try {
-      const result = await queryParcel(munCode, block, lot);
+      const result = await queryParcel(munCodes, block, lot);
 
-      if (result && result.propertyAddress) {
+      if (result && result.ambiguous) {
+        c.enrichmentError = `Ambiguous (${result.reason}): ${result.candidates.join(' | ')}`;
+        c.enrichmentAmbiguous = result.candidates;
+        console.log(`${prefix} ❓ ${c.instrumentNumber} B:${block} L:${lot} → ambiguous, ${result.matchCount} matches (${result.reason})`);
+        ambiguous++;
+      } else if (result && result.needsReview) {
+        const s = result.suggestion;
+        c.enrichmentError = `Needs review - ${result.reason}: suggests ${s.propertyAddress} (${s.municipality})`;
+        c.suggestedAddress = s.propertyAddress;
+        c.suggestedMunicipality = s.municipality;
+        console.log(`${prefix} 🔍 ${c.instrumentNumber} B:${block} L:${lot} → needs review, suggests ${s.propertyAddress} (${s.municipality})`);
+        needsReview++;
+      } else if (result && result.noAddressOnFile) {
+        // Keep the valuation data - only the street address is missing.
+        c.assessedValue = result.netValue;
+        c.landValue = result.landValue;
+        c.improvementValue = result.improvementValue;
+        c.propertyClass = result.propertyClass;
+        c.dwellingUnits = result.dwellingUnits;
+        c.resolvedMunicipality = result.municipality;
+        c.enrichmentError = 'Parcel found but MOD-IV has no street address on file';
+        console.log(`${prefix} ⃠ ${c.instrumentNumber} B:${block} L:${lot} → parcel found, no address on file`);
+        noAddressOnFile++;
+      } else if (result && result.propertyAddress) {
         c.propertyAddress = result.propertyAddress;
         c.assessedValue = result.netValue;
         c.landValue = result.landValue;
@@ -795,9 +1078,17 @@ async function enrichCamdenCases(data, options = {}) {
         c.dwellingUnits = result.dwellingUnits;
         c.enrichmentSource = 'NJ MOD-IV via ArcGIS REST';
         c.enrichedAt = new Date().toISOString();
+        c.enrichmentError = '';
+        c.resolvedMunicipality = result.municipality;
+        // Surface, rather than silently correct, a Clerk town label that turned
+        // out to belong to a different municipality.
+        c.townMismatch = result.matchedVia !== 'primary'
+          ? `Clerk town '${town}' resolved to ${result.municipality}`
+          : '';
 
         const val = result.netValue ? `$${result.netValue.toLocaleString()}` : 'N/A';
-        console.log(`${prefix} ✅ ${c.instrumentNumber} B:${block} L:${lot} → ${result.propertyAddress} (${val})`);
+        const via = result.matchedVia === 'primary' ? '' : ` [via ${result.matchedVia}: ${result.municipality}]`;
+        console.log(`${prefix} ✅ ${c.instrumentNumber} B:${block} L:${lot} → ${result.propertyAddress} (${val})${via}`);
         found++;
       } else {
         c.enrichmentError = 'No parcel match found';
@@ -810,6 +1101,19 @@ async function enrichCamdenCases(data, options = {}) {
       errors++;
     }
   }
+
+  // Hand each worker the next index; counters stay safe because Node runs the
+  // synchronous parts of processCase to completion between awaits.
+  let cursor = 0;
+  async function worker() {
+    while (cursor < cases.length) {
+      const i = cursor++;
+      await processCase(cases[i], i);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(ADDRESS_CONCURRENCY, cases.length) }, worker)
+  );
 
   // Update data object
   if (testMode) {
@@ -829,6 +1133,9 @@ async function enrichCamdenCases(data, options = {}) {
     totalCases: total,
     addressesFound: found,
     notFound,
+    ambiguous,
+    needsReview,
+    noAddressOnFile,
     skipped,
     errors,
     hitRate: (total - skipped) > 0 ? `${(found / (total - skipped) * 100).toFixed(1)}%` : 'N/A',
@@ -837,7 +1144,10 @@ async function enrichCamdenCases(data, options = {}) {
   console.log(`\n${'='.repeat(50)}`);
   console.log(`📊 ENRICHMENT SUMMARY`);
   console.log(`  Addresses found: ${found} ✅`);
-  console.log(`  Not found: ${notFound} ❌`);
+  console.log(`  No parcel at all: ${notFound} ❌`);
+  console.log(`  Ambiguous (needs a pick): ${ambiguous} ❓`);
+  console.log(`  Found outside labelled town: ${needsReview} 🔍`);
+  console.log(`  Parcel exists, no address on file: ${noAddressOnFile} ⃠`);
   console.log(`  Skipped: ${skipped} | Errors: ${errors}`);
   if ((total - skipped) > 0) {
     console.log(`  Hit rate: ${found}/${total - skipped} = ${(found / (total - skipped) * 100).toFixed(1)}%`);
@@ -854,5 +1164,11 @@ module.exports = {
   classifyCourtCaseType,
   classifyPlaintiff,
   classifyDefendant,
-  TOWN_TO_MUN_CODE
+  TOWN_TO_MUN_CODE,
+  LOCALITY_TO_MUN_CODES,
+  normalizeTownName,
+  townNameVariants,
+  resolveMunCodes,
+  splitLotQualifier,
+  queryParcel
 };
