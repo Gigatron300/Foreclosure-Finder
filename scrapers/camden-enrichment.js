@@ -994,7 +994,7 @@ async function enrichCamdenCases(data, options = {}) {
   // The NJ ArcGIS service costs ~6s per query, so a full county re-resolve is
   // hours long when run one at a time. Three in flight keeps this feature
   // usable without the memory footprint that forced the scrapers to 1.
-  const ADDRESS_CONCURRENCY = 1;
+  const ADDRESS_CONCURRENCY = 3;
 
   async function processCase(c, i) {
     const prefix = `  ${i + 1}/${total}`;
