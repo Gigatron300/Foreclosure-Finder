@@ -937,6 +937,7 @@
 
             <div class="actions-secondary">
                 <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
+                <button class="btn" onclick="reverifyAddresses()" id="reverifyBtn" title="Re-check addresses already stored, flagging any that no longer match. Never overwrites.">Re-verify Stored</button>
             </div>
 
             <div class="results-header">
@@ -2078,16 +2079,17 @@
             `;
         }
 
-        async function enrichData(testMode = false) {
+        async function enrichData(testMode = false, reverify = false) {
             const enrichBtn = document.getElementById('enrichBtn');
             enrichBtn.disabled = true;
-            enrichBtn.innerHTML = testMode ? 'Testing...' : 'Resolving addresses... (~45 sec)';
+            document.getElementById('reverifyBtn').disabled = true;
+            enrichBtn.innerHTML = reverify ? 'Re-verifying stored addresses...' : (testMode ? 'Testing...' : 'Resolving addresses... (~45 sec)');
 
             try {
                 const r = await fetch('/api/camden/enrich', {
                     method: 'POST',
                     headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ testMode })
+                    body: JSON.stringify({ testMode, reverify })
                 });
                 const result = await r.json();
 
@@ -2106,7 +2108,17 @@
                         checkCsvStatus();
                         if (status.lastStatus?.status === 'completed') {
                             const s = status.lastStatus.enrichmentSummary || {};
-                            alert(`Done! ${s.addressesFound || 0} addresses resolved (${s.hitRate || 'N/A'} hit rate)`);
+                            if (reverify) {
+                                alert(`Re-verify done!
+
+Unchanged: ${s.verified || 0}
+DISAGREEMENTS: ${s.disagreed || 0}
+No longer confirmable: ${s.unconfirmed || 0}
+
+Nothing was overwritten. Disagreements are recorded on each case.`);
+                            } else {
+                                alert(`Done! ${s.addressesFound || 0} addresses resolved (${s.hitRate || 'N/A'} hit rate)`);
+                            }
                         } else if (status.lastStatus?.error) {
                             alert('Error: ' + status.lastStatus.error);
                         }
@@ -2122,6 +2134,17 @@
 function resetButtons() {
     document.getElementById('enrichBtn').disabled = false;
     document.getElementById('enrichBtn').innerHTML = 'Resolve Addresses';
+    const rb = document.getElementById('reverifyBtn');
+    if (rb) { rb.disabled = false; rb.innerHTML = 'Re-verify Stored'; }
+}
+
+// Audits addresses stored by earlier runs. Long job - one lookup per resolved
+// case - so it asks first.
+function reverifyAddresses() {
+    if (!confirm(`Re-check every address already stored?
+
+This runs one parcel lookup per resolved case, so it can take a few hours. Nothing is overwritten - mismatches are flagged for you to review.`)) return;
+    enrichData(false, true);
 }
 
 function buildCourtStatusCommand(testMode = false, mode = 'default', resume = false) {
