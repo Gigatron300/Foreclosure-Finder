@@ -141,36 +141,52 @@ function normalizeTownName(value) {
 // and neighbouring towns get mislabelled outright. Each alias maps to an
 // ORDERED list of municipality codes used to rank parcel matches.
 // ============================================================
+// TRUSTED. These are USPS place names with no municipality of their own, so
+// the label stakes no claim that resolving them could contradict - "ATCO" can
+// only mean Waterford or Winslow Twp. A match here fills the address.
 const LOCALITY_TO_MUN_CODES = {
   // Gloucester Twp mailing names
   'GLENDORA': ['0415'],
   'BLACKWOOD': ['0415'],
-  'ERIAL': ['0415', '0436'],
+  'ERIAL': ['0415'],
   'GRENLOCH': ['0415'],
   'ALBION': ['0415'],
   // Winslow Twp mailing names
   'SICKLERVILLE': ['0436', '0415'],
   'CEDAR BROOK': ['0436'],
-  'BLUE ANCHOR': ['0436', '0435'],
+  'BLUE ANCHOR': ['0436'],
   'BRADDOCK': ['0436'],
   // Waterford Twp mailing names
   'ATCO': ['0435', '0436'],
   'WATERFORD WORKS': ['0435', '0436'],
-  'TANSBORO': ['0435', '0406'],
-  // Haddon Twp mailing name
+  'TANSBORO': ['0435'],
+  // Haddon Twp / Berlin Twp mailing names
   'WESTMONT': ['0416'],
-  // Bare names shared by a boro and the township that surrounds it
-  'BERLIN': ['0405', '0406', '0436', '0435'],
-  'WEST BERLIN': ['0406', '0405', '0436'],
-  'CLEMENTON': ['0411', '0415', '0428', '0422'],
-  'LAUREL SPRINGS': ['0420', '0415', '0422', '0431'],
-  'GLOUCESTER': ['0414', '0415'],
-  'HADDONFIELD': ['0417', '0416', '0403', '0409'],
-  'HADDON TWP': ['0416', '0417'],
-  'HI-NELLA': ['0419'],
-  // Pine Valley (0429) merged into Pine Hill in 2022; parcels still carry 0429
+  'WEST BERLIN': ['0406'],
+  // Pine Valley (0429) was absorbed by Pine Hill in 2022; parcels still 0429
   'PINE VALLEY': ['0429', '0428'],
-  'PINE HILL': ['0428', '0429'],
+  'HI-NELLA': ['0419'],
+};
+
+// NOT TRUSTED. Neighbouring municipalities a label sometimes turns out to
+// belong to. The label names a real town, so resolving it elsewhere means the
+// Clerk mislabelled the row - reported as needs-review with a suggestion
+// rather than filled in, the same as any other out-of-town match.
+const NEARBY_MUN_CODES = {
+  'BERLIN': ['0405', '0406', '0436', '0435'],
+  'BERLIN BOROUGH': ['0406', '0436', '0435'],
+  'BERLIN BORO': ['0406', '0436', '0435'],
+  'BERLIN TWP': ['0405', '0436', '0435'],
+  'WEST BERLIN': ['0405', '0436'],
+  'ERIAL': ['0436'],
+  'BLUE ANCHOR': ['0435'],
+  'TANSBORO': ['0406'],
+  'CLEMENTON': ['0415', '0428', '0422'],
+  'LAUREL SPRINGS': ['0415', '0422', '0431'],
+  'HADDONFIELD': ['0416', '0403', '0409'],
+  'HADDON TWP': ['0417'],
+  // A bare "GLOUCESTER" could be the City or the Township - never assume
+  'GLOUCESTER': ['0414', '0415'],
 };
 
 // Scope county-wide lookups by municipality-code prefix, NOT by COUNTY.
@@ -201,17 +217,38 @@ function townNameVariants(raw) {
   return variants;
 }
 
-// Ordered, de-duplicated candidate municipality codes for a town label.
-// Empty means "no idea" - the caller falls back to a county-wide match.
+// Splits a town label into municipalities we will fill an address from
+// (trusted) and ones that only earn a suggestion (nearby).
+//
+// The most specific spelling that matches decides the trusted set: a real
+// municipality name contributes exactly itself, while a pure locality
+// contributes all of its readings. Everything reachable from a looser spelling
+// lands in nearby - so "BERLIN TWP" trusts 0406 alone, and Berlin Boro becomes
+// a suggestion rather than a silent substitution.
 function resolveMunCodes(rawTown) {
-  const codes = [];
-  const push = (code) => { if (code && !codes.includes(code)) codes.push(code); };
+  const trusted = [], nearby = [];
+  const push = (list, code) => {
+    if (code && !trusted.includes(code) && !nearby.includes(code)) list.push(code);
+  };
+  let trustedSettled = false;
 
   for (const variant of townNameVariants(rawTown)) {
-    push(TOWN_TO_MUN_CODE[variant]);
-    for (const code of LOCALITY_TO_MUN_CODES[variant] || []) push(code);
+    const municipality = TOWN_TO_MUN_CODE[variant];
+    const locality = LOCALITY_TO_MUN_CODES[variant];
+
+    if (!trustedSettled && municipality) {
+      push(trusted, municipality);
+      trustedSettled = true;
+    } else if (!trustedSettled && locality) {
+      for (const code of locality) push(trusted, code);
+      trustedSettled = true;
+    } else {
+      push(nearby, municipality);
+      for (const code of locality || []) push(nearby, code);
+    }
+    for (const code of NEARBY_MUN_CODES[variant] || []) push(nearby, code);
   }
-  return codes;
+  return { trusted, nearby };
 }
 
 function clamp(n, min, max) {
@@ -891,7 +928,13 @@ const parcelKey = (f) => {
 // Costs the same single request in the common case, and still finds the parcel
 // when the Clerk's town label is wrong.
 async function queryParcel(munCodes, block, lot) {
-  const candidates = (Array.isArray(munCodes) ? munCodes : [munCodes]).filter(Boolean);
+  // Accepts { trusted, nearby } from resolveMunCodes, or a plain array.
+  const spec = Array.isArray(munCodes) || !munCodes || typeof munCodes === 'string'
+    ? { trusted: (Array.isArray(munCodes) ? munCodes : [munCodes]).filter(Boolean), nearby: [] }
+    : munCodes;
+  const trusted = (spec.trusted || []).filter(Boolean);
+  const nearby = (spec.nearby || []).filter(Boolean);
+  const candidates = trusted;
 
   // Fast path: an exact PCL_MUN match runs ~25% quicker than the LIKE '04%'
   // scan, and the labelled town is right the overwhelming majority of the
@@ -912,10 +955,16 @@ async function queryParcel(munCodes, block, lot) {
   if (!features.length) return null;
 
   const hit = pickByCandidate(features, candidates);
+  const nearbyHit = hit ? null : pickByCandidate(features, nearby);
   let scoped, matchedVia;
   if (hit) {
     scoped = hit.matches;
     matchedVia = hit.code === candidates[0] ? 'primary' : 'alias';
+  } else if (nearbyHit) {
+    // A neighbouring municipality carries this block/lot. Plausible, but the
+    // label named a different real town, so it only earns a suggestion.
+    scoped = nearbyHit.matches;
+    matchedVia = 'nearby-town';
   } else {
     // No candidate town matched. Block/lot pairs repeat across municipalities,
     // so only accept a county-wide hit when it points at a single town.
@@ -960,11 +1009,10 @@ async function queryParcel(munCodes, block, lot) {
   const result = toParcelResult(addressed);
   result.matchedVia = matchedVia;
 
-  // The Clerk named a town but the only parcel with this block/lot sits
-  // somewhere else entirely - usually a corrupt block number rather than a
-  // mislabelled town (real mislabels resolve through the alias list above).
-  // Suggest it for review instead of asserting it.
-  if (matchedVia === 'county-wide' && candidates.length) {
+  // Either a neighbouring municipality carries this block/lot, or nothing in
+  // the labelled town does and the county-wide scan landed elsewhere. Both are
+  // out-of-town matches: suggest, do not assert.
+  if (matchedVia === 'nearby-town' || (matchedVia === 'county-wide' && candidates.length)) {
     return {
       needsReview: true,
       reason: 'block/lot found outside the labelled town',
@@ -1053,7 +1101,7 @@ async function enrichCamdenCases(data, options = {}) {
     const lot = (c.lot || '').trim();
     const munCodes = resolveMunCodes(town);
 
-    if (!munCodes.length) {
+    if (!munCodes.trusted.length && !munCodes.nearby.length) {
       // Not fatal - queryParcel still searches the whole county by block/lot.
       console.log(`${prefix} ℹ ${c.instrumentNumber} - Unmapped town '${town}', searching county-wide`);
     }
