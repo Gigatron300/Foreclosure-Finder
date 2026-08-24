@@ -850,8 +850,12 @@ function buildWhereClauses(munFilter, rawBlock, rawLot) {
     clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLLOT IN (${sqlInList(lotVars)})`);
   }
 
+  // Last resort: the block may carry a decimal suffix the Clerk dropped
+  // (625 -> 625.01). Anchored on the decimal point deliberately - a bare
+  // '${b}%' also matches 1380/1381 for block 138, or 326 different blocks for
+  // block 1 in Gloucester Twp, which invents addresses from unrelated blocks.
   if (!block.includes('.')) {
-    clauses.push(`${munFilter} AND PCLBLOCK LIKE '${b}%' AND PCLLOT='${l}'`);
+    clauses.push(`${munFilter} AND PCLBLOCK LIKE '${b}.%' AND PCLLOT='${l}'`);
   }
   return clauses;
 }
