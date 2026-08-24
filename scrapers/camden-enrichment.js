@@ -787,6 +787,25 @@ function decimalPadVariants(value) {
   return [raw, `${m[1]}.${m[2]}0`, `${m[1]}.0${m[2]}`];
 }
 
+// MOD-IV usually zero-pads the numeric run in a condo qualifier to four
+// digits ("C320" is stored "C0320"), but not always - "C702B" is stored
+// verbatim while the Clerk sheet writes "C0702B". Try the value as given plus
+// both paddings.
+function qualifierVariants(qualifier) {
+  const raw = String(qualifier || '').toUpperCase().replace(/\s+/g, '');
+  const out = raw ? [raw] : [];
+  const m = raw.match(/^([A-Z]+)(\d+)([A-Z0-9]*)$/);
+  if (m) {
+    const [, prefix, digits, suffix] = m;
+    const stripped = digits.replace(/^0+/, '') || '0';
+    for (const d of [stripped.padStart(4, '0'), stripped]) {
+      const v = prefix + d + suffix;
+      if (!out.includes(v)) out.push(v);
+    }
+  }
+  return out;
+}
+
 function sqlInList(values) {
   return values.map(v => `'${sqlQuote(v)}'`).join(', ');
 }
@@ -794,9 +813,11 @@ function sqlInList(values) {
 // Ordered lookup strategies, most exact first, so the common case still costs
 // a single request.
 function buildWhereClauses(munFilter, rawBlock, rawLot) {
-  // Callers may hand us numbers straight out of the pipeline JSON.
-  const block = String(rawBlock == null ? '' : rawBlock).trim();
-  const lot = String(rawLot == null ? '' : rawLot).trim();
+  // Callers may hand us numbers straight out of the pipeline JSON. Some Clerk
+  // rows also carry a doubled separator ("29..09", "35..02").
+  const clean = (v) => String(v == null ? '' : v).trim().replace(/\.{2,}/g, '.').replace(/\s+/g, ' ');
+  const block = clean(rawBlock);
+  const lot = clean(rawLot);
   const b = sqlQuote(block);
   const l = sqlQuote(lot);
   const clauses = [`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${l}'`];
@@ -807,21 +828,24 @@ function buildWhereClauses(munFilter, rawBlock, rawLot) {
     clauses.push(`${munFilter} AND PCLBLOCK='${sqlQuote(blockStripped)}' AND PCLLOT='${sqlQuote(lotStripped)}'`);
   }
 
+  const blockVars = decimalPadVariants(block);
+  const lotVars = decimalPadVariants(lot);
+
+  // A condo lot needs the block's padding variants too - block 433.2 with
+  // qualifier C0238 only matches once the block is tried as 433.20.
   const split = splitLotQualifier(lot);
   if (split) {
-    const sl = sqlQuote(split.lot);
-    const sq = sqlQuote(split.qualifier);
-    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${sl}' AND PCLQCODE='${sq}'`);
-    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLLOT='${sl}' AND PCLQCODE LIKE '${sq}%'`);
-  } else if (/^[A-Za-z]/.test(lot.trim())) {
+    const splitLotVars = decimalPadVariants(split.lot);
+    const qualVars = qualifierVariants(split.qualifier);
+    clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLLOT IN (${sqlInList(splitLotVars)}) AND PCLQCODE IN (${sqlInList(qualVars)})`);
+    clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLLOT IN (${sqlInList(splitLotVars)}) AND PCLQCODE LIKE '${sqlQuote(split.qualifier)}%'`);
+  } else if (/^[A-Za-z]/.test(lot)) {
     // Qualifier with no lot prefix, e.g. lot "C2020".
-    clauses.push(`${munFilter} AND PCLBLOCK='${b}' AND PCLQCODE='${sqlQuote(lot.trim().toUpperCase())}'`);
+    clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLQCODE IN (${sqlInList(qualifierVariants(lot))})`);
   }
 
   // Excel-mangled decimals; one query covers every padding combination so a
   // genuine tie is visible in a single result set.
-  const blockVars = decimalPadVariants(block);
-  const lotVars = decimalPadVariants(lot);
   if (blockVars.length > 1 || lotVars.length > 1) {
     clauses.push(`${munFilter} AND PCLBLOCK IN (${sqlInList(blockVars)}) AND PCLLOT IN (${sqlInList(lotVars)})`);
   }
@@ -1045,7 +1069,10 @@ async function enrichCamdenCases(data, options = {}) {
       if (result && result.ambiguous) {
         c.enrichmentError = `Ambiguous (${result.reason}): ${result.candidates.join(' | ')}`;
         c.enrichmentAmbiguous = result.candidates;
-        console.log(`${prefix} ❓ ${c.instrumentNumber} B:${block} L:${lot} → ambiguous, ${result.matchCount} matches (${result.reason})`);
+        const where = result.reason === 'multiple municipalities'
+          ? `not in ${town}; block/lot exists in ${result.matchCount} other towns`
+          : `${result.matchCount} candidate parcels within ${town}`;
+        console.log(`${prefix} ❓ ${c.instrumentNumber} B:${block} L:${lot} → ambiguous, ${where}`);
         ambiguous++;
       } else if (result && result.needsReview) {
         const s = result.suggestion;
