@@ -1326,6 +1326,8 @@ app.post('/api/camden/enrich', checkAuth, async (req, res) => {
   }
 
   const testMode = req.body.testMode === true;
+  // Audit addresses stored by earlier runs instead of skipping them.
+  const reverify = req.body.reverify === true;
   isCamdenEnriching = true;
   lastCamdenEnrichStatus = { started: new Date().toISOString(), status: 'running', testMode };
   res.json({ message: testMode ? 'Test enrichment started (10 cases)' : 'Enrichment started', status: lastCamdenEnrichStatus });
@@ -1334,7 +1336,7 @@ app.post('/api/camden/enrich', checkAuth, async (req, res) => {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
     let data = JSON.parse(content);
 
-    data = await enrichCamdenCases(data, { testMode, testLimit: 10 });
+    data = await enrichCamdenCases(data, { testMode, testLimit: 10, reverify });
 
     await fs.writeFile(CAMDEN_DATA_FILE, JSON.stringify(data, null, 2));
 

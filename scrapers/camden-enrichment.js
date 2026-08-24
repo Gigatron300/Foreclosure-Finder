@@ -1049,7 +1049,7 @@ function toParcelResult(features) {
 // Main enrichment pipeline
 // ============================================================
 async function enrichCamdenCases(data, options = {}) {
-  const { testMode = false, testLimit = 10 } = options;
+  const { testMode = false, testLimit = 10, reverify = false } = options;
   let cases = data.cases || [];
 
   if (testMode) {
@@ -1061,6 +1061,8 @@ async function enrichCamdenCases(data, options = {}) {
   let found = 0, notFound = 0, skipped = 0, errors = 0;
   // Non-success outcomes worth telling apart on a full-county run.
   let ambiguous = 0, needsReview = 0, noAddressOnFile = 0;
+  // Auditing addresses an earlier run already stored.
+  let verified = 0, disagreed = 0, unconfirmed = 0;
 
   console.log(`\n🏠 Camden County Address Enrichment`);
   console.log(`${'='.repeat(50)}`);
@@ -1074,6 +1076,42 @@ async function enrichCamdenCases(data, options = {}) {
 
   async function processCase(c, i) {
     const prefix = `  ${i + 1}/${total}`;
+
+    if (c.propertyAddress && reverify && c.block && c.lot) {
+      // Audit an address resolved by an earlier run. Older code took the first
+      // parcel a query returned with no ambiguity check, and its block
+      // fallback could reach unrelated blocks, so a stored address is not
+      // self-evidently right. Disagreements are flagged, never overwritten -
+      // the stored value may be a manual correction.
+      try {
+        const result = await queryParcel(resolveMunCodes(c.town), c.block, c.lot);
+        const found = (result && !result.ambiguous && !result.needsReview && result.propertyAddress) || '';
+        const same = found && found.toUpperCase() === String(c.propertyAddress).toUpperCase();
+
+        if (same) {
+          c.addressVerifiedAt = new Date().toISOString();
+          delete c.addressDisagreement;
+          verified++;
+        } else if (found) {
+          c.addressDisagreement = { stored: c.propertyAddress, found, municipality: result.municipality };
+          console.log(`${prefix} ⚠ ${c.instrumentNumber} B:${block} L:${lot} → STORED '${c.propertyAddress}' but lookup says '${found}'`);
+          disagreed++;
+        } else {
+          const why = result && result.ambiguous ? `ambiguous (${result.reason})`
+            : result && result.needsReview ? 'only matches outside the labelled town'
+            : result && result.noAddressOnFile ? 'parcel has no address on file'
+            : 'no parcel match';
+          c.addressDisagreement = { stored: c.propertyAddress, found: '', reason: why };
+          console.log(`${prefix} ⚠ ${c.instrumentNumber} B:${block} L:${lot} → STORED '${c.propertyAddress}' unconfirmable: ${why}`);
+          unconfirmed++;
+        }
+      } catch (e) {
+        console.log(`${prefix} ⚠ ${c.instrumentNumber} - reverify failed: ${e.message}`);
+        errors++;
+      }
+      skipped++;
+      return;
+    }
 
     if (c.propertyAddress) {
       // Backfill missing fields from already-enriched cases
@@ -1215,6 +1253,9 @@ async function enrichCamdenCases(data, options = {}) {
     ambiguous,
     needsReview,
     noAddressOnFile,
+    verified,
+    disagreed,
+    unconfirmed,
     skipped,
     errors,
     hitRate: (total - skipped) > 0 ? `${(found / (total - skipped) * 100).toFixed(1)}%` : 'N/A',
@@ -1227,6 +1268,9 @@ async function enrichCamdenCases(data, options = {}) {
   console.log(`  Ambiguous (needs a pick): ${ambiguous} ❓`);
   console.log(`  Found outside labelled town: ${needsReview} 🔍`);
   console.log(`  Parcel exists, no address on file: ${noAddressOnFile} ⃠`);
+  if (reverify) {
+    console.log(`  Re-verified unchanged: ${verified} | DISAGREEMENTS: ${disagreed} | unconfirmable: ${unconfirmed}`);
+  }
   console.log(`  Skipped: ${skipped} | Errors: ${errors}`);
   if ((total - skipped) > 0) {
     console.log(`  Hit rate: ${found}/${total - skipped} = ${(found / (total - skipped) * 100).toFixed(1)}%`);
