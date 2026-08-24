@@ -841,8 +841,10 @@
                         <div id="dealStageFilterOptions" class="filter-dropdown-options">
                             <label class="filter-dropdown-option"><input type="checkbox" value="ACTIVE_OPPORTUNITIES" checked onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active Opportunities</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="NO_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active / No Urgency</span></label>
+                            <label class="filter-dropdown-option" title="Active cases below high urgency -- medium urgency and quieter. Excludes writ-issued and stayed-sale cases."><input type="checkbox" value="NO_HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Active / No High Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="MEDIUM_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Medium Urgency</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="HIGH_URGENCY" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency</span></label>
+                            <label class="filter-dropdown-option" title="High urgency with time left on the 150-day writ clock. Excludes expired countdowns (0d max) and cases with no countdown."><input type="checkbox" value="HIGH_URGENCY_LIVE" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>High Urgency / Clock Live</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="LATE_TAX_LIENS" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Late Tax Liens</span></label>
                             <label class="filter-dropdown-option"><input type="checkbox" value="SALE_RUN" onchange="handleMultiFilterChange('dealStageFilterOptions', 'dealStageFilterButton', 'All Deal Stages', DEAL_STAGE_LABELS)"> <span>Sale Run</span></label>
                         </div>
@@ -983,8 +985,10 @@
         const DEAL_STAGE_LABELS = {
             ACTIVE_OPPORTUNITIES: 'Active Opportunities',
             NO_URGENCY: 'Active / No Urgency',
+            NO_HIGH_URGENCY: 'Active / No High Urgency',
             MEDIUM_URGENCY: 'Medium Urgency',
             HIGH_URGENCY: 'High Urgency',
+            HIGH_URGENCY_LIVE: 'High Urgency / Clock Live',
             LATE_TAX_LIENS: 'Late Tax Liens',
             SALE_RUN: 'Sale Run'
         };
@@ -1163,6 +1167,12 @@
             return caseHasAnySignal(caseObj, ['WRIT RETURN']);
         }
 
+        // True only when the 150-day writ clock (N.J.S.A. 2A:50-64) still has days left.
+        // Null means no countdown at all -- sale stay, or a writ whose filing date didn't parse.
+        function hasLiveSaleClock(caseObj) {
+            return caseObj.daysUntilSale != null && caseObj.daysUntilSale > 0;
+        }
+
         function isClosedCourtCase(caseObj) {
             const courtStatus = String(caseObj.courtStatus || '').toUpperCase();
             return courtStatus === 'CLOSED' || courtStatus === 'STAY';
@@ -1182,10 +1192,14 @@
                     return isActiveOpportunity(caseObj);
                 case 'NO_URGENCY':
                     return isActiveOpportunity(caseObj) && urgencyLevel === 'NONE';
+                case 'NO_HIGH_URGENCY':
+                    return isActiveOpportunity(caseObj) && urgencyLevel !== 'HIGH';
                 case 'MEDIUM_URGENCY':
                     return !isClosedCourtCase(caseObj) && urgencyLevel === 'MEDIUM' && !isLateTaxLien(caseObj);
                 case 'HIGH_URGENCY':
                     return !isClosedCourtCase(caseObj) && urgencyLevel === 'HIGH' && !isSaleRun(caseObj);
+                case 'HIGH_URGENCY_LIVE':
+                    return !isClosedCourtCase(caseObj) && urgencyLevel === 'HIGH' && !isSaleRun(caseObj) && hasLiveSaleClock(caseObj);
                 case 'LATE_TAX_LIENS':
                     return isLateTaxLien(caseObj);
                 case 'SALE_RUN':
