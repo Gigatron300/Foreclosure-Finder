@@ -494,6 +494,16 @@
             border-radius: 6px; font-size: 0.8rem; text-decoration: none;
         }
         .maps-link:hover { background: #3367d6; }
+        .wipp-link {
+            display: inline-flex; align-items: center;
+            padding: 3px 9px; border-radius: 999px;
+            border: 1px solid rgba(96,165,250,0.45);
+            background: rgba(96,165,250,0.12);
+            color: #bfdbfe !important;
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+            text-decoration: none; white-space: nowrap;
+        }
+        .wipp-link:hover { background: rgba(96,165,250,0.28); color: #eff6ff !important; }
         .tag-pill {
             display: inline-flex; align-items: center; gap: 3px;
             background: rgba(184,134,11,0.15); border: 1px solid rgba(184,134,11,0.3);
@@ -936,7 +946,7 @@
             </div>
 
             <div class="actions-secondary">
-                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn">Resolve Addresses</button>
+                <button class="btn btn-primary" onclick="enrichData(false)" id="enrichBtn" title="Resolve addresses for new cases, and fill in the town and WIPP link on cases resolved by earlier runs.">Resolve Addresses</button>
             </div>
 
             <div class="results-header">
@@ -1278,12 +1288,35 @@
             loadData();
         }
 
-        function populateTownFilter(summary, selectedTowns = []) {
+        // Every name a case can be filtered by: its municipality, plus its
+        // USPS subtown where that is a different place. A Blackwood case
+        // counts under both GLOUCESTER TWP and BLACKWOOD, so picking the
+        // township still returns the whole township and picking the subtown
+        // narrows to it. Counts therefore overlap and sum to more than the
+        // case total - that is the point.
+        function townFilterNames(c) {
+            const names = [];
+            const town = String(c.town || '').trim().toUpperCase();
+            if (town) names.push(town);
+            const sub = getSubtown(c).trim().toUpperCase();
+            if (sub && sub !== town) names.push(sub);
+            return names;
+        }
+
+        // Built from the loaded cases rather than summary.byTown: the summary
+        // is computed when the CSV is parsed, before any address is resolved,
+        // so it cannot know the subtowns.
+        function populateTownFilter(cases, selectedTowns = []) {
             const townFilterOptions = document.getElementById('townFilterOptions');
             if (!townFilterOptions) return;
 
-            const byTown = summary && summary.byTown ? summary.byTown : {};
-            const towns = Object.keys(byTown).sort((a, b) => a.localeCompare(b));
+            const byTown = new Map();
+            for (const c of cases || []) {
+                for (const name of townFilterNames(c)) {
+                    byTown.set(name, (byTown.get(name) || 0) + 1);
+                }
+            }
+            const towns = [...byTown.keys()].sort((a, b) => a.localeCompare(b));
 
             if (!towns.length) {
                 townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
@@ -1293,8 +1326,8 @@
 
             const selectedSet = new Set(selectedTowns.map(town => String(town).toUpperCase().trim()));
             townFilterOptions.innerHTML = towns.map(town => {
-                const count = byTown[town];
-                const checked = selectedSet.has(String(town).toUpperCase().trim()) ? ' checked' : '';
+                const count = byTown.get(town);
+                const checked = selectedSet.has(town) ? ' checked' : '';
                 return `<label class="filter-dropdown-option"><input type="checkbox" value="${town}"${checked} onchange="handleTownFilterChange()"><span>${town} (${count})</span></label>`;
             }).join('');
             updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns');
@@ -1442,7 +1475,10 @@
                 daysSinceFilingAsc: (a, b) => (a.daysSinceFiling || 0) - (b.daysSinceFiling || 0),
                 daysSinceFilingDesc: (a, b) => (b.daysSinceFiling || 0) - (a.daysSinceFiling || 0),
                 assessedValue: (a, b) => (b.assessedValue || 0) - (a.assessedValue || 0),
-                town: (a, b) => (a.town || '').localeCompare(b.town || '')
+                // Sorts on the name the card actually shows, so the list reads
+                // alphabetically instead of grouping Blackwood and Glendora
+                // under an invisible "Gloucester Twp".
+                town: (a, b) => (getSubtown(a) || a.town || '').localeCompare(getSubtown(b) || b.town || '')
             };
             const sorter = sorters[sortBy] || sorters.sellerScoreDesc;
             return [...cases].sort(sorter);
@@ -1506,7 +1542,7 @@
         }
         function caseMatchesSearch(c, terms) {
             const haystack = [
-                c.propertyAddress, c.town, c.primaryPlaintiff, c.primaryDefendant,
+                c.propertyAddress, c.town, c.uspsTown, c.primaryPlaintiff, c.primaryDefendant,
                 c.instrumentNumber, c.courtDocketNumber, c.block, c.lot
             ].filter(Boolean).join(' ').toLowerCase();
             return terms.every(t => haystack.includes(t));
@@ -1530,7 +1566,6 @@
 
             try {
                 const data = await fetchCamdenData(forceRefresh);
-                populateTownFilter(data.summary, selectedTowns);
 
                 if (data.lastUpdated) {
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
@@ -1539,6 +1574,7 @@
                 const allCases = data.cases || [];
                 let cases = allCases;
                 populateTagFilter(allCases);
+                populateTownFilter(allCases, selectedTowns);
 
                 if (addressFilter === 'true') {
                     cases = cases.filter(c => !!c.propertyAddress);
@@ -1548,7 +1584,7 @@
 
                 if (selectedTowns.length) {
                     const townSet = new Set(selectedTowns.map(t => String(t || '').trim().toUpperCase()));
-                    cases = cases.filter(c => townSet.has(String(c.town || '').trim().toUpperCase()));
+                    cases = cases.filter(c => townFilterNames(c).some(name => townSet.has(name)));
                 }
 
                 cases = cases.filter(c => matchesAnyDealStage(c, selectedDealStages));
@@ -1894,15 +1930,106 @@
             return detail ? `${primary} (${detail})` : primary;
         }
         
+        // ============================================================
+        // WIPP (Edmunds online tax/utility lookup) per municipality
+        // ------------------------------------------------------------
+        // Camden towns are split across two Edmunds hosts with differently
+        // cased query parameters, so the whole URL is stored per municipality
+        // rather than assembled. Only towns with a known portal get a button.
+        // ============================================================
+        const WIPP_LINKS = {
+            '0401': 'https://wipp.edmundsgovtech.cloud/home?wippId=0401', // Audubon
+            '0403': 'https://wipp.edmundsgovtech.cloud/home?wippId=0403', // Barrington
+            '0406': 'https://wipp.edmundsgovtech.cloud/home?wippId=0406', // Berlin Twp
+            '0408': 'https://wipp.edmundsgovtech.cloud/home?wippId=0408', // Camden City
+            '0415': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0415',    // Gloucester Twp
+            '0422': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0422',    // Lindenwold
+            '0424': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0424',    // Merchantville
+            '0425': 'https://wipp.edmundsgovtech.cloud/home?wippId=0425', // Mt Ephraim
+            '0426': 'https://wipp.edmundsgovtech.cloud/home?wippId=0426', // Oaklyn
+            '0427': 'https://wipp.edmundsgovtech.cloud/home?wippId=0427', // Pennsauken
+            '0431': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0431',    // Somerdale
+            '0435': 'https://wipp.edmundsgovtech.cloud/home?wippId=0435', // Waterford Twp
+        };
+
+        // Fallback for cases enrichment has not stamped a munCode onto yet.
+        // Deliberately only unambiguous municipality spellings: a Clerk label
+        // like SICKLERVILLE names a locality that spans two townships, so it
+        // gets no button rather than a link to the wrong tax office.
+        const WIPP_TOWN_CODES = {
+            'AUDUBON': '0401',
+            'BARRINGTON': '0403',
+            'BERLIN TWP': '0406',
+            'BERLIN TOWNSHIP': '0406',
+            'CAMDEN': '0408',
+            'CAMDEN CITY': '0408',
+            'GLOUCESTER TWP': '0415',
+            'GLOUCESTER TOWNSHIP': '0415',
+            'LINDENWOLD': '0422',
+            'MERCHANTVILLE': '0424',
+            'MT EPHRAIM': '0425',
+            'MOUNT EPHRAIM': '0425',
+            'OAKLYN': '0426',
+            'PENNSAUKEN': '0427',
+            'SOMERDALE': '0431',
+            'WATERFORD TWP': '0435',
+            'WATERFORD TOWNSHIP': '0435',
+        };
+
+        // Do two town names refer to the same municipality, differing only in
+        // how they spell it? "BERLIN" vs "BERLIN BOROUGH", "CHERRY HILL" vs
+        // "CHERRY HILL TOWNSHIP".
+        function sameTownRoot(a, b) {
+            const root = (v) => String(v || '')
+                .toUpperCase()
+                .replace(/[^A-Z ]+/g, ' ')
+                .replace(/\b(TOWNSHIP|TWP|BOROUGH|BORO|CITY|TOWN)\b/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return root(a) === root(b);
+        }
+
+        // The USPS place name only when it names a genuinely different place
+        // than the Clerk's label. A mere respelling is discarded: it would
+        // make two cards in the same town disagree for no reason, since
+        // whether MOD-IV can tell us the place name depends on whether that
+        // particular owner happens to live at the property.
+        function getSubtown(c) {
+            const usps = c.uspsTown || '';
+            if (!usps || sameTownRoot(usps, c.town)) return '';
+            return usps;
+        }
+
+        function getWippUrl(c) {
+            const code = c.munCode
+                || WIPP_TOWN_CODES[String(c.town || '').toUpperCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim()]
+                || '';
+            return WIPP_LINKS[code] || '';
+        }
+
         function createCard(c, repeatCount = 1, onSheriffSale = false) {
             const address = c.propertyAddress || 'Address pending';
             const town = c.town || '';
+            // Show the USPS place ("BLACKWOOD") over the Clerk's township
+            // ("GLOUCESTER TWP") where MOD-IV gave us one. c.town stays the
+            // filter and grouping key, so the Town dropdown is unaffected.
+            const subtown = getSubtown(c);
+            const displayTown = subtown || town;
+            const townTitle = subtown ? ` title="Municipality: ${town}"` : '';
+            // Geocoding is a separate question from display: Google and Zillow
+            // both want the USPS spelling even when it is only a respelling of
+            // the township, so this one takes uspsTown whenever there is one.
+            const geoTown = c.uspsTown || town;
+            const wippUrl = getWippUrl(c);
             const hasAddr = !!c.propertyAddress;
             const isRepeatAddress = hasAddr && repeatCount > 1;
             const typeClass = c.plaintiffType === 'TAX_LIEN' ? 'tax-lien' : c.plaintiffType === 'GOVERNMENT' ? 'government' : 'mortgage';
             const typeLabel = c.plaintiffType === 'TAX_LIEN' ? 'Tax Lien' : c.plaintiffType === 'GOVERNMENT' ? 'Gov\'t' : 'Mortgage';
 
-            const fullAddress = hasAddr ? `${address}, ${town}, NJ` : '';
+            // Street View, Maps and Zillow all geocode the USPS place far
+            // better than the township ("Blackwood, NJ" beats "Gloucester
+            // Twp, NJ").
+            const fullAddress = hasAddr ? `${address}, ${geoTown}, NJ` : '';
             const encodedAddress = encodeURIComponent(fullAddress);
             const canLoadStreetView = hasAddr && authToken;
 
@@ -2017,11 +2144,12 @@
                         <div class="address-row">
                             <div class="property-address">${address}</div>
                             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+                                ${wippUrl ? `<a href="${wippUrl}" target="_blank" rel="noopener" class="wipp-link" title="Open the WIPP tax lookup for ${town}">WIPP</a>` : ''}
                                 ${onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                                 ${isRepeatAddress ? `<span class="repeat-flag" title="This address appears in ${repeatCount} cases"><span class="repeat-dot"></span>Repeat x${repeatCount}</span>` : ''}
                             </div>
                         </div>
-                        <div class="property-location">${town}, NJ - Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' - ' + c.buildingDesc : ''}</div>
+                        <div class="property-location"${townTitle}>${displayTown}, NJ - Block ${c.block}, Lot ${c.lot}${c.buildingDesc ? ' - ' + c.buildingDesc : ''}</div>
 
                         ${valueRow}
 

@@ -1005,7 +1005,8 @@ function pushScoreHistory(caseObj, annotations) {
 const CAMDEN_ENRICH_FIELDS = [
   'propertyAddress', 'assessedValue', 'landValue', 'improvementValue',
   'buildingDesc', 'yearConstructed', 'lastSalePrice', 'lastSaleDate',
-  'propertyClass', 'ownerOfRecord', 'dwellingUnits', 'enrichmentSource', 'enrichedAt'
+  'propertyClass', 'ownerOfRecord', 'dwellingUnits', 'uspsTown', 'munCode',
+  'enrichmentSource', 'enrichedAt'
 ];
 
 // Identity of a parcel: town + block + lot. Same property = same key regardless of CSV/filing.

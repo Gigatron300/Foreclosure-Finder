@@ -61,6 +61,9 @@ const ARCGIS_URL = 'https://maps.nj.gov/arcgis/rest/services/Framework/Cadastral
 const OUT_FIELDS = [
   'PCLBLOCK', 'PCLLOT', 'PCLQCODE', 'PCL_MUN', 'MUN_NAME', 'COUNTY',
   'PROP_LOC', 'PROP_CLASS', 'BLDG_DESC',
+  // Owner's mailing address - used to recover the USPS place name. See
+  // uspsPlaceForParcel().
+  'ST_ADDRESS', 'CITY_STATE',
   'LAND_VAL', 'IMPRVT_VAL', 'NET_VALUE',
   'SALE_PRICE', 'DEED_DATE', 'DEED_BOOK', 'DEED_PAGE',
   'YR_CONSTR', 'ADD_LOTS1', 'CALC_ACRE', 'DWELL'
@@ -188,6 +191,104 @@ const NEARBY_MUN_CODES = {
   // A bare "GLOUCESTER" could be the City or the Township - never assume
   'GLOUCESTER': ['0414', '0415'],
 };
+
+// ============================================================
+// USPS place names (the "subtown")
+// ------------------------------------------------------------
+// A township label tells a seller nothing: nobody who lives at 48 Lamp Post
+// Lane calls it "Gloucester Twp" - the mail, Google and Zillow all say
+// BLACKWOOD. Several Camden townships contain a handful of these places
+// (Gloucester Twp alone covers Blackwood, Glendora, Erial, Grenloch and
+// Blenheim), and the Clerk's Town column only sometimes names one.
+//
+// MOD-IV carries the OWNER's mailing address in ST_ADDRESS / CITY_STATE. When
+// the owner mails to the property itself, CITY_STATE is by definition the USPS
+// place name for that parcel. About half of Camden's residential parcels
+// qualify; the rest are absentee or bank-owned, where CITY_STATE is the
+// servicer's city and tells us nothing, so those keep the township label.
+// Measured share of parcels that gain a subtown this way: Winslow Twp 85%,
+// Gloucester Twp 68%, Waterford Twp 66%, Berlin Twp 52%, Haddon Twp 34%,
+// Cherry Hill 0% (it is its own USPS place - nothing to improve).
+//
+// CITY_STATE is free text, so only recognised Camden-area place names are
+// accepted - the raw column also holds street names ("CLEMENTON RD"),
+// fused states ("BLACKWOODNJ") and typos. The list below is every name that
+// actually occurs on 100+ owner-occupied Camden parcels, plus the smaller
+// localities already known to LOCALITY_TO_MUN_CODES.
+// ============================================================
+const CAMDEN_PLACE_NAMES = new Set([
+  'ALBION', 'ATCO', 'AUDUBON', 'AUDUBON PARK', 'BARRINGTON', 'BELLMAWR',
+  'BERLIN', 'BLACKWOOD', 'BLENHEIM', 'BLUE ANCHOR', 'BRADDOCK', 'BROOKLAWN',
+  'CAMDEN', 'CEDAR BROOK', 'CHERRY HILL', 'CHESILHURST', 'CLEMENTON',
+  'COLLINGSWOOD', 'ERIAL', 'GIBBSBORO', 'GLENDORA', 'GLOUCESTER CITY',
+  'GRENLOCH', 'HADDON HEIGHTS', 'HADDONFIELD', 'HAMMONTON', 'HI-NELLA',
+  'HILLTOP', 'LAUREL SPRINGS', 'LAWNSIDE', 'LINDENWOLD', 'MAGNOLIA',
+  'MERCHANTVILLE', 'MT EPHRAIM', 'OAKLYN', 'PENNSAUKEN', 'PINE HILL',
+  'PINE VALLEY', 'RUNNEMEDE', 'SICKLERVILLE', 'SOMERDALE', 'STRATFORD',
+  'TANSBORO', 'TAVISTOCK', 'VOORHEES', 'WATERFORD', 'WATERFORD WORKS',
+  'WEST BERLIN', 'WEST COLLINGSWOOD', 'WEST COLLINGSWOOD HEIGHTS', 'WESTMONT',
+  'WOODLYNNE',
+]);
+
+// Spellings MOD-IV actually uses, mapped onto the canonical name above.
+const PLACE_NAME_ALIASES = {
+  'MOUNT EPHRAIM': 'MT EPHRAIM',
+  'HI NELLA': 'HI-NELLA',
+  'RUNNEMDE': 'RUNNEMEDE',
+  'W COLLINGSWOOD': 'WEST COLLINGSWOOD',
+  'W BERLIN': 'WEST BERLIN',
+  // West Collingswood Heights is abbreviated a dozen different ways
+  'W COLLS HGTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLSWD HGTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLSWD HTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLINGSWD HGTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLINGSWD HTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLINGSWOOD HTS': 'WEST COLLINGSWOOD HEIGHTS',
+  'W COLLINGSWOOD HEIGHTS': 'WEST COLLINGSWOOD HEIGHTS',
+};
+
+// Same street address, ignoring punctuation, spacing, and the O/0 and I/1
+// swaps MOD-IV keys into street names ("48 LAMP P0ST LANE" is stored against a
+// mailing address of "48 LAMP POST LANE"). Folding both sides cannot mistake
+// two different addresses for each other - they would have to differ by
+// nothing but those substitutions.
+function sameStreetAddress(a, b) {
+  // Only digits sitting inside a word are folded - a digit flanked by letters
+  // is a typo, a digit standing on its own is the house number.
+  const norm = (v) => String(v || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .replace(/([A-Z])0/g, '$1O').replace(/0([A-Z])/g, 'O$1')
+    .replace(/([A-Z])1/g, '$1I').replace(/1([A-Z])/g, 'I$1')
+    .trim();
+  const left = norm(a);
+  return !!left && left === norm(b);
+}
+
+// The USPS place name for a parcel, or '' when the mailing address cannot
+// vouch for one.
+function uspsPlaceForParcel(attrs) {
+  if (!attrs) return '';
+  // An owner mailing somewhere other than the property tells us their city,
+  // not the property's.
+  if (!sameStreetAddress(attrs.ST_ADDRESS, attrs.PROP_LOC)) return '';
+
+  const base = String(attrs.CITY_STATE || '')
+    .toUpperCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+(N J|NJ|NEW JERSEY)$/, '')
+    .trim();
+
+  // Second candidate covers a state fused onto the city ("BLACKWOODNJ").
+  for (const candidate of [base, base.replace(/NJ$/, '').trim()]) {
+    if (!candidate) continue;
+    const canonical = PLACE_NAME_ALIASES[candidate] || candidate;
+    if (CAMDEN_PLACE_NAMES.has(canonical)) return canonical;
+  }
+  return '';
+}
 
 // Scope county-wide lookups by municipality-code prefix, NOT by COUNTY.
 // MOD-IV leaves COUNTY null on incomplete records - the same ones that have a
@@ -1027,6 +1128,7 @@ function toParcelResult(features) {
   return {
     propertyAddress: (attrs.PROP_LOC || '').trim(),
     municipality: (attrs.MUN_NAME || '').trim(),
+    uspsTown: uspsPlaceForParcel(attrs),
     propertyClass: attrs.PROP_CLASS || '',
     buildingDesc: (attrs.BLDG_DESC || '').trim(),
     landValue: attrs.LAND_VAL,
@@ -1088,6 +1190,13 @@ async function enrichCamdenCases(data, options = {}) {
         const found = (result && !result.ambiguous && !result.needsReview && result.propertyAddress) || '';
         const same = found && found.toUpperCase() === String(c.propertyAddress).toUpperCase();
 
+        // The parcel is in hand either way - take the place name and
+        // municipality code off it while we are here.
+        if (result && !result.ambiguous && !result.needsReview) {
+          if (c.uspsTown === undefined) c.uspsTown = result.uspsTown || '';
+          if (!c.munCode && result.matchedMunCode) c.munCode = result.matchedMunCode;
+        }
+
         if (same) {
           c.addressVerifiedAt = new Date().toISOString();
           delete c.addressDisagreement;
@@ -1114,8 +1223,12 @@ async function enrichCamdenCases(data, options = {}) {
     }
 
     if (c.propertyAddress) {
-      // Backfill missing fields from already-enriched cases
-      const needsBackfill = (!c.lastSaleDate || c.dwellingUnits == null) && c.town && c.block && c.lot;
+      // Backfill missing fields from already-enriched cases. c.uspsTown is
+      // checked against undefined, not falsiness - '' means "asked, and the
+      // mailing address had no place name to give", which must not re-query
+      // on every run.
+      const needsBackfill = (!c.lastSaleDate || c.dwellingUnits == null
+        || c.uspsTown === undefined || !c.munCode) && c.town && c.block && c.lot;
       if (needsBackfill) {
         await delay(400);
         try {
@@ -1126,6 +1239,10 @@ async function enrichCamdenCases(data, options = {}) {
             }
             if (c.dwellingUnits == null && result.dwellingUnits != null) {
               c.dwellingUnits = result.dwellingUnits;
+            }
+            if (!result.needsReview) {
+              if (c.uspsTown === undefined) c.uspsTown = result.uspsTown || '';
+              if (!c.munCode && result.matchedMunCode) c.munCode = result.matchedMunCode;
             }
           }
         } catch (e) {}
@@ -1193,6 +1310,10 @@ async function enrichCamdenCases(data, options = {}) {
         c.lastSaleDate = result.saleDate;
         c.propertyClass = result.propertyClass;
         c.dwellingUnits = result.dwellingUnits;
+        // '' is a real answer here - the mailing address could not vouch for a
+        // place name - so the field is always written, never left undefined.
+        c.uspsTown = result.uspsTown || '';
+        c.munCode = result.matchedMunCode || '';
         c.enrichmentSource = 'NJ MOD-IV via ArcGIS REST';
         c.enrichedAt = new Date().toISOString();
         c.enrichmentError = '';
