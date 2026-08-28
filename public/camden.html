@@ -1374,11 +1374,23 @@
         // Built from the loaded cases rather than summary.byTown: the summary
         // is computed when the CSV is parsed, before any address is resolved,
         // so it cannot know the subtowns.
+        //   townOnly  - cases in this municipality with no subtown at all.
+        //               MOD-IV can only name the place when the owner mails to
+        //               the property, so absentee and bank-owned parcels land
+        //               here. This is why a township's count exceeds its
+        //               subtowns' - without it the numbers look wrong.
+        //   subCounts - cases per subtown *within this municipality*. A
+        //               subtown with two parents cannot have its total
+        //               attributed to either one, so the split is tracked here
+        //               rather than read off the subtown's own count.
         function buildTownFilterIndex(cases) {
             const index = new Map();
             const entry = (name) => {
                 if (!index.has(name)) {
-                    index.set(name, { count: 0, subs: new Set(), parents: new Set(), isTown: false });
+                    index.set(name, {
+                        count: 0, subs: new Set(), parents: new Set(),
+                        isTown: false, townOnly: 0, subCounts: new Map(),
+                    });
                 }
                 return index.get(name);
             };
@@ -1386,9 +1398,14 @@
                 const names = townFilterNames(c);
                 for (const name of names) entry(name).count++;
                 const [town, sub] = names;
-                if (town) entry(town).isTown = true;
+                if (town) {
+                    entry(town).isTown = true;
+                    if (!sub) entry(town).townOnly++;
+                }
                 if (town && sub) {
-                    entry(town).subs.add(sub);
+                    const t = entry(town);
+                    t.subs.add(sub);
+                    t.subCounts.set(sub, (t.subCounts.get(sub) || 0) + 1);
                     entry(sub).parents.add(town);
                 }
             }
@@ -1403,6 +1420,11 @@
         // top-level row and says "also in ..." from there.
         // hideParents is set for a row already nested under its township -
         // the indentation says "in Gloucester Twp" better than the text does.
+        // The three counts on a township always sum to its own total:
+        // cases in a nested subtown, cases whose place name is a borough with
+        // its own top-level row, and cases with no place name at all. Leaving
+        // the last two out is what made "Berlin Twp (45) / West Berlin (20)"
+        // look like a contradiction.
         function townFilterNote(name, info, index, hideParents = false) {
             const parts = [];
             if (info.subs.size) {
@@ -1413,6 +1435,12 @@
                 if (nested.length) {
                     parts.push(`${nested.length} subtown${nested.length === 1 ? '' : 's'}`);
                 }
+                const shared = [...info.subs].filter(sub => !nested.includes(sub))
+                    .reduce((n, sub) => n + (info.subCounts.get(sub) || 0), 0);
+                if (shared) parts.push(`${shared} in shared towns`);
+            }
+            if (info.isTown && info.townOnly && info.subs.size) {
+                parts.push(`${info.townOnly} township only`);
             }
             if (info.parents.size && !hideParents) {
                 const where = [...info.parents].sort().join(', ');
@@ -1491,7 +1519,12 @@
                 const info = index.get(name);
                 const checked = selectedSet.has(name) ? ' checked' : '';
                 const note = townFilterNote(name, info, index);
-                const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
+                const why = info.townOnly
+                    ? `${info.count} cases in ${name}. ${info.townOnly} have no subtown: MOD-IV only names the place when the owner mails to the property, so absentee and bank-owned parcels keep the township name.`
+                    : '';
+                const noteHtml = note
+                    ? ` <span class="filter-dropdown-note"${why ? ` title="${why}"` : ''}>${note}</span>`
+                    : '';
                 return `<div class="town-group" data-town="${name}">
                     <div class="filter-dropdown-option town-parent">
                         <label class="town-parent-label"><input type="checkbox" value="${name}"${checked} onchange="handleTownFilterChange()"><span>${name} (${info.count})${noteHtml}</span></label>
