@@ -345,6 +345,33 @@
         .property-info { padding: 20px; }
         .address-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .property-address { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--benoro-white); }
+        /* Click the address to copy it. Only addresses we actually have are
+           made clickable, so "Address pending" stays inert. */
+        .property-address.copyable { cursor: pointer; }
+        .property-address.copyable:hover { text-decoration: underline dotted rgba(255,255,255,0.5); }
+        .property-address.copy-done,
+        .property-address.copy-failed { position: relative; }
+        .property-address.copy-done::after,
+        .property-address.copy-failed::after {
+            content: 'Copied';
+            margin-left: 8px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            vertical-align: middle;
+            white-space: nowrap;
+            border: 1px solid rgba(134,239,172,0.45);
+            background: rgba(134,239,172,0.14);
+            color: #86efac;
+        }
+        .property-address.copy-failed::after {
+            content: 'Copy failed';
+            border-color: rgba(252,165,165,0.45);
+            background: rgba(252,165,165,0.14);
+            color: #fca5a5;
+        }
         .repeat-flag {
             display: inline-flex;
             align-items: center;
@@ -2062,6 +2089,7 @@
             '0416': 'https://wipp.edmundsgovtech.cloud/home?wippId=0416', // Haddon Twp
             '0417': 'https://wipp.edmundsgovtech.cloud/home?wippId=0417', // Haddonfield
             '0418': 'https://wipp.edmundsgovtech.cloud/home?wippId=0418', // Haddon Heights
+            '0419': 'https://wipp.edmundsgovtech.cloud/home?wippId=0419', // Hi-Nella
             '0420': 'https://wipp.edmundsgovtech.cloud/home?wippId=0420', // Laurel Springs
             '0421': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0421',    // Lawnside
             '0422': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0422',    // Lindenwold
@@ -2167,6 +2195,45 @@
             return WIPP_LINKS[code] || '';
         }
 
+        // Clicking a card's address copies it. The async clipboard API needs a
+        // secure context and can be blocked outright, so a hidden-textarea
+        // fallback covers those cases and the caller is told which happened.
+        async function copyTextToClipboard(text) {
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                }
+            } catch (e) { /* blocked or unavailable - try the legacy path */ }
+            try {
+                const scratch = document.createElement('textarea');
+                scratch.value = text;
+                scratch.setAttribute('readonly', '');
+                scratch.style.position = 'fixed';
+                scratch.style.top = '-1000px';
+                scratch.style.opacity = '0';
+                document.body.appendChild(scratch);
+                scratch.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(scratch);
+                return ok;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function copyAddressFromCard(el) {
+            const text = el.dataset.copy || '';
+            if (!text) return;
+            const ok = await copyTextToClipboard(text);
+            el.classList.remove('copy-done', 'copy-failed');
+            el.classList.add(ok ? 'copy-done' : 'copy-failed');
+            clearTimeout(el.dataset.copyTimer);
+            el.dataset.copyTimer = setTimeout(() => {
+                el.classList.remove('copy-done', 'copy-failed');
+            }, 1500);
+        }
+
         function createCard(c, repeatCount = 1, onSheriffSale = false) {
             const address = c.propertyAddress || 'Address pending';
             const town = c.town || '';
@@ -2182,6 +2249,14 @@
             const geoTown = c.uspsTown || town;
             const wippUrl = getWippUrl(c);
             const hasAddr = !!c.propertyAddress;
+
+            // Copy exactly what the card shows, so what you paste is what you
+            // were looking at. Held in a data attribute rather than inlined
+            // into the handler, which keeps quotes in an address harmless.
+            const copyText = hasAddr ? `${address}, ${displayTown}, NJ` : '';
+            const copyAttrs = hasAddr
+                ? ` data-copy="${copyText.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" title="Click to copy: ${copyText.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" onclick="copyAddressFromCard(this)"`
+                : '';
             const isRepeatAddress = hasAddr && repeatCount > 1;
             const typeClass = c.plaintiffType === 'TAX_LIEN' ? 'tax-lien' : c.plaintiffType === 'GOVERNMENT' ? 'government' : 'mortgage';
             const typeLabel = c.plaintiffType === 'TAX_LIEN' ? 'Tax Lien' : c.plaintiffType === 'GOVERNMENT' ? 'Gov\'t' : 'Mortgage';
@@ -2302,7 +2377,7 @@
                         </div>
                         ${scoreExplainHtml}
                         <div class="address-row">
-                            <div class="property-address">${address}</div>
+                            <div class="property-address${hasAddr ? ' copyable' : ''}"${copyAttrs}>${address}</div>
                             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                                 ${wippUrl ? `<a href="${wippUrl}" target="_blank" rel="noopener" class="wipp-link" title="Open the WIPP tax lookup for ${town}">WIPP</a>` : ''}
                                 ${onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
