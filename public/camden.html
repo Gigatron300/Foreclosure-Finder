@@ -1484,17 +1484,17 @@
             }
 
             const selectedSet = new Set(selectedTowns.map(v => String(v || '').trim()));
-            // Subtowns are selected by name, not by row: if Atco is ticked
-            // under Waterford Twp then it is ticked under Winslow Twp too, so a
-            // partially-restored selection still renders both boxes ticked.
-            const selectedSubs = new Set([...selectedSet].map(subtownOf).filter(Boolean));
+            // Places are selected by name, not by row: if Collingswood is
+            // ticked as a borough it is ticked under Haddon Twp too, so a
+            // partially-restored selection still renders every box ticked.
+            const selectedPlaces = new Set([...selectedSet].map(placeNameOf).filter(Boolean));
             const esc = (s) => String(s).replace(/"/g, '&quot;');
             const row = (value, label, count, note, rowClass, title) => {
                 townFilterLabels[value] = decodeTownValue(value);
-                const sub = subtownOf(value);
-                const isChecked = selectedSet.has(value) || (sub && selectedSubs.has(sub));
+                const place = placeNameOf(value);
+                const isChecked = selectedSet.has(value) || (place && selectedPlaces.has(place));
                 const checked = isChecked ? ' checked' : '';
-                const handler = sub ? 'handleSubtownFilterChange(this)' : 'handleTownFilterChange()';
+                const handler = place ? 'handlePlaceFilterChange(this)' : 'handleTownFilterChange()';
                 const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
                 const titleAttr = title ? ` title="${esc(title)}"` : '';
                 return `<label class="filter-dropdown-option ${rowClass}"${titleAttr}><input type="checkbox" value="${esc(value)}"${checked} onchange="${handler}"><span>${label} (${count})${noteHtml}</span></label>`;
@@ -1520,7 +1520,7 @@
                     if (elsewhere.length) notes.push(`also in ${elsewhere.join(', ')}`);
                     const titles = [];
                     if (alsoTown) {
-                        titles.push(`${sub} is its own municipality as well as a place ${town} mails to. This row is only the ${town} cases - the separate ${sub} row is the borough itself.`);
+                        titles.push(`${sub} is its own municipality as well as a place ${town} mails to. This row counts only the ${town} cases, but ticking it also ticks the ${sub} row so you get the whole place.`);
                     }
                     if (elsewhere.length) {
                         titles.push(`${sub} straddles ${[town, ...elsewhere].sort().join(' and ')}. Ticking it here ticks it there too, so you always get the whole place.`);
@@ -1541,10 +1541,10 @@
 
                 const parts = [`${subs.length} subtown${subs.length === 1 ? '' : 's'}`];
                 if (entry.noSub) parts.push(`${entry.noSub} unresolved`);
-                const checked = selectedSet.has(townValue) ? ' checked' : '';
+                const checked = (selectedSet.has(townValue) || selectedPlaces.has(town)) ? ' checked' : '';
                 return `<div class="town-group" data-town="${esc(town)}">
                     <div class="filter-dropdown-option town-parent">
-                        <label class="town-parent-label"><input type="checkbox" value="${esc(townValue)}"${checked} onchange="handleTownFilterChange()"><span>${town} (${entry.count}) <span class="filter-dropdown-note">${parts.join(' &middot; ')}</span></span></label>
+                        <label class="town-parent-label"><input type="checkbox" value="${esc(townValue)}"${checked} onchange="handlePlaceFilterChange(this)"><span>${town} (${entry.count}) <span class="filter-dropdown-note">${parts.join(' &middot; ')}</span></span></label>
                         <button type="button" class="town-toggle" aria-expanded="${isOpen}" title="Show the subtowns inside ${esc(town)}" onclick="toggleTownGroup(this)">${isOpen ? '▾' : '▸'}</button>
                     </div>
                     <div class="town-subgroup"${isOpen ? '' : ' hidden'}>${childRows.join('')}</div>
@@ -1553,33 +1553,37 @@
             updateTownFilterButton(selectedTowns);
         }
 
-        // A place that straddles two municipalities (Atco is partly Waterford
-        // Twp and partly Winslow Twp) gets a row under each, so both counts
-        // stay honest. Ticking either one ticks the other: it is one place, and
-        // nobody researching Atco wants half of it. The row values stay scoped
-        // to their township, so the selection is just their union.
-        function subtownOf(value) {
-            return value.startsWith('s:') ? (value.split('|')[1] || '') : '';
+        // A place name means one place, wherever it appears. Rows stay scoped
+        // to a municipality so every count is honest, but rows naming the same
+        // place tick together and the filter takes their union:
+        //
+        //   Atco         a place split across Waterford Twp and Winslow Twp
+        //   Collingswood a borough that Haddon Twp also mails to
+        //
+        // Either way, nobody researching Collingswood wants only the half of it
+        // that happens to fall on one side of a municipal line. "No subtown"
+        // rows name no place, so they never link to anything.
+        function placeNameOf(value) {
+            if (value.startsWith('s:')) return value.split('|')[1] || '';
+            if (value.startsWith('t:')) return value.slice(2);
+            return '';
         }
 
-        function handleSubtownFilterChange(input) {
-            const sub = subtownOf(input.value);
-            if (sub) {
+        function handlePlaceFilterChange(input) {
+            const place = placeNameOf(input.value);
+            if (place) {
                 document.querySelectorAll('#townFilterOptions input[type="checkbox"]').forEach(box => {
-                    if (box !== input && subtownOf(box.value) === sub) box.checked = input.checked;
+                    if (box !== input && placeNameOf(box.value) === place) box.checked = input.checked;
                 });
             }
             handleTownFilterChange();
         }
 
-        // The shared button helper counts raw values, which would read
-        // "2 selected" for a single linked place. Collapse to distinct names
-        // first so Atco reads as "ATCO".
+        // Counting raw values would read "2 selected" for a single linked
+        // place. Collapse to distinct place names so Collingswood reads
+        // "COLLINGSWOOD".
         function updateTownFilterButton(selectedValues) {
-            const names = [...new Set((selectedValues || []).map(v => {
-                const sub = subtownOf(v);
-                return sub || decodeTownValue(v);
-            }))];
+            const names = [...new Set((selectedValues || []).map(v => placeNameOf(v) || decodeTownValue(v)))];
             const button = document.getElementById('townFilterButton');
             if (!button) return;
             button.textContent = !names.length ? 'All towns'
