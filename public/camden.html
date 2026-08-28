@@ -240,6 +240,13 @@
             overflow-y: auto;
             padding: 6px 0;
         }
+        .filter-dropdown-note {
+            color: var(--benoro-text-light);
+            font-size: 0.68rem;
+            font-style: italic;
+            opacity: 0.85;
+            white-space: nowrap;
+        }
         .filter-dropdown-option {
             display: flex;
             align-items: center;
@@ -1303,20 +1310,58 @@
             return names;
         }
 
+        // One entry per selectable name, with the relationships needed to say
+        // how the entries overlap:
+        //   count   - cases the entry would return
+        //   subs    - subtowns inside this municipality
+        //   parents - municipalities this subtown sits in (usually one, but
+        //             Sicklerville spans Winslow and Gloucester Twp)
+        //   isTown  - the name is a municipality in its own right
+        //
         // Built from the loaded cases rather than summary.byTown: the summary
         // is computed when the CSV is parsed, before any address is resolved,
         // so it cannot know the subtowns.
+        function buildTownFilterIndex(cases) {
+            const index = new Map();
+            const entry = (name) => {
+                if (!index.has(name)) {
+                    index.set(name, { count: 0, subs: new Set(), parents: new Set(), isTown: false });
+                }
+                return index.get(name);
+            };
+            for (const c of cases || []) {
+                const names = townFilterNames(c);
+                for (const name of names) entry(name).count++;
+                const [town, sub] = names;
+                if (town) entry(town).isTown = true;
+                if (town && sub) {
+                    entry(town).subs.add(sub);
+                    entry(sub).parents.add(town);
+                }
+            }
+            return index;
+        }
+
+        // "3 subtowns" on a township, "in Gloucester Twp" on a subtown, both
+        // when a name is a municipality that other townships also mail to.
+        function townFilterNote(name, info) {
+            const parts = [];
+            if (info.subs.size) {
+                parts.push(`${info.subs.size} subtown${info.subs.size === 1 ? '' : 's'}`);
+            }
+            if (info.parents.size) {
+                const where = [...info.parents].sort().join(', ');
+                parts.push(info.isTown ? `also in ${where}` : `in ${where}`);
+            }
+            return parts.join(' &middot; ');
+        }
+
         function populateTownFilter(cases, selectedTowns = []) {
             const townFilterOptions = document.getElementById('townFilterOptions');
             if (!townFilterOptions) return;
 
-            const byTown = new Map();
-            for (const c of cases || []) {
-                for (const name of townFilterNames(c)) {
-                    byTown.set(name, (byTown.get(name) || 0) + 1);
-                }
-            }
-            const towns = [...byTown.keys()].sort((a, b) => a.localeCompare(b));
+            const index = buildTownFilterIndex(cases);
+            const towns = [...index.keys()].sort((a, b) => a.localeCompare(b));
 
             if (!towns.length) {
                 townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
@@ -1326,9 +1371,11 @@
 
             const selectedSet = new Set(selectedTowns.map(town => String(town).toUpperCase().trim()));
             townFilterOptions.innerHTML = towns.map(town => {
-                const count = byTown.get(town);
+                const info = index.get(town);
                 const checked = selectedSet.has(town) ? ' checked' : '';
-                return `<label class="filter-dropdown-option"><input type="checkbox" value="${town}"${checked} onchange="handleTownFilterChange()"><span>${town} (${count})</span></label>`;
+                const note = townFilterNote(town, info);
+                const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
+                return `<label class="filter-dropdown-option"><input type="checkbox" value="${town}"${checked} onchange="handleTownFilterChange()"><span>${town} (${info.count})${noteHtml}</span></label>`;
             }).join('');
             updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns');
         }
@@ -1952,28 +1999,58 @@
             '0435': 'https://wipp.edmundsgovtech.cloud/home?wippId=0435', // Waterford Twp
         };
 
-        // Fallback for cases enrichment has not stamped a munCode onto yet.
-        // Deliberately only unambiguous municipality spellings: a Clerk label
-        // like SICKLERVILLE names a locality that spans two townships, so it
-        // gets no button rather than a link to the wrong tax office.
+        // Fallback for cases enrichment has not stamped a munCode onto yet -
+        // every Camden municipality, mirroring TOWN_TO_MUN_CODE on the server.
+        // Only the tax office depends on this, so a wrong code would send you
+        // to the wrong town's portal: localities that span more than one
+        // municipality (SICKLERVILLE, ATCO, WATERFORD WORKS, PINE VALLEY) are
+        // deliberately absent and get no button until enrichment resolves the
+        // actual parcel.
         const WIPP_TOWN_CODES = {
             'AUDUBON': '0401',
+            'AUDUBON PARK': '0402',
             'BARRINGTON': '0403',
-            'BERLIN TWP': '0406',
-            'BERLIN TOWNSHIP': '0406',
-            'CAMDEN': '0408',
-            'CAMDEN CITY': '0408',
-            'GLOUCESTER TWP': '0415',
-            'GLOUCESTER TOWNSHIP': '0415',
+            'BELLMAWR': '0404',
+            'BERLIN BOROUGH': '0405', 'BERLIN BORO': '0405',
+            'BERLIN TWP': '0406', 'BERLIN TOWNSHIP': '0406',
+            'BROOKLAWN': '0407',
+            'CAMDEN': '0408', 'CAMDEN CITY': '0408',
+            'CHERRY HILL': '0409', 'CHERRY HILL TWP': '0409', 'CHERRY HILL TOWNSHIP': '0409',
+            'CHESILHURST': '0410',
+            'CLEMENTON': '0411',
+            'COLLINGSWOOD': '0412',
+            'GIBBSBORO': '0413',
+            'GLOUCESTER CITY': '0414',
+            'GLOUCESTER TWP': '0415', 'GLOUCESTER TOWNSHIP': '0415',
+            'HADDON TWP': '0416', 'HADDON TOWNSHIP': '0416',
+            'HADDONFIELD': '0417',
+            'HADDON HEIGHTS': '0418',
+            'HI NELLA': '0419', 'HI-NELLA': '0419',
+            'LAUREL SPRINGS': '0420',
+            'LAWNSIDE': '0421',
             'LINDENWOLD': '0422',
+            'MAGNOLIA': '0423',
             'MERCHANTVILLE': '0424',
-            'MT EPHRAIM': '0425',
-            'MOUNT EPHRAIM': '0425',
+            'MT EPHRAIM': '0425', 'MOUNT EPHRAIM': '0425',
             'OAKLYN': '0426',
-            'PENNSAUKEN': '0427',
+            'PENNSAUKEN': '0427', 'PENNSAUKEN TWP': '0427',
+            'PINE HILL': '0428',
+            'RUNNEMEDE': '0430',
             'SOMERDALE': '0431',
-            'WATERFORD TWP': '0435',
-            'WATERFORD TOWNSHIP': '0435',
+            'STRATFORD': '0432',
+            'TAVISTOCK': '0433',
+            'VOORHEES': '0434', 'VOORHEES TWP': '0434', 'VOORHEES TOWNSHIP': '0434',
+            'WATERFORD': '0435', 'WATERFORD TWP': '0435', 'WATERFORD TOWNSHIP': '0435',
+            'WINSLOW': '0436', 'WINSLOW TWP': '0436', 'WINSLOW TOWNSHIP': '0436',
+            'WOODLYNNE': '0437',
+            // Localities belonging to exactly one municipality, so the tax
+            // office is unambiguous even without a resolved parcel.
+            'GLENDORA': '0415', 'BLACKWOOD': '0415', 'ERIAL': '0415',
+            'GRENLOCH': '0415', 'ALBION': '0415',
+            'CEDAR BROOK': '0436', 'BLUE ANCHOR': '0436', 'BRADDOCK': '0436',
+            'TANSBORO': '0435',
+            'WESTMONT': '0416',
+            'WEST BERLIN': '0406',
         };
 
         // Do two town names refer to the same municipality, differing only in
