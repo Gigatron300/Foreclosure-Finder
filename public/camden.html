@@ -300,6 +300,9 @@
             margin-left: 20px;
         }
         .town-sub { padding-left: 10px; }
+        /* The leftover row inside a group: real and selectable, but clearly
+           not a place name. */
+        .town-nosub span { color: var(--benoro-text-light); font-style: italic; }
         .filter-dropdown-option {
             display: flex;
             align-items: center;
@@ -1340,7 +1343,7 @@
         }
 
         function setAllTownFilters(checked) {
-            setAllMultiFilterOptions('townFilterOptions', checked, 'townFilterButton', 'All towns');
+            setAllMultiFilterOptions('townFilterOptions', checked, 'townFilterButton', 'All towns', townFilterLabels);
         }
 
         function handleMultiFilterChange(containerId, buttonId, defaultLabel, labels = null) {
@@ -1348,111 +1351,84 @@
             loadData();
         }
 
-        // Every name a case can be filtered by: its municipality, plus its
-        // USPS subtown where that is a different place. A Blackwood case
-        // counts under both GLOUCESTER TWP and BLACKWOOD, so picking the
-        // township still returns the whole township and picking the subtown
-        // narrows to it. Counts therefore overlap and sum to more than the
-        // case total - that is the point.
-        function townFilterNames(c) {
-            const names = [];
-            const town = String(c.town || '').trim().toUpperCase();
-            if (town) names.push(town);
-            const sub = getSubtown(c).trim().toUpperCase();
-            if (sub && sub !== town) names.push(sub);
-            return names;
-        }
-
-        // One entry per selectable name, with the relationships needed to say
-        // how the entries overlap:
-        //   count   - cases the entry would return
-        //   subs    - subtowns inside this municipality
-        //   parents - municipalities this subtown sits in (usually one, but
-        //             Sicklerville spans Winslow and Gloucester Twp)
-        //   isTown  - the name is a municipality in its own right
+        // ============================================================
+        // Town filter: municipalities, with their USPS subtowns nested
+        // ------------------------------------------------------------
+        // Every case belongs to exactly one municipality (the Clerk's Town
+        // column) and, where MOD-IV could name it, one USPS place inside that
+        // municipality. So the filter is a two-level tree and each row selects
+        // exactly what its count says:
         //
-        // Built from the loaded cases rather than summary.byTown: the summary
-        // is computed when the CSV is parsed, before any address is resolved,
-        // so it cannot know the subtowns.
-        //   townOnly  - cases in this municipality with no subtown at all.
-        //               MOD-IV can only name the place when the owner mails to
-        //               the property, so absentee and bank-owned parcels land
-        //               here. This is why a township's count exceeds its
-        //               subtowns' - without it the numbers look wrong.
-        //   subCounts - cases per subtown *within this municipality*. A
-        //               subtown with two parents cannot have its total
-        //               attributed to either one, so the split is tracked here
-        //               rather than read off the subtown's own count.
+        //   t:TOWN         the whole municipality
+        //   s:TOWN|SUB     just the cases in that municipality mailing to SUB
+        //   o:TOWN         just the cases with no subtown resolved
+        //
+        // A municipality's children therefore always sum to its own count,
+        // with nothing left over and nothing double-counted. Scoping a subtown
+        // to its parent matters because a place can sit in two townships:
+        // Sicklerville is partly Winslow Twp and partly Gloucester Twp, and
+        // Clementon is a borough that Gloucester Twp also mails to. Each of
+        // those gets a row per municipality rather than one shared row whose
+        // count belongs to nobody.
+        // ============================================================
+        const TOWN_VALUE = {
+            town: (town) => `t:${town}`,
+            sub: (town, sub) => `s:${town}|${sub}`,
+            noSub: (town) => `o:${town}`,
+        };
+
         function buildTownFilterIndex(cases) {
-            const index = new Map();
-            const entry = (name) => {
-                if (!index.has(name)) {
-                    index.set(name, {
-                        count: 0, subs: new Set(), parents: new Set(),
-                        isTown: false, townOnly: 0, subCounts: new Map(),
-                    });
-                }
-                return index.get(name);
-            };
+            const towns = new Map();          // town -> { count, subs: Map(sub -> count), noSub }
+            const municipalities = new Set(); // every name the Clerk used as a Town
+            const subParents = new Map();     // sub -> Set(town) it appears under
             for (const c of cases || []) {
-                const names = townFilterNames(c);
-                for (const name of names) entry(name).count++;
-                const [town, sub] = names;
-                if (town) {
-                    entry(town).isTown = true;
-                    if (!sub) entry(town).townOnly++;
-                }
-                if (town && sub) {
-                    const t = entry(town);
-                    t.subs.add(sub);
-                    t.subCounts.set(sub, (t.subCounts.get(sub) || 0) + 1);
-                    entry(sub).parents.add(town);
+                const town = String(c.town || '').trim().toUpperCase();
+                if (!town) continue;          // unfilterable either way
+                municipalities.add(town);
+                if (!towns.has(town)) towns.set(town, { count: 0, subs: new Map(), noSub: 0 });
+                const entry = towns.get(town);
+                entry.count++;
+                const sub = getSubtown(c).trim().toUpperCase();
+                if (sub && sub !== town) {
+                    entry.subs.set(sub, (entry.subs.get(sub) || 0) + 1);
+                    if (!subParents.has(sub)) subParents.set(sub, new Set());
+                    subParents.get(sub).add(town);
+                } else {
+                    entry.noSub++;
                 }
             }
-            return index;
+            return { towns, municipalities, subParents };
         }
 
-        // "3 subtowns" on a township, "in Gloucester Twp" on a subtown, and
-        // "also in Gloucester Twp" on a name that is a municipality other
-        // townships mail to. The subtown count deliberately counts only the
-        // ones nested under this township, so it matches what expanding the
-        // group reveals - a subtown that is also a borough keeps its own
-        // top-level row and says "also in ..." from there.
-        // hideParents is set for a row already nested under its township -
-        // the indentation says "in Gloucester Twp" better than the text does.
-        // The three counts on a township always sum to its own total:
-        // cases in a nested subtown, cases whose place name is a borough with
-        // its own top-level row, and cases with no place name at all. Leaving
-        // the last two out is what made "Berlin Twp (45) / West Berlin (20)"
-        // look like a contradiction.
-        function townFilterNote(name, info, index, hideParents = false) {
-            const parts = [];
-            if (info.subs.size) {
-                const nested = [...info.subs].filter(sub => {
-                    const si = index.get(sub);
-                    return si && !si.isTown && si.parents.size === 1;
-                });
-                if (nested.length) {
-                    parts.push(`${nested.length} subtown${nested.length === 1 ? '' : 's'}`);
-                }
-                const shared = [...info.subs].filter(sub => !nested.includes(sub))
-                    .reduce((n, sub) => n + (info.subCounts.get(sub) || 0), 0);
-                if (shared) parts.push(`${shared} in shared towns`);
+        // Does this case fall under any ticked row? An empty selection means no
+        // town filter at all. The three row kinds are mutually exclusive, so a
+        // case is never matched twice.
+        function caseMatchesTownSelection(c, selected) {
+            if (!selected.size) return true;
+            const town = String(c.town || '').trim().toUpperCase();
+            if (!town) return false;
+            if (selected.has(TOWN_VALUE.town(town))) return true;
+            const sub = getSubtown(c).trim().toUpperCase();
+            if (sub && sub !== town) return selected.has(TOWN_VALUE.sub(town, sub));
+            return selected.has(TOWN_VALUE.noSub(town));
+        }
+
+        // Readable text for the filter button when exactly one row is ticked.
+        function decodeTownValue(value) {
+            if (value.startsWith('t:')) return value.slice(2);
+            if (value.startsWith('o:')) return `${value.slice(2)} - no subtown`;
+            if (value.startsWith('s:')) {
+                const [town, sub] = value.slice(2).split('|');
+                return `${sub} (${town})`;
             }
-            if (info.isTown && info.townOnly && info.subs.size) {
-                parts.push(`${info.townOnly} township only`);
-            }
-            if (info.parents.size && !hideParents) {
-                const where = [...info.parents].sort().join(', ');
-                parts.push(info.isTown ? `also in ${where}` : `in ${where}`);
-            }
-            return parts.join(' &middot; ');
+            return value;
         }
 
         // Which parent groups are expanded. Kept outside the render because
         // populateTownFilter re-runs on every filter change, which would
         // otherwise collapse a group the moment you ticked something in it.
         const openTownGroups = new Set();
+        let townFilterLabels = {};
 
         function toggleTownGroup(btn) {
             const group = btn.closest('.town-group');
@@ -1466,78 +1442,81 @@
             if (opening) openTownGroups.add(name); else openTownGroups.delete(name);
         }
 
-        // A subtown nests under its township only where that is unambiguous:
-        // it is not a municipality in its own right, and it has exactly one
-        // parent. Everything else keeps a top-level row, so each name has
-        // exactly one checkbox and no two rows ever need syncing. The rows
-        // left at the top carry a note pointing back at their township.
         function populateTownFilter(cases, selectedTowns = []) {
             const townFilterOptions = document.getElementById('townFilterOptions');
             if (!townFilterOptions) return;
 
-            const index = buildTownFilterIndex(cases);
-            const nestable = (name) => {
-                const info = index.get(name);
-                return !!info && !info.isTown && info.parents.size === 1;
-            };
+            const { towns, municipalities, subParents } = buildTownFilterIndex(cases);
+            const townNames = [...towns.keys()].sort((a, b) => a.localeCompare(b));
+            townFilterLabels = {};
 
-            const children = new Map();
-            for (const [name, info] of index) {
-                if (!nestable(name)) continue;
-                const parent = [...info.parents][0];
-                if (!children.has(parent)) children.set(parent, []);
-                children.get(parent).push(name);
-            }
-
-            const topLevel = [...index.keys()].filter(name => !nestable(name))
-                .sort((a, b) => a.localeCompare(b));
-
-            if (!topLevel.length) {
+            if (!townNames.length) {
                 townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
                 updateMultiFilterButtonText('townFilterButton', [], 'All towns');
                 return;
             }
 
-            const selectedSet = new Set(selectedTowns.map(town => String(town).toUpperCase().trim()));
-            const option = (name, rowClass) => {
-                const info = index.get(name);
-                const checked = selectedSet.has(name) ? ' checked' : '';
-                const note = townFilterNote(name, info, index, rowClass === 'town-sub');
+            const selectedSet = new Set(selectedTowns.map(v => String(v || '').trim()));
+            const esc = (s) => String(s).replace(/"/g, '&quot;');
+            const row = (value, label, count, note, rowClass, title) => {
+                townFilterLabels[value] = decodeTownValue(value);
+                const checked = selectedSet.has(value) ? ' checked' : '';
                 const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
-                return `<label class="filter-dropdown-option ${rowClass}"><input type="checkbox" value="${name}"${checked} onchange="handleTownFilterChange()"><span>${name} (${info.count})${noteHtml}</span></label>`;
+                const titleAttr = title ? ` title="${esc(title)}"` : '';
+                return `<label class="filter-dropdown-option ${rowClass}"${titleAttr}><input type="checkbox" value="${esc(value)}"${checked} onchange="handleTownFilterChange()"><span>${label} (${count})${noteHtml}</span></label>`;
             };
 
-            townFilterOptions.innerHTML = topLevel.map(name => {
-                const kids = (children.get(name) || []).sort((a, b) => a.localeCompare(b));
-                if (!kids.length) return option(name, 'town-plain');
+            townFilterOptions.innerHTML = townNames.map(town => {
+                const entry = towns.get(town);
+                const subs = [...entry.subs.keys()].sort((a, b) => a.localeCompare(b));
+                const townValue = TOWN_VALUE.town(town);
+                townFilterLabels[townValue] = decodeTownValue(townValue);
 
-                // Open if the user left it open, or if something inside it is
-                // ticked - a hidden active filter is a trap.
-                const isOpen = openTownGroups.has(name) || kids.some(kid => selectedSet.has(kid));
-                if (isOpen) openTownGroups.add(name);
+                if (!subs.length) {
+                    return row(townValue, town, entry.count, '', 'town-plain', '');
+                }
 
-                const info = index.get(name);
-                const checked = selectedSet.has(name) ? ' checked' : '';
-                const note = townFilterNote(name, info, index);
-                const why = info.townOnly
-                    ? `${info.count} cases in ${name}. ${info.townOnly} have no subtown: MOD-IV only names the place when the owner mails to the property, so absentee and bank-owned parcels keep the township name.`
-                    : '';
-                const noteHtml = note
-                    ? ` <span class="filter-dropdown-note"${why ? ` title="${why}"` : ''}>${note}</span>`
-                    : '';
-                return `<div class="town-group" data-town="${name}">
+                // Children: one row per subtown, then the cases MOD-IV could
+                // not place. Together they account for the whole township.
+                const childRows = subs.map(sub => {
+                    const notes = [];
+                    const alsoTown = municipalities.has(sub);
+                    if (alsoTown) notes.push('also independent town');
+                    const elsewhere = [...(subParents.get(sub) || [])].filter(p => p !== town).sort();
+                    if (elsewhere.length) notes.push(`also in ${elsewhere.join(', ')}`);
+                    const title = alsoTown
+                        ? `${sub} is its own municipality as well as a place ${town} mails to. This row is only the ${town} cases - the separate ${sub} row is the borough itself.`
+                        : '';
+                    return row(TOWN_VALUE.sub(town, sub), sub, entry.subs.get(sub),
+                        notes.join(' &middot; '), 'town-sub', title);
+                });
+                if (entry.noSub) {
+                    childRows.push(row(TOWN_VALUE.noSub(town), 'No subtown', entry.noSub, '',
+                        'town-sub town-nosub',
+                        `${entry.noSub} of the ${entry.count} cases in ${town} have no subtown. MOD-IV can only name the place when the owner mails to the property, so absentee and bank-owned parcels keep the township name.`));
+                }
+
+                const isOpen = openTownGroups.has(town)
+                    || subs.some(sub => selectedSet.has(TOWN_VALUE.sub(town, sub)))
+                    || selectedSet.has(TOWN_VALUE.noSub(town));
+                if (isOpen) openTownGroups.add(town);
+
+                const parts = [`${subs.length} subtown${subs.length === 1 ? '' : 's'}`];
+                if (entry.noSub) parts.push(`${entry.noSub} unresolved`);
+                const checked = selectedSet.has(townValue) ? ' checked' : '';
+                return `<div class="town-group" data-town="${esc(town)}">
                     <div class="filter-dropdown-option town-parent">
-                        <label class="town-parent-label"><input type="checkbox" value="${name}"${checked} onchange="handleTownFilterChange()"><span>${name} (${info.count})${noteHtml}</span></label>
-                        <button type="button" class="town-toggle" aria-expanded="${isOpen}" title="Show the subtowns inside ${name}" onclick="toggleTownGroup(this)">${isOpen ? '▾' : '▸'}</button>
+                        <label class="town-parent-label"><input type="checkbox" value="${esc(townValue)}"${checked} onchange="handleTownFilterChange()"><span>${town} (${entry.count}) <span class="filter-dropdown-note">${parts.join(' &middot; ')}</span></span></label>
+                        <button type="button" class="town-toggle" aria-expanded="${isOpen}" title="Show the subtowns inside ${esc(town)}" onclick="toggleTownGroup(this)">${isOpen ? '▾' : '▸'}</button>
                     </div>
-                    <div class="town-subgroup"${isOpen ? '' : ' hidden'}>${kids.map(kid => option(kid, 'town-sub')).join('')}</div>
+                    <div class="town-subgroup"${isOpen ? '' : ' hidden'}>${childRows.join('')}</div>
                 </div>`;
             }).join('');
-            updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns');
+            updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns', townFilterLabels);
         }
 
         function handleTownFilterChange() {
-            handleMultiFilterChange('townFilterOptions', 'townFilterButton', 'All towns');
+            handleMultiFilterChange('townFilterOptions', 'townFilterButton', 'All towns', townFilterLabels);
         }
 
         function buildStreetViewErrorHtml(streetViewUrl, mapsUrl) {
@@ -1786,8 +1765,10 @@
                 }
 
                 if (selectedTowns.length) {
-                    const townSet = new Set(selectedTowns.map(t => String(t || '').trim().toUpperCase()));
-                    cases = cases.filter(c => townFilterNames(c).some(name => townSet.has(name)));
+                    // Values are already encoded (t:/s:/o:) by the dropdown, so
+                    // they are compared verbatim - no case folding here.
+                    const townSet = new Set(selectedTowns.map(t => String(t || '').trim()));
+                    cases = cases.filter(c => caseMatchesTownSelection(c, townSet));
                 }
 
                 cases = cases.filter(c => matchesAnyDealStage(c, selectedDealStages));
@@ -2143,6 +2124,7 @@
         const WIPP_LINKS = {
             '0401': 'https://wipp.edmundsgovtech.cloud/home?wippId=0401', // Audubon
             '0403': 'https://wipp.edmundsgovtech.cloud/home?wippId=0403', // Barrington
+            '0404': 'https://wipp.edmundsgovtech.cloud/home?wippId=0404', // Bellmawr
             '0405': 'https://wipp.edmundsgovtech.cloud/home?wippId=0405', // Berlin Borough
             '0406': 'https://wipp.edmundsgovtech.cloud/home?wippId=0406', // Berlin Twp
             '0407': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0407',    // Brooklawn
@@ -2154,7 +2136,9 @@
             '0413': 'https://wipp.edmundsgovtech.cloud/home?wippId=0413', // Gibbsboro
             '0414': 'https://wipp.edmundsgovtech.cloud/home?wippId=0414', // Gloucester City
             '0415': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0415',    // Gloucester Twp
+            '0416': 'https://wipp.edmundsgovtech.cloud/home?wippId=0416', // Haddon Twp
             '0418': 'https://wipp.edmundsgovtech.cloud/home?wippId=0418', // Haddon Heights
+            '0420': 'https://wipp.edmundsgovtech.cloud/home?wippId=0420', // Laurel Springs
             '0421': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0421',    // Lawnside
             '0422': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0422',    // Lindenwold
             '0423': 'https://wipp.edmundsgovtech.cloud/home?wippId=0423', // Magnolia
