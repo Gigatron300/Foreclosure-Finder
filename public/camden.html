@@ -247,6 +247,59 @@
             opacity: 0.85;
             white-space: nowrap;
         }
+        /* The Town dropdown alone is wider and taller - it carries nested
+           groups and long "also in ..." notes that the other filters do not. */
+        #townFilterDropdown {
+            width: 420px;
+            max-width: calc(100vw - 32px);
+            max-height: min(74vh, 660px);
+        }
+        #townFilterOptions {
+            max-height: min(64vh, 560px);
+        }
+        /* A township that contains subtowns reads blue; every subtown stays
+           the default white, so the two levels are never confused. */
+        .town-parent {
+            justify-content: space-between;
+            gap: 6px;
+        }
+        .town-parent .town-parent-label,
+        .town-parent .town-parent-label span {
+            color: #7dd3fc;
+            font-weight: 600;
+        }
+        .town-parent .town-parent-label .filter-dropdown-note {
+            color: #7dd3fc;
+            font-weight: 500;
+            opacity: 0.7;
+        }
+        .town-parent-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+            cursor: pointer;
+        }
+        .town-toggle {
+            flex: none;
+            background: rgba(125,211,252,0.12);
+            border: 1px solid rgba(125,211,252,0.35);
+            color: #7dd3fc;
+            border-radius: 5px;
+            width: 24px;
+            height: 22px;
+            line-height: 1;
+            font-size: 0.72rem;
+            cursor: pointer;
+            padding: 0;
+        }
+        .town-toggle:hover { background: rgba(125,211,252,0.28); }
+        .town-subgroup {
+            border-left: 2px solid rgba(125,211,252,0.28);
+            margin-left: 20px;
+        }
+        .town-sub { padding-left: 10px; }
         .filter-dropdown-option {
             display: flex;
             align-items: center;
@@ -1342,40 +1395,110 @@
             return index;
         }
 
-        // "3 subtowns" on a township, "in Gloucester Twp" on a subtown, both
-        // when a name is a municipality that other townships also mail to.
-        function townFilterNote(name, info) {
+        // "3 subtowns" on a township, "in Gloucester Twp" on a subtown, and
+        // "also in Gloucester Twp" on a name that is a municipality other
+        // townships mail to. The subtown count deliberately counts only the
+        // ones nested under this township, so it matches what expanding the
+        // group reveals - a subtown that is also a borough keeps its own
+        // top-level row and says "also in ..." from there.
+        // hideParents is set for a row already nested under its township -
+        // the indentation says "in Gloucester Twp" better than the text does.
+        function townFilterNote(name, info, index, hideParents = false) {
             const parts = [];
             if (info.subs.size) {
-                parts.push(`${info.subs.size} subtown${info.subs.size === 1 ? '' : 's'}`);
+                const nested = [...info.subs].filter(sub => {
+                    const si = index.get(sub);
+                    return si && !si.isTown && si.parents.size === 1;
+                });
+                if (nested.length) {
+                    parts.push(`${nested.length} subtown${nested.length === 1 ? '' : 's'}`);
+                }
             }
-            if (info.parents.size) {
+            if (info.parents.size && !hideParents) {
                 const where = [...info.parents].sort().join(', ');
                 parts.push(info.isTown ? `also in ${where}` : `in ${where}`);
             }
             return parts.join(' &middot; ');
         }
 
+        // Which parent groups are expanded. Kept outside the render because
+        // populateTownFilter re-runs on every filter change, which would
+        // otherwise collapse a group the moment you ticked something in it.
+        const openTownGroups = new Set();
+
+        function toggleTownGroup(btn) {
+            const group = btn.closest('.town-group');
+            const sub = group && group.querySelector('.town-subgroup');
+            if (!sub) return;
+            const name = group.dataset.town || '';
+            const opening = sub.hidden;
+            sub.hidden = !opening;
+            btn.textContent = opening ? '▾' : '▸';
+            btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+            if (opening) openTownGroups.add(name); else openTownGroups.delete(name);
+        }
+
+        // A subtown nests under its township only where that is unambiguous:
+        // it is not a municipality in its own right, and it has exactly one
+        // parent. Everything else keeps a top-level row, so each name has
+        // exactly one checkbox and no two rows ever need syncing. The rows
+        // left at the top carry a note pointing back at their township.
         function populateTownFilter(cases, selectedTowns = []) {
             const townFilterOptions = document.getElementById('townFilterOptions');
             if (!townFilterOptions) return;
 
             const index = buildTownFilterIndex(cases);
-            const towns = [...index.keys()].sort((a, b) => a.localeCompare(b));
+            const nestable = (name) => {
+                const info = index.get(name);
+                return !!info && !info.isTown && info.parents.size === 1;
+            };
 
-            if (!towns.length) {
+            const children = new Map();
+            for (const [name, info] of index) {
+                if (!nestable(name)) continue;
+                const parent = [...info.parents][0];
+                if (!children.has(parent)) children.set(parent, []);
+                children.get(parent).push(name);
+            }
+
+            const topLevel = [...index.keys()].filter(name => !nestable(name))
+                .sort((a, b) => a.localeCompare(b));
+
+            if (!topLevel.length) {
                 townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
                 updateMultiFilterButtonText('townFilterButton', [], 'All towns');
                 return;
             }
 
             const selectedSet = new Set(selectedTowns.map(town => String(town).toUpperCase().trim()));
-            townFilterOptions.innerHTML = towns.map(town => {
-                const info = index.get(town);
-                const checked = selectedSet.has(town) ? ' checked' : '';
-                const note = townFilterNote(town, info);
+            const option = (name, rowClass) => {
+                const info = index.get(name);
+                const checked = selectedSet.has(name) ? ' checked' : '';
+                const note = townFilterNote(name, info, index, rowClass === 'town-sub');
                 const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
-                return `<label class="filter-dropdown-option"><input type="checkbox" value="${town}"${checked} onchange="handleTownFilterChange()"><span>${town} (${info.count})${noteHtml}</span></label>`;
+                return `<label class="filter-dropdown-option ${rowClass}"><input type="checkbox" value="${name}"${checked} onchange="handleTownFilterChange()"><span>${name} (${info.count})${noteHtml}</span></label>`;
+            };
+
+            townFilterOptions.innerHTML = topLevel.map(name => {
+                const kids = (children.get(name) || []).sort((a, b) => a.localeCompare(b));
+                if (!kids.length) return option(name, 'town-plain');
+
+                // Open if the user left it open, or if something inside it is
+                // ticked - a hidden active filter is a trap.
+                const isOpen = openTownGroups.has(name) || kids.some(kid => selectedSet.has(kid));
+                if (isOpen) openTownGroups.add(name);
+
+                const info = index.get(name);
+                const checked = selectedSet.has(name) ? ' checked' : '';
+                const note = townFilterNote(name, info, index);
+                const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
+                return `<div class="town-group" data-town="${name}">
+                    <div class="filter-dropdown-option town-parent">
+                        <label class="town-parent-label"><input type="checkbox" value="${name}"${checked} onchange="handleTownFilterChange()"><span>${name} (${info.count})${noteHtml}</span></label>
+                        <button type="button" class="town-toggle" aria-expanded="${isOpen}" title="Show the subtowns inside ${name}" onclick="toggleTownGroup(this)">${isOpen ? '▾' : '▸'}</button>
+                    </div>
+                    <div class="town-subgroup"${isOpen ? '' : ' hidden'}>${kids.map(kid => option(kid, 'town-sub')).join('')}</div>
+                </div>`;
             }).join('');
             updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns');
         }
@@ -1987,16 +2110,35 @@
         const WIPP_LINKS = {
             '0401': 'https://wipp.edmundsgovtech.cloud/home?wippId=0401', // Audubon
             '0403': 'https://wipp.edmundsgovtech.cloud/home?wippId=0403', // Barrington
+            '0405': 'https://wipp.edmundsgovtech.cloud/home?wippId=0405', // Berlin Borough
             '0406': 'https://wipp.edmundsgovtech.cloud/home?wippId=0406', // Berlin Twp
+            '0407': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0407',    // Brooklawn
             '0408': 'https://wipp.edmundsgovtech.cloud/home?wippId=0408', // Camden City
+            '0409': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0409',    // Cherry Hill
+            '0410': 'https://wipp.edmundsgovtech.cloud/home?wippId=0410', // Chesilhurst
+            '0411': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0411',    // Clementon
+            '0412': 'https://wipp.edmundsgovtech.cloud/home?wippId=0412', // Collingswood
+            '0413': 'https://wipp.edmundsgovtech.cloud/home?wippId=0413', // Gibbsboro
+            '0414': 'https://wipp.edmundsgovtech.cloud/home?wippId=0414', // Gloucester City
             '0415': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0415',    // Gloucester Twp
+            '0418': 'https://wipp.edmundsgovtech.cloud/home?wippId=0418', // Haddon Heights
+            '0421': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0421',    // Lawnside
             '0422': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0422',    // Lindenwold
+            '0423': 'https://wipp.edmundsgovtech.cloud/home?wippId=0423', // Magnolia
             '0424': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0424',    // Merchantville
             '0425': 'https://wipp.edmundsgovtech.cloud/home?wippId=0425', // Mt Ephraim
             '0426': 'https://wipp.edmundsgovtech.cloud/home?wippId=0426', // Oaklyn
             '0427': 'https://wipp.edmundsgovtech.cloud/home?wippId=0427', // Pennsauken
+            '0428': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0428',    // Pine Hill
+            '0430': 'https://wipp.edmundsgovtech.cloud/home?wippId=0430', // Runnemede
             '0431': 'https://wipp.edmundsassoc.com/Wipp/?wippid=0431',    // Somerdale
+            '0432': 'https://wipp.edmundsgovtech.cloud/home?wippId=0432', // Stratford
+            '0434': 'https://wipp.edmundsgovtech.cloud/home?wippId=0434', // Voorhees Twp
             '0435': 'https://wipp.edmundsgovtech.cloud/home?wippId=0435', // Waterford Twp
+            // Winslow needs modFilter=T; without it the portal opens on the
+            // wrong module rather than the tax lookup.
+            '0436': 'https://wipp.edmundsgovtech.cloud/home?wippId=0436&modFilter=T', // Winslow Twp
+            '0437': 'https://wipp.edmundsgovtech.cloud/home?wippId=0437', // Woodlynne
         };
 
         // Fallback for cases enrichment has not stamped a munCode onto yet -
