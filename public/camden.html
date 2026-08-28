@@ -1343,7 +1343,9 @@
         }
 
         function setAllTownFilters(checked) {
-            setAllMultiFilterOptions('townFilterOptions', checked, 'townFilterButton', 'All towns', townFilterLabels);
+            document.querySelectorAll('#townFilterOptions input[type="checkbox"]')
+                .forEach(box => { box.checked = checked; });
+            handleTownFilterChange();
         }
 
         function handleMultiFilterChange(containerId, buttonId, defaultLabel, labels = null) {
@@ -1377,19 +1379,44 @@
             noSub: (town) => `o:${town}`,
         };
 
+        // Municipalities the filter presents as one category. Berlin Borough
+        // and Berlin Twp are separate governments and keep their own WIPP
+        // portals and card labels, but for lead research they are one place -
+        // so the dropdown offers a single flat "BERLIN" row rather than two
+        // townships and a West Berlin subtown.
+        const TOWN_FILTER_MERGES = {
+            'BERLIN BOROUGH': 'BERLIN',
+            'BERLIN BORO': 'BERLIN',
+            'BERLIN TWP': 'BERLIN',
+            'BERLIN TOWNSHIP': 'BERLIN',
+        };
+
+        // The single place where a case is mapped onto its filter rows. Both
+        // the dropdown and the filter read it, so the two can never disagree
+        // about which row a case belongs to. A merged category is flat: its
+        // cases carry no subtown, so it renders as one plain row.
+        function townFilterKeys(c) {
+            const raw = String(c.town || '').trim().toUpperCase();
+            if (!raw) return null;
+            const merged = TOWN_FILTER_MERGES[raw];
+            if (merged) return { town: merged, sub: '' };
+            const sub = getSubtown(c).trim().toUpperCase();
+            return { town: raw, sub: sub && sub !== raw ? sub : '' };
+        }
+
         function buildTownFilterIndex(cases) {
             const towns = new Map();          // town -> { count, subs: Map(sub -> count), noSub }
             const municipalities = new Set(); // every name the Clerk used as a Town
             const subParents = new Map();     // sub -> Set(town) it appears under
             for (const c of cases || []) {
-                const town = String(c.town || '').trim().toUpperCase();
-                if (!town) continue;          // unfilterable either way
+                const keys = townFilterKeys(c);
+                if (!keys) continue;          // no town: unfilterable either way
+                const { town, sub } = keys;
                 municipalities.add(town);
                 if (!towns.has(town)) towns.set(town, { count: 0, subs: new Map(), noSub: 0 });
                 const entry = towns.get(town);
                 entry.count++;
-                const sub = getSubtown(c).trim().toUpperCase();
-                if (sub && sub !== town) {
+                if (sub) {
                     entry.subs.set(sub, (entry.subs.get(sub) || 0) + 1);
                     if (!subParents.has(sub)) subParents.set(sub, new Set());
                     subParents.get(sub).add(town);
@@ -1405,11 +1432,11 @@
         // case is never matched twice.
         function caseMatchesTownSelection(c, selected) {
             if (!selected.size) return true;
-            const town = String(c.town || '').trim().toUpperCase();
-            if (!town) return false;
+            const keys = townFilterKeys(c);
+            if (!keys) return false;
+            const { town, sub } = keys;
             if (selected.has(TOWN_VALUE.town(town))) return true;
-            const sub = getSubtown(c).trim().toUpperCase();
-            if (sub && sub !== town) return selected.has(TOWN_VALUE.sub(town, sub));
+            if (sub) return selected.has(TOWN_VALUE.sub(town, sub));
             return selected.has(TOWN_VALUE.noSub(town));
         }
 
@@ -1452,18 +1479,25 @@
 
             if (!townNames.length) {
                 townFilterOptions.innerHTML = '<div class="filter-dropdown-empty">No towns available</div>';
-                updateMultiFilterButtonText('townFilterButton', [], 'All towns');
+                updateTownFilterButton([]);
                 return;
             }
 
             const selectedSet = new Set(selectedTowns.map(v => String(v || '').trim()));
+            // Subtowns are selected by name, not by row: if Atco is ticked
+            // under Waterford Twp then it is ticked under Winslow Twp too, so a
+            // partially-restored selection still renders both boxes ticked.
+            const selectedSubs = new Set([...selectedSet].map(subtownOf).filter(Boolean));
             const esc = (s) => String(s).replace(/"/g, '&quot;');
             const row = (value, label, count, note, rowClass, title) => {
                 townFilterLabels[value] = decodeTownValue(value);
-                const checked = selectedSet.has(value) ? ' checked' : '';
+                const sub = subtownOf(value);
+                const isChecked = selectedSet.has(value) || (sub && selectedSubs.has(sub));
+                const checked = isChecked ? ' checked' : '';
+                const handler = sub ? 'handleSubtownFilterChange(this)' : 'handleTownFilterChange()';
                 const noteHtml = note ? ` <span class="filter-dropdown-note">${note}</span>` : '';
                 const titleAttr = title ? ` title="${esc(title)}"` : '';
-                return `<label class="filter-dropdown-option ${rowClass}"${titleAttr}><input type="checkbox" value="${esc(value)}"${checked} onchange="handleTownFilterChange()"><span>${label} (${count})${noteHtml}</span></label>`;
+                return `<label class="filter-dropdown-option ${rowClass}"${titleAttr}><input type="checkbox" value="${esc(value)}"${checked} onchange="${handler}"><span>${label} (${count})${noteHtml}</span></label>`;
             };
 
             townFilterOptions.innerHTML = townNames.map(town => {
@@ -1484,11 +1518,15 @@
                     if (alsoTown) notes.push('also independent town');
                     const elsewhere = [...(subParents.get(sub) || [])].filter(p => p !== town).sort();
                     if (elsewhere.length) notes.push(`also in ${elsewhere.join(', ')}`);
-                    const title = alsoTown
-                        ? `${sub} is its own municipality as well as a place ${town} mails to. This row is only the ${town} cases - the separate ${sub} row is the borough itself.`
-                        : '';
+                    const titles = [];
+                    if (alsoTown) {
+                        titles.push(`${sub} is its own municipality as well as a place ${town} mails to. This row is only the ${town} cases - the separate ${sub} row is the borough itself.`);
+                    }
+                    if (elsewhere.length) {
+                        titles.push(`${sub} straddles ${[town, ...elsewhere].sort().join(' and ')}. Ticking it here ticks it there too, so you always get the whole place.`);
+                    }
                     return row(TOWN_VALUE.sub(town, sub), sub, entry.subs.get(sub),
-                        notes.join(' &middot; '), 'town-sub', title);
+                        notes.join(' &middot; '), 'town-sub', titles.join(' '));
                 });
                 if (entry.noSub) {
                     childRows.push(row(TOWN_VALUE.noSub(town), 'No subtown', entry.noSub, '',
@@ -1512,11 +1550,46 @@
                     <div class="town-subgroup"${isOpen ? '' : ' hidden'}>${childRows.join('')}</div>
                 </div>`;
             }).join('');
-            updateMultiFilterButtonText('townFilterButton', selectedTowns, 'All towns', townFilterLabels);
+            updateTownFilterButton(selectedTowns);
+        }
+
+        // A place that straddles two municipalities (Atco is partly Waterford
+        // Twp and partly Winslow Twp) gets a row under each, so both counts
+        // stay honest. Ticking either one ticks the other: it is one place, and
+        // nobody researching Atco wants half of it. The row values stay scoped
+        // to their township, so the selection is just their union.
+        function subtownOf(value) {
+            return value.startsWith('s:') ? (value.split('|')[1] || '') : '';
+        }
+
+        function handleSubtownFilterChange(input) {
+            const sub = subtownOf(input.value);
+            if (sub) {
+                document.querySelectorAll('#townFilterOptions input[type="checkbox"]').forEach(box => {
+                    if (box !== input && subtownOf(box.value) === sub) box.checked = input.checked;
+                });
+            }
+            handleTownFilterChange();
+        }
+
+        // The shared button helper counts raw values, which would read
+        // "2 selected" for a single linked place. Collapse to distinct names
+        // first so Atco reads as "ATCO".
+        function updateTownFilterButton(selectedValues) {
+            const names = [...new Set((selectedValues || []).map(v => {
+                const sub = subtownOf(v);
+                return sub || decodeTownValue(v);
+            }))];
+            const button = document.getElementById('townFilterButton');
+            if (!button) return;
+            button.textContent = !names.length ? 'All towns'
+                : names.length === 1 ? names[0]
+                : `${names.length} selected`;
         }
 
         function handleTownFilterChange() {
-            handleMultiFilterChange('townFilterOptions', 'townFilterButton', 'All towns', townFilterLabels);
+            updateTownFilterButton(getSelectedCheckboxValues('townFilterOptions'));
+            loadData();
         }
 
         function buildStreetViewErrorHtml(streetViewUrl, mapsUrl) {
