@@ -3,52 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pre-Foreclosure Pipeline | Foreclosure Finder</title>
+    <script src="/theme.js"></script>
+    <title>Pre-Foreclosure Pipeline | Blake Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         :root {
-            --benoro-navy: #1a3a52;
-            --benoro-navy-dark: #152d42;
-            --benoro-navy-light: #234a66;
-            --benoro-gold: #d4a84b;
-            --benoro-gold-light: #e0bc6a;
-            --benoro-gold-dark: #b8923f;
-            --benoro-white: #f8fafc;
-            --benoro-card: #1f4460;
-            --benoro-card-hover: #245070;
-            --benoro-text-muted: #a0b4c4;
-            --benoro-text-light: #7a9bb5;
-            --benoro-border: rgba(255,255,255,0.12);
-            --benoro-success: #4ade80;
-            --benoro-warning: #fbbf24;
-            --benoro-danger: #f87171;
+            --bg: #F7F4EC;
+            --surface: #FFFFFF;
+            --surface-2: #FBF9F4;
+            --surface-3: #F1ECE1;
+            --ink: #232323;
+            --ink-2: #4A463F;
+            --muted: #7C756A;
+            --brand-gold: #C9943A;
+            --brand-gold-hover: #B8842C;
+            --brand-gold-dark: #8F6A22;
+            --brand-gold-light: #E2C489;
+            --brand-gold-tint: rgba(201,148,58,0.12);
+            --border: #E4DCCB;
+            --border-strong: #D3C8B2;
+            --success: #2F7D4F;
+            --success-tint: rgba(47,125,79,0.12);
+            --warning: #A86B00;
+            --warning-tint: rgba(214,150,30,0.15);
+            --danger: #B3261E;
+            --danger-tint: rgba(179,38,30,0.10);
+            --info: #2F5F8A;
+            --info-tint: rgba(47,95,138,0.10);
+            --orange: #B4500F;
+            --orange-tint: rgba(194,86,16,0.12);
+            --shadow: 0 1px 2px rgba(35,35,35,0.05), 0 4px 14px rgba(35,35,35,0.06);
+            --shadow-modal: 0 20px 50px rgba(35,35,35,0.18);
+            --focus-ring: 0 0 0 3px rgba(201,148,58,0.18);
+            --serif: 'Cormorant Garamond', Georgia, serif;
+            --on-gold: #232323;
+            --on-solid: #FFFFFF;
+            --info-hover: #244B6E;
+            --warning-tint-hover: rgba(214,150,30,0.22);
+            --shadow-hover: 0 2px 4px rgba(35,35,35,0.05), 0 12px 28px rgba(35,35,35,0.10);
+            --photo-pill-bg: rgba(255,255,255,0.94);
+            color-scheme: light;
+        }
+        [data-theme="dark"] {
+            --bg: #161513;
+            --surface: #1F1D1A;
+            --surface-2: #262420;
+            --surface-3: #2E2B26;
+            --ink: #EDE8DE;
+            --ink-2: #C7C0B2;
+            --muted: #9A9284;
+            --brand-gold: #D4A24A;
+            --brand-gold-hover: #E0B865;
+            --brand-gold-dark: #E0B865;
+            --brand-gold-light: #8F6A22;
+            --brand-gold-tint: rgba(212,162,74,0.16);
+            --border: #34302A;
+            --border-strong: #46413A;
+            --success: #5DBB82;
+            --success-tint: rgba(93,187,130,0.16);
+            --warning: #E0A53A;
+            --warning-tint: rgba(224,165,58,0.16);
+            --warning-tint-hover: rgba(224,165,58,0.24);
+            --danger: #E5675E;
+            --danger-tint: rgba(229,103,94,0.16);
+            --info: #6FA3D6;
+            --info-tint: rgba(111,163,214,0.16);
+            --info-hover: #8DB8E2;
+            --orange: #F08A4B;
+            --orange-tint: rgba(240,138,75,0.16);
+            --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.25);
+            --shadow-hover: 0 2px 4px rgba(0,0,0,0.35), 0 12px 28px rgba(0,0,0,0.4);
+            --shadow-modal: 0 20px 50px rgba(0,0,0,0.6);
+            --focus-ring: 0 0 0 3px rgba(212,162,74,0.28);
+            --on-solid: #161513;
+            --photo-pill-bg: rgba(31,29,26,0.92);
+            color-scheme: dark;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--benoro-navy);
+            background: var(--bg);
             min-height: 100vh;
-            color: var(--benoro-white);
+            overflow-x: hidden;
+            color: var(--ink);
+            transition: background-color 0.2s, color 0.2s;
         }
-        .bg-pattern {
-            position: fixed;
-            inset: 0;
-            z-index: -1;
-            background:
-                linear-gradient(rgba(21,45,66,0.92), rgba(21,45,66,0.92)),
-                radial-gradient(circle at 18% 80%, rgba(212,168,75,0.18) 0%, transparent 52%),
-                radial-gradient(circle at 80% 14%, rgba(122,155,181,0.18) 0%, transparent 50%),
-                url('/images/BENORO%20Variations-04.png') center/560px no-repeat,
-                var(--benoro-navy);
-        }
+        a { color: var(--brand-gold-dark); }
         .container { max-width: 1400px; margin: 0 auto; padding: 0 30px 30px; }
         header {
-            background: var(--benoro-navy-dark);
-            border-bottom: 2px solid var(--benoro-gold);
-            padding: 15px 0;
+            background: var(--surface);
+            border-bottom: 2px solid var(--brand-gold);
+            box-shadow: var(--shadow);
+            padding: 12px 0;
             margin-bottom: 30px;
             width: 100vw;
             margin-left: calc(50% - 50vw);
@@ -64,43 +113,45 @@
             padding: 0 30px;
         }
         .logo-section { display: flex; align-items: center; }
-        .header-logo { height: 102px; width: auto; }
+        .header-logo { height: 64px; width: auto; display: block; }
         .page-title-section { flex: 1; text-align: center; }
         .page-title {
-            font-size: 0.8rem;
+            font-family: var(--serif);
+            font-size: 1.75rem;
             font-weight: 600;
-            letter-spacing: 2.5px;
-            color: var(--benoro-gold);
-            text-transform: uppercase;
-            margin-bottom: 4px;
+            line-height: 1.15;
+            color: var(--ink);
         }
         h1 {
-            font-family: 'Montserrat', sans-serif;
-            font-size: 1.5rem;
+            font-family: var(--serif);
+            font-size: 1.8rem;
             font-weight: 600;
             line-height: 1.1;
             margin-bottom: 2px;
-            color: var(--benoro-white);
+            color: var(--ink);
         }
-        .subtitle { color: var(--benoro-text-muted); font-size: 0.85rem; }
-        .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+        .subtitle { color: var(--muted); font-size: 0.85rem; }
+        .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px; }
         .nav-links a {
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             text-decoration: none;
             font-size: 0.78rem;
             text-transform: uppercase;
             letter-spacing: 0.1em;
-            border-radius: 0;
-            border: none;
-            padding: 7px 2px;
-            transition: color 0.25s;
+            border-bottom: 2px solid transparent;
+            padding: 7px 2px 5px;
+            transition: color 0.25s, border-color 0.25s;
         }
-        .nav-links a:hover, .nav-links a.active { color: var(--benoro-gold); }
-        
+        .nav-links a:hover { color: var(--brand-gold-dark); }
+        .nav-links a.active { color: var(--brand-gold-dark); border-bottom-color: var(--brand-gold); font-weight: 600; }
+
+        /* Status bar */
         .status-bar {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 15px 25px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 4px;
+            padding: 18px 25px;
             margin-bottom: 25px;
             display: flex;
             justify-content: space-between;
@@ -108,63 +159,107 @@
             flex-wrap: wrap;
             gap: 15px;
         }
-        .status-info { display: flex; align-items: center; gap: 10px; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #10b981; }
-        .status-dot.stale { background: #f59e0b; }
-        
-        /* Upload Section */
+        .status-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--ink); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-tint); }
+        .status-dot.stale { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-tint); }
+        .source-info { color: var(--muted); font-size: 0.8rem; }
+
+        /* Upload / session sections */
         .upload-section {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(52, 211, 153, 0.05));
-            border: 2px dashed #10b981;
-            border-radius: 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 4px;
             padding: 25px;
             margin-bottom: 25px;
             text-align: center;
         }
-        .upload-section h3 { color: #10b981; margin-bottom: 10px; }
-        .upload-section p { color: #9ca3af; margin-bottom: 15px; font-size: 0.95rem; }
+        .upload-section h3 {
+            color: var(--ink);
+            font-family: var(--serif);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .upload-section p { color: var(--ink-2); margin-bottom: 15px; font-size: 0.9rem; line-height: 1.5; }
+        .upload-section a { color: var(--brand-gold-dark); font-weight: 500; }
+        .upload-steps {
+            text-align: left; max-width: 660px; margin: 0 auto 0.85rem;
+            font-size: 0.85rem; line-height: 1.55; color: var(--ink-2);
+            padding-left: 1.2rem;
+        }
+        .upload-steps b { color: var(--ink); }
+        .session-row { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+        .session-input {
+            flex: 1; min-width: 260px; max-width: 420px;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
+        }
         .upload-input { display: none; }
         .upload-label {
             display: inline-block;
             padding: 12px 30px;
-            background: #10b981;
-            color: white;
-            border-radius: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            color: var(--ink);
+            border-radius: 6px;
             cursor: pointer;
             font-weight: 600;
+            font-size: 0.85rem;
             transition: all 0.2s;
         }
-        .upload-label:hover { background: #059669; }
+        .upload-label:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
         .csv-status {
             margin-top: 15px;
             padding: 10px 15px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 8px;
-            font-size: 0.9rem;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: var(--ink-2);
         }
-        .csv-status.has-file { color: #10b981; }
-        .csv-status.no-file { color: #f59e0b; }
-        
+        .csv-status.has-file { color: var(--success); }
+        .csv-status.no-file { color: var(--warning); }
+
+        /* Buttons */
         .btn {
             padding: 12px 25px;
-            border-radius: 8px;
+            border-radius: 6px;
             font-weight: 600;
             cursor: pointer;
-            border: none;
+            border: 1px solid transparent;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            font-size: 0.95rem;
+            font-family: inherit;
+            font-size: 0.75rem;
+            letter-spacing: 1.3px;
+            text-transform: uppercase;
             transition: all 0.2s;
         }
-        .btn-primary { background: #10b981; color: white; }
-        .btn-primary:hover { background: #059669; }
-        .btn-secondary { background: #f59e0b; color: white; }
-        .btn-secondary:hover { background: #d97706; }
-        .btn-outline { background: transparent; border: 1px solid #374151; color: #9ca3af; }
-        .btn-outline:hover { border-color: #10b981; color: #10b981; }
+        .btn-primary { background: var(--brand-gold); border-color: var(--brand-gold); color: var(--on-gold); }
+        .btn-primary:hover { background: var(--brand-gold-hover); border-color: var(--brand-gold-hover); }
+        .btn-secondary { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink); }
+        .btn-secondary:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
+        .btn-outline { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink-2); }
+        .btn-outline:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        
+        /* Toggle filter buttons (colors set by JS when active) */
+        .btn-outline.filter-gold { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
+        .btn-outline.filter-warning { border-color: var(--warning); color: var(--warning); }
+        .btn-outline.filter-danger { border-color: var(--danger); color: var(--danger); }
+        .btn-outline.filter-danger:hover { background: var(--danger-tint); }
+        .btn-outline.filter-warning:hover { background: var(--warning-tint); }
+        .btn-outline.filter-gold:hover { background: var(--brand-gold-tint); }
+        /* Active (toggled-on) filter buttons */
+        .btn-outline.filter-gold.is-active, .btn-outline.filter-gold.is-active:hover { background: var(--brand-gold); color: var(--on-gold); }
+        .btn-outline.filter-warning.is-active, .btn-outline.filter-warning.is-active:hover { background: var(--warning); color: var(--on-solid); }
+        .btn-outline.filter-danger.is-active, .btn-outline.filter-danger.is-active:hover { background: var(--danger); color: var(--on-solid); }
+
         .actions-bar {
             display: flex;
             gap: 15px;
@@ -172,28 +267,47 @@
             flex-wrap: wrap;
             align-items: center;
         }
+        .actions-bar select, .actions-bar input:not([type="checkbox"]), .api-key-row input {
+            padding: 10px 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
+            font-size: 0.85rem;
+            height: 40px;
+        }
+        .actions-bar select:focus, .actions-bar input:not([type="checkbox"]):focus, .api-key-row input:focus,
+        .session-input:focus, .streetview-mode-row select:focus, .filter-row select:focus, .filter-row input:focus {
+            outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring);
+        }
+        input::placeholder { color: var(--muted); }
         .case-search-group { flex: 1 1 260px; min-width: 200px; }
         .case-search {
             width: 100%; box-sizing: border-box;
-            padding: 10px 15px; border-radius: 8px;
-            border: 1px solid var(--benoro-border);
-            background: var(--benoro-card); color: var(--benoro-white);
-            font-size: 0.9rem;
+            padding: 10px 15px; border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface); color: var(--ink);
+            font-size: 0.85rem;
         }
-        .case-search:focus { outline: none; border-color: var(--benoro-gold); }
+        .case-search:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .cases-load-more { grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 30px; }
         .load-more-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
-            padding: 12px 28px; border-radius: 8px; cursor: pointer;
-            font-size: 0.9rem; font-weight: 600;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            padding: 12px 28px; border-radius: 6px; cursor: pointer;
+            font-family: inherit; font-size: 0.85rem; font-weight: 600;
+            box-shadow: var(--shadow);
         }
-        .load-more-btn:hover { background: rgba(212,168,75,0.25); }
+        .load-more-btn:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
 
+        /* Stats */
         .stats-summary {
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 4px;
             padding: 15px 25px;
             margin-bottom: 25px;
             display: flex;
@@ -201,72 +315,77 @@
             flex-wrap: wrap;
         }
         .stat-item { text-align: center; }
-        .stat-value { font-size: 1.8rem; font-weight: 700; color: #10b981; }
-        .stat-label { color: #9ca3af; font-size: 0.85rem; }
-        
-        .results-header { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
+        .stat-value { font-family: var(--serif); font-size: 2.4rem; line-height: 1.1; font-weight: 700; color: var(--brand-gold); }
+        .stat-label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 20px;
         }
-        .results-header h2 { display: flex; align-items: center; gap: 10px; }
-        .case-count { color: #9ca3af; font-weight: normal; }
-        
-        /* Property Cards with Street View */
-        .cases-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); 
-            gap: 20px; 
+        .results-header h2 {
+            display: flex; align-items: baseline; gap: 10px;
+            font-family: var(--serif); font-size: 1.6rem; font-weight: 600; color: var(--ink);
         }
-        
+        .case-count { color: var(--muted); font-weight: 500; font-family: 'Montserrat', sans-serif; font-size: 0.95rem; }
+
+        /* Property cards */
+        .cases-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
         .property-card {
-            background: rgba(255,255,255,0.05);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
             border-radius: 4px;
             overflow: hidden;
             transition: all 0.2s;
-            border: 1px solid transparent;
         }
-        .property-card:hover { 
-            border-color: #10b981; 
+        .property-card:hover {
+            border-color: var(--brand-gold);
             transform: translateY(-3px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            box-shadow: var(--shadow-hover);
         }
-        
+        .property-card.sweet-spot { border: 1px solid var(--brand-gold); box-shadow: 0 0 0 1px var(--brand-gold-light), var(--shadow); }
+
         .street-view-container {
             position: relative;
             width: 100%;
-            height: 200px;
-            background: #1f2937;
+            height: 180px;
+            background: var(--surface-3);
+            border-bottom: 1px solid var(--border);
         }
-        .street-view-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
+        .street-view-container > a { color: var(--ink-2); }
+        .street-view-img { width: 100%; height: 100%; object-fit: cover; }
         .no-image {
             display: flex;
             align-items: center;
             justify-content: center;
             height: 100%;
-            color: #6b7280;
-            font-size: 0.9rem;
+            color: var(--muted);
+            font-size: 0.85rem;
         }
+        .maps-placeholder {
+            display: flex; align-items: center; justify-content: center;
+            height: 100%; color: var(--ink-2); text-decoration: none; font-size: 0.85rem;
+        }
+        .maps-placeholder small { color: var(--muted); }
+        .ondemand-note { font-size: 0.72rem; color: var(--muted); }
         .days-badge {
             position: absolute;
             top: 10px;
             right: 10px;
-            background: rgba(0,0,0,0.7);
-            color: white;
+            background: rgba(35,35,35,0.78);
+            color: #FFFFFF;
             padding: 5px 10px;
             border-radius: 6px;
             font-size: 0.8rem;
             font-weight: 600;
         }
-        .days-badge.sweet-spot {
-            background: rgba(16, 185, 129, 0.9);
-            color: white;
-        }
+        .days-badge.sweet-spot { background: var(--brand-gold); color: var(--on-gold); }
         .type-badge {
             position: absolute;
             top: 10px;
@@ -278,31 +397,53 @@
             letter-spacing: 0.5px;
             text-transform: uppercase;
         }
-        .type-badge.mortgage { background: rgba(212,168,75,0.9); color: #152d42; }
-        .type-badge.lien { background: rgba(248,113,113,0.9); color: white; }
-        .type-badge.other { background: rgba(96,165,250,0.9); color: white; }
-        .sheriff-flag {
+        .type-badge.mortgage { background: var(--brand-gold); color: var(--on-gold); }
+        .type-badge.lien { background: var(--danger); color: var(--on-solid); }
+        .type-badge.other { background: var(--info); color: var(--on-solid); }
+        .stack-badge {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: var(--photo-pill-bg);
+            color: var(--brand-gold-dark);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            border: 1px solid var(--brand-gold);
+        }
+
+        /* Flags */
+        .sheriff-flag, .repeat-flag, .address-warning-flag {
             display: inline-flex;
             align-items: center;
             gap: 6px;
             padding: 3px 8px;
             margin-bottom: 4px;
             border-radius: 999px;
-            border: 1px solid rgba(248,113,113,0.5);
-            background: rgba(248,113,113,0.14);
-            color: #fecaca;
             font-size: 0.65rem;
             font-weight: 600;
             letter-spacing: 0.4px;
             white-space: nowrap;
         }
-        .sheriff-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #f87171;
-            box-shadow: 0 0 0 2px rgba(248,113,113,0.22);
+        .sheriff-flag { border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); background: var(--danger-tint); color: var(--danger); }
+        .sheriff-dot, .repeat-dot, .address-warning-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .sheriff-dot { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent); }
+        .repeat-flag { border: 1px solid color-mix(in srgb, var(--brand-gold) 45%, transparent); background: var(--brand-gold-tint); color: var(--brand-gold-dark); }
+        .repeat-dot { background: var(--brand-gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-gold) 20%, transparent); }
+        .address-warning-flag.out-of-county { border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); background: var(--danger-tint); color: var(--danger); }
+        .address-warning-flag.defendant-source { border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); background: var(--warning-tint); color: var(--warning); }
+        .out-of-county .address-warning-dot { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent); }
+        .defendant-source .address-warning-dot { background: var(--warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 18%, transparent); }
+        .closed-flag {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: var(--danger); color: var(--on-solid);
+            font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
         }
+
+        /* Filter dropdown */
         .filter-dropdown-group {
             display: flex;
             flex-direction: column;
@@ -311,7 +452,7 @@
             min-width: 0;
         }
         .filter-dropdown-label {
-            color: var(--benoro-text-muted);
+            color: var(--muted);
             font-size: 0.68rem;
             letter-spacing: 1.2px;
             text-transform: uppercase;
@@ -319,9 +460,10 @@
         .filter-dropdown-button {
             padding: 10px 14px;
             border-radius: 6px;
-            border: 1px solid var(--benoro-border);
-            background: var(--benoro-card);
-            color: var(--benoro-text);
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
             font-size: 0.8rem;
             line-height: 1.2;
             text-align: left;
@@ -332,12 +474,12 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .filter-dropdown-button:focus { outline: none; border-color: var(--benoro-gold); }
+        .filter-dropdown-button:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .filter-dropdown-button::after {
             content: '▼';
             float: right;
             font-size: 0.65rem;
-            color: var(--benoro-text-light);
+            color: var(--muted);
         }
         .filter-dropdown-panel {
             position: absolute;
@@ -346,10 +488,10 @@
             width: 280px;
             max-height: 320px;
             overflow: hidden;
-            border: 1px solid rgba(184,134,11,0.25);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            background: #17364d;
-            box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+            background: var(--surface);
+            box-shadow: var(--shadow-modal);
             z-index: 30;
             display: none;
         }
@@ -359,13 +501,16 @@
             justify-content: space-between;
             gap: 10px;
             padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
         }
         .filter-dropdown-action {
             border: none;
             background: transparent;
-            color: var(--benoro-gold);
+            color: var(--brand-gold-dark);
+            font-family: inherit;
             font-size: 0.72rem;
+            font-weight: 600;
             letter-spacing: 0.8px;
             text-transform: uppercase;
             cursor: pointer;
@@ -382,39 +527,28 @@
             gap: 10px;
             padding: 8px 12px;
             font-size: 0.8rem;
-            color: var(--benoro-text);
+            color: var(--ink);
             cursor: pointer;
         }
-        .filter-dropdown-option:hover { background: rgba(255,255,255,0.05); }
-        .filter-dropdown-option input { accent-color: var(--benoro-gold); }
+        .filter-dropdown-option:hover { background: var(--surface-3); }
+        .filter-dropdown-option input { accent-color: var(--brand-gold); }
         .filter-dropdown-empty {
             padding: 12px;
-            color: var(--benoro-text-light);
+            color: var(--muted);
             font-size: 0.8rem;
         }
-        .stack-badge {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(15, 23, 42, 0.85);
-            color: #fde68a;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.72rem;
-            font-weight: 600;
-            letter-spacing: 0.4px;
-            text-transform: uppercase;
-            border: 1px solid rgba(212,168,75,0.45);
-        }
+
+        /* Stacked cases */
         .stack-section {
-            border-top: 1px solid var(--benoro-border);
+            border-top: 1px solid var(--border);
             padding: 12px 20px;
-            background: rgba(15, 23, 42, 0.35);
+            background: var(--surface-2);
         }
         .stack-toggle {
             background: none;
             border: none;
-            color: var(--benoro-gold);
+            color: var(--brand-gold-dark);
+            font-family: inherit;
             font-size: 0.78rem;
             font-weight: 600;
             cursor: pointer;
@@ -426,6 +560,7 @@
         .stack-toggle:hover { text-decoration: underline; }
         .stack-toggle .arrow { transition: transform 0.15s ease; display: inline-block; }
         .stack-toggle.open .arrow { transform: rotate(90deg); }
+        .stack-toggle-detail { color: var(--ink-2); font-weight: 500; }
         .stack-list { display: none; margin-top: 10px; }
         .stack-list.open { display: block; }
         .stack-row {
@@ -435,26 +570,21 @@
             align-items: center;
             padding: 6px 0;
             font-size: 0.78rem;
-            border-bottom: 1px solid rgba(212,168,75,0.08);
+            border-bottom: 1px solid var(--border);
         }
         .stack-row:last-child { border-bottom: none; }
-        .stack-row .stack-case-num { color: var(--benoro-gold); font-weight: 600; }
+        .stack-row .stack-case-num { color: var(--brand-gold-dark); font-weight: 600; }
         .stack-row .stack-case-num a { color: inherit; text-decoration: none; }
         .stack-row .stack-case-num a:hover { text-decoration: underline; }
-        .stack-row .stack-meta { color: var(--benoro-text-light); font-size: 0.72rem; }
-        .stack-row .stack-status { font-size: 0.7rem; opacity: 0.85; }
+        .stack-row .stack-amount { color: var(--ink); font-weight: 600; }
+        .stack-row .stack-meta { color: var(--muted); font-size: 0.72rem; }
+        .stack-row .stack-status { font-size: 0.7rem; color: var(--ink-2); }
         .stack-row .stack-pill { font-size: 0.65rem; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
-        .stack-row .stack-pill.mortgage { background: rgba(212,168,75,0.2); color: #fbbf24; }
-        .stack-row .stack-pill.lien { background: rgba(248,113,113,0.2); color: #fca5a5; }
-        .stack-row .stack-pill.other { background: rgba(96,165,250,0.2); color: #93c5fd; }
-        .property-card.sweet-spot {
-            border: 2px solid #10b981;
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
-        }
-        
-        .property-info {
-            padding: 20px;
-        }
+        .stack-row .stack-pill.mortgage { background: var(--brand-gold-tint); color: var(--brand-gold-dark); }
+        .stack-row .stack-pill.lien { background: var(--danger-tint); color: var(--danger); }
+        .stack-row .stack-pill.other { background: var(--info-tint); color: var(--info); }
+
+        .property-info { padding: 20px; }
         .address-row {
             display: flex;
             align-items: center;
@@ -462,108 +592,52 @@
             gap: 10px;
         }
         .property-address {
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             font-weight: 600;
             margin-bottom: 5px;
-            color: #f3f4f6;
+            color: var(--ink);
         }
-        .repeat-flag {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 8px;
-            margin-bottom: 4px;
-            border-radius: 999px;
-            border: 1px solid rgba(212,168,75,0.45);
-            background: rgba(212,168,75,0.12);
-            color: #f5d89b;
-            font-size: 0.65rem;
-            font-weight: 600;
-            letter-spacing: 0.4px;
-            white-space: nowrap;
-        }
-        .repeat-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #e0bc6a;
-            box-shadow: 0 0 0 2px rgba(224,188,106,0.2);
-        }
-        .address-warning-flag {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 8px;
-            margin-bottom: 4px;
-            border-radius: 999px;
-            font-size: 0.65rem;
-            font-weight: 600;
-            letter-spacing: 0.4px;
-            white-space: nowrap;
-        }
-        .address-warning-flag.out-of-county {
-            border: 1px solid rgba(220,68,68,0.55);
-            background: rgba(220,68,68,0.14);
-            color: #fca5a5;
-        }
-        .address-warning-flag.defendant-source {
-            border: 1px solid rgba(245,158,11,0.55);
-            background: rgba(245,158,11,0.14);
-            color: #fcd34d;
-        }
-        .address-warning-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-        }
-        .out-of-county .address-warning-dot { background: #ef4444; box-shadow: 0 0 0 2px rgba(239,68,68,0.2); }
-        .defendant-source .address-warning-dot { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
         .property-location {
-            color: #9ca3af;
-            font-size: 0.9rem;
+            color: var(--ink-2);
+            font-size: 0.85rem;
             margin-bottom: 15px;
         }
-        
         .property-details {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
             margin-bottom: 15px;
         }
-        .detail-item {
-            font-size: 0.85rem;
-        }
+        .detail-item { font-size: 0.85rem; }
         .detail-label {
-            color: #6b7280;
-            font-size: 0.75rem;
+            color: var(--muted);
+            font-size: 0.7rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .detail-value {
-            color: #f3f4f6;
-            margin-top: 2px;
-        }
-        
+        .detail-value { color: var(--ink); margin-top: 2px; }
+        .detail-value.amount { color: var(--brand-gold-dark); font-weight: 700; }
+
         .property-footer {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding-top: 15px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid var(--border);
         }
         .property-footer a {
-            color: #10b981;
+            color: var(--brand-gold-dark);
             text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
+            font-size: 0.85rem;
+            font-weight: 600;
         }
         .property-footer a:hover { text-decoration: underline; }
-        
-        /* Score Breakdown Dropdown */
+
+        /* Score breakdown */
         .score-details {
             margin: 15px 0;
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
             overflow: hidden;
         }
         .score-summary {
@@ -571,163 +645,108 @@
             align-items: center;
             gap: 10px;
             padding: 10px 15px;
-            background: rgba(0,0,0,0.2);
+            background: var(--surface-2);
             cursor: pointer;
             user-select: none;
         }
-        .score-summary:hover {
-            background: rgba(0,0,0,0.3);
-        }
+        .score-summary:hover { background: var(--surface-3); }
         .score-badge {
             padding: 4px 10px;
             border-radius: 6px;
             font-weight: 700;
             font-size: 0.85rem;
         }
-        .score-badge.grade-a { background: rgba(16, 185, 129, 0.3); color: #10b981; }
-        .score-badge.grade-b { background: rgba(59, 130, 246, 0.3); color: #3b82f6; }
-        .score-badge.grade-c { background: rgba(245, 158, 11, 0.3); color: #f59e0b; }
-        .score-badge.grade-d { background: rgba(249, 115, 22, 0.3); color: #f97316; }
-        .score-badge.grade-f { background: rgba(239, 68, 68, 0.3); color: #ef4444; }
-        .score-number {
-            color: #9ca3af;
-            font-size: 0.85rem;
-        }
+        .score-badge.grade-a { background: var(--success-tint); color: var(--success); }
+        .score-badge.grade-b { background: var(--info-tint); color: var(--info); }
+        .score-badge.grade-c { background: var(--warning-tint); color: var(--warning); }
+        .score-badge.grade-d { background: var(--orange-tint); color: var(--orange); }
+        .score-badge.grade-f { background: var(--danger-tint); color: var(--danger); }
+        .score-number { color: var(--ink-2); font-size: 0.85rem; }
         .expand-icon {
             margin-left: auto;
-            color: #6b7280;
+            color: var(--muted);
             font-size: 0.7rem;
             transition: transform 0.2s;
         }
-        details[open] .expand-icon {
-            transform: rotate(180deg);
-        }
+        details[open] .expand-icon { transform: rotate(180deg); }
         .grade-meaning {
-            color: #9ca3af;
+            color: var(--ink-2);
             font-size: 0.8rem;
             margin-left: auto;
             margin-right: 10px;
         }
-        .docket-event {
-            display: flex;
-            gap: 10px;
-            padding: 4px 0;
-            font-size: 0.8rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        .docket-event:last-child {
-            border-bottom: none;
-        }
-        .event-date {
-            color: #6b7280;
-            min-width: 80px;
-        }
-        .event-type {
-            color: #9ca3af;
-        }
-        
-        /* 1. Contributing Factors */
+
         .factors-header {
             font-weight: 600;
-            color: #10b981;
+            color: var(--success);
             margin-bottom: 6px;
             font-size: 0.8rem;
         }
-        .no-factors {
-            color: #6b7280;
-            font-size: 0.8rem;
-            padding: 4px 0;
-        }
-        
-        /* 2. Negative Signals */
+        .no-factors { color: var(--muted); font-size: 0.8rem; padding: 4px 0; }
         .negative-section {
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid var(--border);
         }
         .negative-header {
             font-weight: 600;
-            color: #ef4444;
+            color: var(--danger);
             margin-bottom: 6px;
             font-size: 0.8rem;
         }
-        
-        /* 3. What's Holding It Back (Nested Dropdown) */
-        .missing-details {
-            margin-top: 10px;
-        }
+        .missing-details { margin-top: 10px; }
         .missing-summary {
             cursor: pointer;
             padding: 8px 10px;
-            background: rgba(251, 191, 36, 0.08);
-            border: 1px solid rgba(251, 191, 36, 0.2);
+            background: var(--warning-tint);
+            border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
             border-radius: 6px;
             font-size: 0.8rem;
-            color: #fbbf24;
-            font-weight: 500;
+            color: var(--warning);
+            font-weight: 600;
             user-select: none;
             display: flex;
             align-items: center;
             gap: 6px;
         }
-        .missing-summary:hover {
-            background: rgba(251, 191, 36, 0.12);
-        }
-        .missing-count {
-            color: #9ca3af;
-            font-weight: 400;
-        }
+        .missing-summary:hover { background: var(--warning-tint-hover); }
+        .missing-count { color: var(--ink-2); font-weight: 400; }
         .missing-content {
             padding: 10px;
-            border: 1px solid rgba(251, 191, 36, 0.15);
+            border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
             border-top: none;
             border-radius: 0 0 6px 6px;
-            background: rgba(0,0,0,0.1);
+            background: var(--surface);
         }
-        .missing-item {
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        .missing-item:last-child {
-            border-bottom: none;
-        }
-        .missing-text {
-            display: block;
-            font-size: 0.8rem;
-            color: #e5e7eb;
-            line-height: 1.3;
-        }
+        .missing-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
+        .missing-item:last-child { border-bottom: none; }
+        .missing-text { display: block; font-size: 0.8rem; color: var(--ink); line-height: 1.3; }
         .missing-explanation {
             display: block;
             font-size: 0.75rem;
-            color: #9ca3af;
+            color: var(--muted);
             margin-top: 2px;
             padding-left: 18px;
             line-height: 1.3;
         }
         .all-good {
             margin-top: 10px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid rgba(16, 185, 129, 0.3);
+            background: var(--success-tint);
+            border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
             border-radius: 6px;
             padding: 8px 10px;
-            color: #10b981;
+            color: var(--success);
             font-size: 0.8rem;
         }
-        
-        /* Compact score breakdown */
-        .score-breakdown {
-            padding: 10px;
-            background: rgba(0,0,0,0.1);
-        }
+        .score-breakdown { padding: 10px; background: var(--surface); }
         .score-interpretation {
-            background: rgba(16, 185, 129, 0.1);
-            border-left: 3px solid #10b981;
+            background: var(--success-tint);
+            border-left: 3px solid var(--success);
             padding: 6px 10px;
             margin-bottom: 10px;
             border-radius: 0 4px 4px 0;
             font-size: 0.8rem;
-            color: #d1d5db;
+            color: var(--ink);
         }
         .score-factor {
             display: flex;
@@ -736,82 +755,103 @@
             padding: 3px 0;
             font-size: 0.8rem;
         }
-        .score-factor.positive .factor-impact { color: #10b981; }
-        .score-factor.negative .factor-impact { color: #ef4444; }
-        .score-factor.neutral .factor-impact { color: #6b7280; }
-        .factor-text { color: #d1d5db; }
+        .score-factor.positive .factor-impact { color: var(--success); }
+        .score-factor.negative .factor-impact { color: var(--danger); }
+        .score-factor.neutral .factor-impact { color: var(--muted); }
+        .factor-text { color: var(--ink-2); }
         .factor-impact { font-weight: 600; min-width: 35px; text-align: right; }
-        
-        /* Compact docket info */
+
         .docket-info {
             margin-top: 10px;
             padding-top: 10px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid var(--border);
         }
         .docket-header {
             font-weight: 600;
-            color: #9ca3af;
+            color: var(--ink-2);
             margin-bottom: 4px;
             font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .docket-event {
             display: flex;
             gap: 8px;
             padding: 2px 0;
             font-size: 0.75rem;
+            border-bottom: 1px solid var(--surface-3);
         }
-        .event-date { color: #6b7280; min-width: 70px; }
-        .docket-stat { font-size: 0.75rem; color: #6b7280; padding: 2px 0; }
-        
+        .docket-event:last-child { border-bottom: none; }
+        .event-date { color: var(--muted); min-width: 70px; }
+        .event-type { color: var(--ink-2); }
+        .docket-stat { font-size: 0.75rem; color: var(--muted); padding: 2px 0; }
+
         .maps-link {
-            background: #4285f4;
-            color: white !important;
+            background: var(--info);
+            color: var(--on-solid) !important;
             padding: 6px 12px;
             border-radius: 6px;
             font-size: 0.8rem;
             text-decoration: none;
         }
-        .maps-link:hover { background: #3367d6; text-decoration: none !important; }
-        
-        .no-results { text-align: center; padding: 60px 20px; color: #9ca3af; }
-        .loading { text-align: center; padding: 60px 20px; }
+        .maps-link:hover { background: var(--info-hover); text-decoration: none !important; }
+
+        .no-results { text-align: center; padding: 60px 20px; color: var(--muted); }
+        .loading { text-align: center; padding: 60px 20px; color: var(--ink-2); }
         .spinner {
             width: 40px; height: 40px;
-            border: 3px solid rgba(16, 185, 129, 0.2);
-            border-top-color: #10b981;
+            border: 3px solid var(--brand-gold-tint);
+            border-top-color: var(--brand-gold);
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 15px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        
+
+        /* Login */
         .login-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.9);
+            background: var(--bg);
             display: flex; align-items: center; justify-content: center;
             z-index: 1000;
         }
         .login-box {
-            background: #1f2937;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-modal);
+            border-top: 3px solid var(--brand-gold);
             padding: 40px;
-            border-radius: 16px;
+            border-radius: 8px;
             text-align: center;
             max-width: 400px;
             width: 90%;
         }
-        .login-box h2 { margin-bottom: 20px; color: #10b981; }
+        .login-logo { width: 170px; height: auto; margin-bottom: 18px; }
+        .login-box h2 {
+            color: var(--ink);
+            font-family: var(--serif);
+            margin-bottom: 6px;
+            font-size: 1.9rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .login-subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; }
         .login-box input {
-            width: 100%; padding: 15px; border-radius: 8px;
-            border: 1px solid #374151; background: #111827;
-            color: white; font-size: 1rem; margin-bottom: 15px;
+            width: 100%; padding: 15px; border-radius: 6px;
+            border: 1px solid var(--border-strong); background: var(--surface);
+            color: var(--ink); font-family: inherit; font-size: 1rem; margin-bottom: 15px;
         }
+        .login-box input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .login-box button {
-            width: 100%; padding: 15px; border-radius: 8px;
-            border: none; background: #10b981;
-            color: white; font-size: 1rem; font-weight: 600; cursor: pointer;
+            width: 100%; padding: 15px; border-radius: 6px;
+            border: none; background: var(--brand-gold);
+            color: var(--on-gold); font-family: inherit; font-size: 0.95rem; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;
+            transition: background 0.2s;
         }
-        .login-error { color: #ef4444; margin-top: 10px; display: none; }
-        
+        .login-box button:hover { background: var(--brand-gold-hover); }
+        .login-error { color: var(--danger); margin-top: 10px; display: none; font-size: 0.85rem; }
+
         .filter-row {
             display: flex;
             gap: 15px;
@@ -821,16 +861,16 @@
         }
         .filter-row select, .filter-row input {
             padding: 10px 15px;
-            border-radius: 8px;
-            border: 1px solid #374151;
-            background: #1f2937;
-            color: #f3f4f6;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
             font-size: 0.9rem;
         }
-        
+
         .api-key-section {
-            background: rgba(245, 158, 11, 0.1);
-            border: 1px solid #f59e0b;
+            background: var(--warning-tint);
+            border: 1px solid var(--warning);
             border-radius: 8px;
             padding: 15px;
             margin-bottom: 20px;
@@ -840,85 +880,39 @@
             width: 300px;
             padding: 8px 12px;
             border-radius: 6px;
-            border: 1px solid #374151;
-            background: #1f2937;
-            color: #f3f4f6;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
             margin-right: 10px;
         }
         .api-key-section button {
             padding: 8px 15px;
             border-radius: 6px;
             border: none;
-            background: #f59e0b;
-            color: white;
+            background: var(--warning);
+            color: var(--on-solid);
             cursor: pointer;
         }
 
-        .status-bar { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 4px; padding: 18px 25px; }
-        .status-info { font-size: 0.85rem; }
-        .status-dot { width: 8px; height: 8px; background: var(--benoro-success); }
-        .status-dot.stale { background: var(--benoro-warning); }
-        .upload-section { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.24); border-radius: 4px; }
-        .upload-section h3 { color: var(--benoro-white); font-family: 'Montserrat', sans-serif; font-size: 1.15rem; font-weight: 600; }
-        .upload-section p { color: var(--benoro-text-muted); }
-        .upload-label { background: transparent; border: 1px solid var(--benoro-gold); color: var(--benoro-gold); }
-        .upload-label:hover { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
-        .csv-status.has-file { color: var(--benoro-success); }
-        .csv-status.no-file { color: var(--benoro-warning); }
-        .btn { border-radius: 6px; font-size: 0.75rem; letter-spacing: 1.3px; text-transform: uppercase; font-weight: 600; }
-        .btn-primary { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
-        .btn-primary:hover { background: var(--benoro-gold-light); }
-        .btn-secondary { background: var(--benoro-navy-light); border: 1px solid var(--benoro-border); color: var(--benoro-white); }
-        .btn-secondary:hover { background: var(--benoro-card-hover); border-color: var(--benoro-gold); }
-        .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
-        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
-        .stats-summary { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.14); border-radius: 4px; }
-        .stat-value { font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 600; color: var(--benoro-gold); }
-        .stat-label { color: var(--benoro-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
-        .results-header h2 { font-family: 'Montserrat', sans-serif; font-size: 1.25rem; font-weight: 600; }
-        .case-count { color: var(--benoro-text-muted); }
-        .property-card { background: var(--benoro-card); border: 1px solid var(--benoro-border); }
-        .property-card:hover { border-color: var(--benoro-gold); }
-        .property-card.sweet-spot { border: 1px solid var(--benoro-gold); box-shadow: 0 0 18px rgba(212,168,75,0.25); }
-        .street-view-container { background: var(--benoro-navy-dark); height: 180px; }
-        .no-image { color: var(--benoro-text-light); }
-        .days-badge.sweet-spot { background: rgba(212,168,75,0.92); color: var(--benoro-navy-dark); }
-        .property-address { color: var(--benoro-white); }
-        .property-location { color: var(--benoro-text-muted); }
-        .detail-label { color: var(--benoro-text-light); }
-        .detail-value { color: var(--benoro-white); }
-        .property-footer { border-top: 1px solid var(--benoro-border); }
-        .property-footer a { color: var(--benoro-gold); }
-        .score-details { border: 1px solid var(--benoro-border); border-radius: 6px; }
-        .score-badge.grade-a { background: rgba(74,222,128,0.24); color: #9de7b9; }
-        .score-badge.grade-b { background: rgba(96,165,250,0.24); color: #93c5fd; }
-        .score-badge.grade-c { background: rgba(251,191,36,0.22); color: #facc15; }
-        .score-badge.grade-d { background: rgba(251,146,60,0.24); color: #fdba74; }
-        .score-badge.grade-f { background: rgba(248,113,113,0.26); color: #fca5a5; }
-        .score-number, .grade-meaning, .event-type { color: var(--benoro-text-muted); }
-        .expand-icon, .event-date, .docket-stat, .no-factors, .detail-label { color: var(--benoro-text-light); }
-        .login-overlay { background: var(--benoro-navy); }
-        .login-box { background: var(--benoro-card); border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.45); }
-        .login-logo { width: 250px; margin-bottom: 20px; }
-        .login-box h2 { color: var(--benoro-white); font-family: 'Montserrat', sans-serif; margin-bottom: 8px; font-size: 1.5rem; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; }
-        .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 24px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; }
-        .login-box input { border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); }
-        .login-box input:focus { border-color: var(--benoro-gold); }
-        .login-box button { background: var(--benoro-gold); color: var(--benoro-navy-dark); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
-        .login-box button:hover { background: var(--benoro-gold-light); }
-        .login-error { color: var(--benoro-danger); }
-        .api-dropdown { background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15); border-radius: 4px; margin-bottom: 25px; overflow: hidden; }
+        /* Street View dropdown */
+        .api-dropdown {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 4px;
+            margin-bottom: 25px;
+            overflow: hidden;
+        }
         .api-dropdown-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s; }
-        .api-dropdown-header:hover { background: rgba(255,255,255,0.03); }
-        .api-dropdown-title { font-size: 0.85rem; color: var(--benoro-text-muted); display: flex; align-items: center; gap: 10px; }
-        .api-dropdown-arrow { color: var(--benoro-text-muted); transition: transform 0.3s; font-size: 0.7rem; }
+        .api-dropdown-header:hover { background: var(--surface-2); }
+        .api-dropdown-title { font-size: 0.85rem; font-weight: 500; color: var(--ink); display: flex; align-items: center; gap: 10px; }
+        .api-dropdown-arrow { color: var(--muted); transition: transform 0.3s; font-size: 0.7rem; }
         .api-dropdown.open .api-dropdown-arrow { transform: rotate(180deg); }
-        .api-dropdown-content { display: none; padding: 15px 20px 20px 20px; border-top: 1px solid rgba(255,255,255,0.05); }
+        .api-dropdown-content { display: none; padding: 15px 20px 20px 20px; border-top: 1px solid var(--border); background: var(--surface-2); }
         .api-dropdown.open .api-dropdown-content { display: block; }
         .api-key-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .api-key-row input, .actions-bar select, .actions-bar input { border: 1px solid var(--benoro-border); background: var(--benoro-card); color: var(--benoro-white); }
-        .api-key-row button { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
-        .api-help-link { color: var(--benoro-gold); font-size: 0.8rem; text-decoration: none; margin-left: 10px; }
+        .api-key-row button { background: var(--brand-gold); color: var(--on-gold); }
+        .api-help-link { color: var(--brand-gold-dark); font-size: 0.8rem; text-decoration: none; margin-left: 10px; }
         .api-help-link:hover { text-decoration: underline; }
         .streetview-mode-row {
             margin-top: 12px;
@@ -926,71 +920,68 @@
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             font-size: 0.8rem;
         }
         .streetview-mode-row select {
             padding: 7px 10px;
             border-radius: 6px;
-            border: 1px solid #374151;
-            background: #1f2937;
-            color: #f3f4f6;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
             font-size: 0.8rem;
         }
-        .streetview-mode-note {
-            font-size: 0.75rem;
-            color: var(--benoro-text-light);
-        }
+        .streetview-mode-note { font-size: 0.75rem; color: var(--muted); }
         .mode-lock-row {
             display: flex;
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
             margin-bottom: 10px;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             font-size: 0.8rem;
         }
-        .mode-lock-note {
-            font-size: 0.75rem;
-            color: var(--benoro-text-light);
-        }
-        .mode-unlock-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
+        .mode-lock-note { font-size: 0.75rem; color: var(--muted); }
+        .mode-unlock-btn, .load-photo-btn {
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
             border-radius: 6px;
-            padding: 6px 10px;
+            padding: 6px 12px;
+            font-family: inherit;
             font-size: 0.75rem;
+            font-weight: 600;
             cursor: pointer;
+            transition: all 0.2s;
         }
-        .load-photo-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 0.75rem;
-            cursor: pointer;
-        }
-        .load-photo-btn:hover {
-            background: rgba(212,168,75,0.25);
-        }
-        .themed-link { color: var(--benoro-gold); }
-        .themed-link:hover { color: var(--benoro-gold-light); }
-        
+        .mode-unlock-btn:hover, .load-photo-btn:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
+        .themed-link { color: var(--brand-gold-dark); }
+        .themed-link:hover { color: var(--brand-gold); }
+
         @media (max-width: 768px) {
-            .header-inner { grid-template-columns: 1fr; text-align: center; }
+            .container { padding: 0 16px 24px; }
+            header { margin-bottom: 20px; }
+            .header-inner { grid-template-columns: 1fr; text-align: center; gap: 8px; padding: 0 16px; }
             .logo-section { justify-content: center; }
+            .header-logo { height: 44px; }
+            .page-title { font-size: 1.35rem; }
             .nav-links { justify-content: center; }
             .cases-grid { grid-template-columns: 1fr; }
             .property-details { grid-template-columns: 1fr; }
+            .stats-summary { justify-content: space-around; gap: 16px; }
+            .stat-value { font-size: 2rem; }
+            .actions-bar { gap: 10px; }
+            .actions-bar select { margin-left: 0 !important; }
+            .session-input { min-width: 0; width: 100%; }
+            .upload-section { padding: 20px 16px; }
         }
     </style>
 </head>
 <body>
     <div class="login-overlay" id="loginOverlay">
         <div class="login-box">
-            <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-01.png" alt="Benoro Development" class="login-logo">
+            <img src="/images/blake-logo-stacked.png" alt="Blake Management" class="login-logo">
             <h2>MontCo Pipeline</h2>
             <p class="login-subtitle">Montgomery County Pipeline</p>
             <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')login()">
@@ -1003,7 +994,7 @@
         <header>
             <div class="header-inner">
                 <div class="logo-section">
-                    <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-03.png" alt="Benoro Development" class="header-logo">
+                    <img src="/images/blake-logo-horizontal.png" alt="Blake Management" class="header-logo">
                 </div>
                 <div class="page-title-section">
                     <div class="page-title">Montgomery County &mdash; Pre-Foreclosure Pipeline</div>
@@ -1021,7 +1012,7 @@
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Loading...</span>
             </div>
-            <div id="sourceInfo" style="color: var(--benoro-text-light); font-size: 0.8rem;"></div>
+            <div id="sourceInfo" class="source-info"></div>
         </div>
         <div class="api-dropdown" id="apiDropdown">
             <div class="api-dropdown-header" onclick="toggleApiDropdown()">
@@ -1050,7 +1041,7 @@
         <!-- CSV / Excel Upload Section -->
         <div class="upload-section" id="uploadSection">
             <h3>Upload Court Data</h3>
-            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank" style="color: var(--benoro-gold);">Montgomery County Courts</a> (CSV or Excel)</p>
+            <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank">Montgomery County Courts</a> (CSV or Excel)</p>
             <input type="file" id="csvUpload" class="upload-input" accept=".csv,.xlsx,.xls" onchange="handleFileUpload(event)">
             <label for="csvUpload" class="upload-label">Choose CSV or Excel File</label>
             <div class="csv-status" id="csvStatus">Checking for existing CSV...</div>
@@ -1060,15 +1051,15 @@
         <div class="upload-section" id="sessionSection">
             <h3>Court Session</h3>
             <p>The court site now shows a "verify you are human" check that the server can't clear on its own. Paste a fresh session so scrapes can read case dockets. (Property addresses work without this; dockets and scores do not.)</p>
-            <ol style="text-align:left; max-width:660px; margin:0 auto 0.85rem; font-size:0.85rem; line-height:1.55; color:#94a3b8;">
-                <li>Open the <a href="https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1" target="_blank" style="color: var(--benoro-gold);">court search page</a> and complete the "Verify you are human" check so the real search page loads.</li>
+            <ol class="upload-steps">
+                <li>Open the <a href="https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1" target="_blank">court search page</a> and complete the "Verify you are human" check so the real search page loads.</li>
                 <li>Press <b>F12</b> → click the <b>Application</b> tab → in the left sidebar under <b>Cookies</b> click <b>https://courtsapp.montcopa.org</b>.</li>
                 <li>Find the row named <b>ASP.NET_SessionId</b>, double-click its <b>Value</b> cell, and copy it (Ctrl+C).</li>
                 <li>Paste it below and click <b>Save Session</b>, then start a scrape right away (sessions go stale after ~20 min idle).</li>
             </ol>
-            <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap;">
+            <div class="session-row">
                 <input type="text" id="sessionInput" placeholder="Paste ASP.NET_SessionId value" autocomplete="off" spellcheck="false"
-                    style="flex:1; min-width:260px; max-width:420px; padding:0.5rem 0.75rem; border:1px solid var(--benoro-border, #334155); border-radius:6px; background:var(--benoro-navy-light, #1e293b); color:var(--benoro-white, #fff);">
+                    class="session-input">
                 <button class="btn btn-primary" onclick="saveCourtSession()" id="saveSessionBtn">Save Session</button>
             </div>
             <div class="csv-status" id="sessionStatus" style="margin-top:0.75rem;">Checking session…</div>
@@ -1097,14 +1088,14 @@
         <!-- Actions -->
         <div class="actions-bar">
             <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">Process All</button>
-            <button class="btn btn-primary" onclick="refreshData(true)" id="testBtn" style="background: var(--benoro-navy-light); color: var(--benoro-white); border: 1px solid var(--benoro-border);">Test (10 only)</button>
-            <button class="btn btn-outline" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="border-color: var(--benoro-danger); color: var(--benoro-danger); padding: 0.5rem 0.75rem;">🔒</button>
-            <button class="btn btn-outline" onclick="clearPipelineData()" id="clearBtn" disabled style="border-color: var(--benoro-danger); color: var(--benoro-danger); opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
+            <button class="btn btn-secondary" onclick="refreshData(true)" id="testBtn">Test (10 only)</button>
+            <button class="btn btn-outline filter-danger" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="padding: 0.5rem 0.75rem;">🔒</button>
+            <button class="btn btn-outline filter-danger" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
             <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
-            <button class="btn btn-outline" id="sweetSpotFilter" onclick="toggleSweetSpot()" style="border-color: var(--benoro-gold); color: var(--benoro-gold);">Sweet Spot Only</button>
-            <button class="btn btn-outline" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel" style="border-color: #f59e0b; color: #f59e0b;">Hide Unreliable</button>
-            <button class="btn btn-outline" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)" style="border-color: #ef4444; color: #ef4444;">Hide Closed</button>
+            <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
+            <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
+            <button class="btn btn-outline filter-danger" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)">Hide Closed</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1477,39 +1468,21 @@
         function toggleSweetSpot() {
             sweetSpotOnly = !sweetSpotOnly;
             const btn = document.getElementById('sweetSpotFilter');
-            if (sweetSpotOnly) {
-                btn.style.background = '#d4a84b';
-                btn.style.color = 'white';
-            } else {
-                btn.style.background = 'transparent';
-                btn.style.color = '#d4a84b';
-            }
+            btn.classList.toggle('is-active', sweetSpotOnly);
             loadData();
         }
 
         function toggleHideUnreliable() {
             hideUnreliable = !hideUnreliable;
             const btn = document.getElementById('hideUnreliableFilter');
-            if (hideUnreliable) {
-                btn.style.background = '#f59e0b';
-                btn.style.color = 'white';
-            } else {
-                btn.style.background = 'transparent';
-                btn.style.color = '#f59e0b';
-            }
+            btn.classList.toggle('is-active', hideUnreliable);
             loadData();
         }
 
         function toggleHideClosed() {
             hideClosed = !hideClosed;
             const btn = document.getElementById('hideClosedFilter');
-            if (hideClosed) {
-                btn.style.background = '#ef4444';
-                btn.style.color = 'white';
-            } else {
-                btn.style.background = 'transparent';
-                btn.style.color = '#ef4444';
-            }
+            btn.classList.toggle('is-active', hideClosed);
             loadData();
         }
 
@@ -2012,13 +1985,13 @@
             if (!c.propertyAddress) {
                 streetViewHtml = '<div class="no-image">No address available</div>';
             } else if (!canLoadStreetView) {
-                streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
+                streetViewHtml = `<a href="${mapsUrl}" target="_blank" class="maps-placeholder">
                     <div style="text-align:center;">Click to view on Google Maps<br><small>Sign in to load street photos</small></div>
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
                     <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}', '${c.caseNumber}')">Load Photo</button>
-                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">On-demand mode</span>
+                    <span class="ondemand-note">On-demand mode</span>
                 </div>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
@@ -2051,7 +2024,7 @@
                         <button class="stack-toggle" type="button" onclick="toggleStack(this)">
                             <span class="arrow">&gt;</span>
                             <span class="stack-label">Show all</span>
-                            <span style="opacity:0.7;">${stackSize} cases on parcel ${c._stackParcel}</span>
+                            <span class="stack-toggle-detail">${stackSize} cases on parcel ${c._stackParcel}</span>
                         </button>
                         <div class="stack-list">
                             ${stackMembers.map(m => {
@@ -2065,7 +2038,7 @@
                                 const mAmount = formatCurrency(m.judgmentAmount);
                                 return `<div class="stack-row">
                                     <span class="stack-pill ${mKind}">${mLabel}</span>
-                                    <span class="stack-case-num">${detailLink}${mAmount ? ` <span style="color:#fde68a;font-weight:600;">${mAmount}</span>` : ''}</span>
+                                    <span class="stack-case-num">${detailLink}${mAmount ? ` <span class="stack-amount">${mAmount}</span>` : ''}</span>
                                     <span class="stack-meta">${filed}</span>
                                     <span class="stack-status">${mStatus}</span>
                                 </div>`;
@@ -2085,7 +2058,7 @@
                     <div class="property-info">
                         <div class="address-row">
                             <div class="property-address">${address}</div>
-                            ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV" style="display:inline-flex;align-items:center;gap:4px;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:10px;">CLOSED NOW</span>` : ''}
+                            ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV">CLOSED NOW</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
@@ -2108,7 +2081,7 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">${stackSize > 1 ? `Total (${stackSize})` : 'Amount'}</div>
-                                <div class="detail-value" style="color: var(--benoro-gold); font-weight: 700;">${formatCurrency(c._stackTotalAmount) || 'N/A'}</div>
+                                <div class="detail-value amount">${formatCurrency(c._stackTotalAmount) || 'N/A'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Plaintiff</div>

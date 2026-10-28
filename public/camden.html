@@ -3,129 +3,223 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Camden County Pipeline | Benoro Development</title>
+    <script src="/theme.js"></script>
+    <title>Camden County Pipeline | Blake Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --benoro-navy: #1a3a52;
-            --benoro-navy-dark: #152d42;
-            --benoro-navy-light: #234a66;
-            --benoro-gold: #d4a84b;
-            --benoro-gold-light: #e0bc6a;
-            --benoro-gold-dark: #b8923f;
-            --benoro-white: #ffffff;
-            --benoro-card: #1f4460;
-            --benoro-card-hover: #245070;
-            --benoro-text: #ffffff;
-            --benoro-text-muted: #a0b4c4;
-            --benoro-text-light: #7a9bb5;
-            --benoro-border: rgba(255,255,255,0.1);
-            --benoro-success: #4ade80;
-            --benoro-warning: #fbbf24;
-            --benoro-danger: #f87171;
+            --bg: #F7F4EC;
+            --surface: #FFFFFF;
+            --surface-2: #FBF9F4;
+            --surface-3: #F1ECE1;
+            --ink: #232323;
+            --ink-2: #4A463F;
+            --muted: #7C756A;
+            --brand-gold: #C9943A;
+            --brand-gold-hover: #B8842C;
+            --brand-gold-dark: #8F6A22;
+            --brand-gold-light: #E2C489;
+            --brand-gold-tint: rgba(201,148,58,0.12);
+            --border: #E4DCCB;
+            --border-strong: #D3C8B2;
+            --success: #2F7D4F;
+            --success-tint: rgba(47,125,79,0.12);
+            --warning: #A86B00;
+            --warning-tint: rgba(214,150,30,0.15);
+            --danger: #B3261E;
+            --danger-tint: rgba(179,38,30,0.10);
+            --info: #2F5F8A;
+            --info-tint: rgba(47,95,138,0.10);
+            --orange: #B4500E;
+            --orange-tint: rgba(194,85,14,0.12);
+            --pink: #A3245E;
+            --pink-tint: rgba(163,36,94,0.10);
+            --purple: #6B3FA0;
+            --purple-tint: rgba(107,63,160,0.10);
+            --shadow: 0 1px 2px rgba(35,35,35,0.05), 0 4px 14px rgba(35,35,35,0.06);
+            --shadow-hover: 0 2px 4px rgba(35,35,35,0.06), 0 10px 24px rgba(35,35,35,0.09);
+            --shadow-modal: 0 20px 50px rgba(35,35,35,0.18);
+            --backdrop: rgba(35,35,35,0.45);
+            --focus-ring: 0 0 0 3px rgba(201,148,58,0.18);
+            --serif: 'Cormorant Garamond', Georgia, serif;
+            /* Text on gold fills stays dark in both themes. */
+            --on-gold: #232323;
+            /* Text on solid danger/info/success fills. */
+            --on-solid: #FFFFFF;
+            --warning-ink: #7A4E00;
+            --gold-border: rgba(201,148,58,0.35);
+            --gold-border-strong: rgba(201,148,58,0.45);
+            --gold-glow: rgba(201,148,58,0.2);
+            --success-border: rgba(47,125,79,0.35);
+            --warning-border: rgba(168,107,0,0.25);
+            --danger-border: rgba(179,38,30,0.35);
+            --danger-border-soft: rgba(179,38,30,0.22);
+            --danger-glow: rgba(179,38,30,0.18);
+            --info-border: rgba(47,95,138,0.3);
+            --info-tint-hover: rgba(47,95,138,0.18);
+            --info-hover: #224A6D;
+            --photo-pill-bg: rgba(255,255,255,0.92);
+            color-scheme: light;
+        }
+        [data-theme="dark"] {
+            --bg: #161513;
+            --surface: #1F1D1A;
+            --surface-2: #262420;
+            --surface-3: #2E2B26;
+            --ink: #EDE8DE;
+            --ink-2: #C7C0B2;
+            --muted: #9A9284;
+            --brand-gold: #D4A24A;
+            --brand-gold-hover: #E0B865;
+            --brand-gold-dark: #E0B865;
+            --brand-gold-light: #8F6A22;
+            --brand-gold-tint: rgba(212,162,74,0.16);
+            --border: #34302A;
+            --border-strong: #46413A;
+            --success: #5DBB82;
+            --success-tint: rgba(93,187,130,0.16);
+            --warning: #E0A53A;
+            --warning-tint: rgba(224,165,58,0.16);
+            --danger: #E5675E;
+            --danger-tint: rgba(229,103,94,0.16);
+            --info: #6FA3D6;
+            --info-tint: rgba(111,163,214,0.16);
+            --orange: #F0904F;
+            --orange-tint: rgba(240,144,79,0.16);
+            --pink: #E77AAE;
+            --pink-tint: rgba(231,122,174,0.16);
+            --purple: #B392E6;
+            --purple-tint: rgba(179,146,230,0.16);
+            --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 14px rgba(0,0,0,0.25);
+            --shadow-hover: 0 2px 4px rgba(0,0,0,0.35), 0 10px 24px rgba(0,0,0,0.35);
+            --shadow-modal: 0 20px 50px rgba(0,0,0,0.5);
+            --backdrop: rgba(0,0,0,0.6);
+            --focus-ring: 0 0 0 3px rgba(212,162,74,0.28);
+            --on-solid: #161513;
+            --warning-ink: #E0A53A;
+            --gold-border: rgba(212,162,74,0.4);
+            --gold-border-strong: rgba(212,162,74,0.5);
+            --gold-glow: rgba(212,162,74,0.25);
+            --success-border: rgba(93,187,130,0.4);
+            --warning-border: rgba(224,165,58,0.35);
+            --danger-border: rgba(229,103,94,0.4);
+            --danger-border-soft: rgba(229,103,94,0.3);
+            --danger-glow: rgba(229,103,94,0.25);
+            --info-border: rgba(111,163,214,0.4);
+            --info-tint-hover: rgba(111,163,214,0.26);
+            --info-hover: #9CC2E6;
+            --photo-pill-bg: rgba(31,29,26,0.9);
+            color-scheme: dark;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--benoro-navy);
+            background: var(--bg);
             min-height: 100vh;
-            color: var(--benoro-text);
+            color: var(--ink);
+            transition: background-color 0.2s, color 0.2s;
         }
+        a { color: var(--brand-gold-dark); }
+        input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
         .container { max-width: 1400px; margin: 0 auto; padding: 0 30px; }
 
         /* Header */
         header {
-            background: var(--benoro-navy-dark);
-            border-bottom: 2px solid var(--benoro-gold);
-            padding: 15px 0;
+            background: var(--surface);
+            border-bottom: 2px solid var(--brand-gold);
+            box-shadow: var(--shadow);
+            padding: 12px 0;
             margin-bottom: 30px;
         }
         .header-inner {
             display: flex; justify-content: space-between; align-items: center;
             max-width: 1400px; margin: 0 auto; padding: 0 30px;
         }
-        .logo-section { 
-            display: flex; 
-            align-items: center; 
-            gap: 15px; 
-            background: var(--benoro-navy-dark);
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: transparent;
         }
-        .header-logo { height: 102px; width: auto; }
+        .header-logo { height: 64px; width: auto; display: block; }
         .page-title-section { flex: 1; text-align: center; }
         .page-title {
-            font-family: 'Montserrat', sans-serif;
-            font-size: 0.9rem; font-weight: 500;
-            color: var(--benoro-gold);
-            letter-spacing: 3px; text-transform: uppercase;
+            font-family: var(--serif);
+            font-size: 1.6rem; font-weight: 600;
+            color: var(--ink);
+            letter-spacing: 0.5px;
         }
         .nav-links a {
-            color: var(--benoro-text-muted); text-decoration: none; margin-left: 25px;
-            font-weight: 400; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;
-            transition: color 0.3s;
+            color: var(--ink-2); text-decoration: none; margin-left: 25px;
+            font-weight: 500; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;
+            padding-bottom: 4px; border-bottom: 2px solid transparent;
+            transition: color 0.3s, border-color 0.3s;
         }
-        .nav-links a:hover, .nav-links a.active { color: var(--benoro-gold); }
+        .nav-links a:hover { color: var(--brand-gold-dark); }
+        .nav-links a.active { color: var(--brand-gold-dark); border-bottom-color: var(--brand-gold); }
 
         /* Login */
         .login-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background: var(--benoro-navy);
+            background: var(--bg);
             display: flex; align-items: center; justify-content: center; z-index: 1000;
         }
         .login-box {
-            background: var(--benoro-card); padding: 50px; border-radius: 12px;
+            background: var(--surface); padding: 44px 50px; border-radius: 12px;
             text-align: center; max-width: 420px; width: 90%;
-            border: 1px solid var(--benoro-border); box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+            border: 1px solid var(--border); box-shadow: var(--shadow-modal);
         }
-        .login-logo { width: 250px; margin-bottom: 25px; }
-        .login-box h2 { margin-bottom: 10px; color: var(--benoro-white); font-family: 'Montserrat', sans-serif; font-size: 1.5rem; font-weight: 600; letter-spacing: 2px; }
-        .login-box .login-subtitle { color: var(--benoro-text-muted); margin-bottom: 30px; font-size: 0.85rem; }
-        .login-box input { width: 100%; padding: 15px 20px; border-radius: 6px; border: 1px solid var(--benoro-border); background: var(--benoro-navy-dark); color: var(--benoro-white); font-size: 0.9rem; margin-bottom: 20px; }
-        .login-box input:focus { outline: none; border-color: var(--benoro-gold); }
-        .login-box button { width: 100%; padding: 15px; border-radius: 6px; border: none; background: var(--benoro-gold); color: var(--benoro-navy-dark); font-size: 0.75rem; font-weight: 600; cursor: pointer; letter-spacing: 2px; text-transform: uppercase; }
-        .login-box button:hover { background: var(--benoro-gold-light); }
-        .login-error { color: #f87171; margin-top: 15px; display: none; font-size: 0.85rem; }
+        .login-logo { width: 170px; margin-bottom: 20px; }
+        .login-box h2 { margin-bottom: 10px; color: var(--ink); font-family: var(--serif); font-size: 1.8rem; font-weight: 600; letter-spacing: 0.5px; }
+        .login-box .login-subtitle { color: var(--ink); font-family: var(--serif); margin-bottom: 26px; font-size: 1.6rem; font-weight: 600; letter-spacing: 0.3px; }
+        .login-box input { width: 100%; padding: 14px 18px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); font-size: 0.9rem; font-family: inherit; margin-bottom: 18px; }
+        .login-box input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
+        .login-box button { width: 100%; padding: 15px; border-radius: 6px; border: none; background: var(--brand-gold); color: var(--on-gold); font-family: inherit; font-size: 0.75rem; font-weight: 600; cursor: pointer; letter-spacing: 2px; text-transform: uppercase; }
+        .login-box button:hover { background: var(--brand-gold-hover); }
+        .login-error { color: var(--danger); margin-top: 15px; display: none; font-size: 0.85rem; }
 
         /* Cards & Layout */
         .status-bar {
-            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.15);
-            border-radius: 4px; padding: 18px 25px; margin-bottom: 25px;
+            background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+            border-radius: 8px; padding: 18px 25px; margin-bottom: 25px;
             display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;
         }
-        .status-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--benoro-success); }
-        .status-dot.stale { background: var(--benoro-warning); }
+        .status-info { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--ink); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-tint); }
+        .status-dot.stale { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-tint); }
 
         .upload-section {
-            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.2);
-            border-radius: 4px; padding: 30px; margin-bottom: 25px; text-align: center;
+            background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+            border-radius: 8px; padding: 30px; margin-bottom: 25px; text-align: center;
         }
-        .upload-section h3 { color: var(--benoro-white); margin-bottom: 8px; font-family: 'Montserrat', sans-serif; font-size: 1.1rem; font-weight: 600; }
-        .upload-section p { color: var(--benoro-text-muted); margin-bottom: 20px; font-size: 0.85rem; }
+        .upload-section h3 { color: var(--ink); margin-bottom: 8px; font-family: var(--serif); font-size: 1.35rem; font-weight: 600; }
+        .upload-section p { color: var(--ink-2); margin-bottom: 20px; font-size: 0.85rem; }
         .upload-input { display: none; }
         .upload-label {
-            display: inline-block; padding: 12px 35px; background: transparent;
-            border: 1px solid var(--benoro-gold); color: var(--benoro-gold);
-            cursor: pointer; font-weight: 500; font-size: 0.8rem;
+            display: inline-block; padding: 12px 35px; background: var(--surface);
+            border: 1px solid var(--border-strong); color: var(--ink); border-radius: 6px;
+            cursor: pointer; font-weight: 600; font-size: 0.8rem;
             letter-spacing: 1.5px; text-transform: uppercase; transition: all 0.3s;
         }
-        .upload-label:hover { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
-        .csv-status { margin-top: 15px; padding: 10px 15px; background: rgba(0,0,0,0.3); border-radius: 2px; font-size: 0.8rem; }
-        .csv-status.has-file { color: var(--benoro-success); }
-        .csv-status.no-file { color: var(--benoro-warning); }
+        .upload-label:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
+        .csv-status { margin-top: 15px; padding: 10px 15px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; font-size: 0.8rem; }
+        .csv-status.has-file { color: var(--success); }
+        .csv-status.no-file { color: var(--warning); }
 
         .btn {
-            padding: 12px 30px; border-radius: 6px; font-weight: 500; cursor: pointer;
+            padding: 12px 30px; border-radius: 6px; font-weight: 600; cursor: pointer;
             border: none; display: inline-flex; align-items: center; gap: 8px;
+            font-family: inherit;
             font-size: 0.75rem; letter-spacing: 1.5px; text-transform: uppercase; transition: all 0.3s;
         }
-        .btn-primary { background: var(--benoro-gold); color: var(--benoro-navy-dark); }
-        .btn-primary:hover { background: var(--benoro-gold-light); }
-        .btn-secondary { background: var(--benoro-navy-light); border: 1px solid var(--benoro-border); color: var(--benoro-text); }
-        .btn-secondary:hover { background: var(--benoro-card-hover); border-color: var(--benoro-gold); }
-        .btn-outline { background: transparent; border: 1px solid var(--benoro-text-light); color: var(--benoro-text-muted); }
-        .btn-outline:hover { border-color: var(--benoro-gold); color: var(--benoro-gold); }
+        .btn-primary { background: var(--brand-gold); color: var(--on-gold); }
+        .btn-primary:hover { background: var(--brand-gold-hover); }
+        .btn-secondary { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink); }
+        .btn-secondary:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
+        .btn-outline { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink); }
+        .btn-outline:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .actions-bar {
@@ -146,22 +240,23 @@
             width: 100%;
             justify-content: center;
             white-space: nowrap;
+            height: 40px;
         }
         .stats-summary {
-            background: var(--benoro-card); border: 1px solid rgba(184,134,11,0.1);
-            border-radius: 2px; padding: 25px 35px; margin-bottom: 30px;
+            background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow);
+            border-radius: 8px; padding: 25px 35px; margin-bottom: 30px;
             display: flex; gap: 50px; flex-wrap: wrap;
         }
         .stat-item { text-align: center; }
-        .stat-value { font-family: 'Montserrat', sans-serif; font-size: 2rem; font-weight: 600; color: var(--benoro-gold); }
-        .stat-label { color: var(--benoro-text-muted); font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 5px; }
+        .stat-value { font-family: var(--serif); font-size: 2.5rem; line-height: 1.05; font-weight: 700; color: var(--brand-gold); font-variant-numeric: lining-nums; }
+        .stat-label { color: var(--muted); font-size: 0.7rem; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 5px; }
 
         .filter-row { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
         .filter-row select, .filter-row input {
-            padding: 10px 15px; border-radius: 6px; border: 1px solid var(--benoro-border);
-            background: var(--benoro-card); color: var(--benoro-text); font-size: 0.8rem;
+            padding: 10px 15px; border-radius: 6px; border: 1px solid var(--border-strong);
+            background: var(--surface); color: var(--ink); font-size: 0.8rem;
         }
-        .filter-row select:focus, .filter-row input:focus { outline: none; border-color: var(--benoro-gold); }
+        .filter-row select:focus, .filter-row input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .filter-dropdown-group {
             display: flex;
             flex-direction: column;
@@ -170,17 +265,20 @@
             min-width: 0;
         }
         .filter-dropdown-label {
-            color: var(--benoro-text-muted);
+            color: var(--muted);
             font-size: 0.68rem;
+            font-weight: 500;
             letter-spacing: 1.2px;
             text-transform: uppercase;
         }
         .filter-dropdown-button {
-            padding: 10px 14px;
+            position: relative;
+            padding: 10px 30px 10px 14px;
             border-radius: 6px;
-            border: 1px solid var(--benoro-border);
-            background: var(--benoro-card);
-            color: var(--benoro-text);
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
             font-size: 0.8rem;
             line-height: 1.2;
             text-align: left;
@@ -191,15 +289,17 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .filter-dropdown-button:hover { border-color: var(--brand-gold); }
         .filter-dropdown-button:focus {
             outline: none;
-            border-color: var(--benoro-gold);
+            border-color: var(--brand-gold);
+            box-shadow: var(--focus-ring);
         }
         .filter-dropdown-button::after {
             content: '▼';
-            float: right;
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
             font-size: 0.65rem;
-            color: var(--benoro-text-light);
+            color: var(--brand-gold);
         }
         .filter-dropdown-panel {
             position: absolute;
@@ -208,10 +308,10 @@
             width: 280px;
             max-height: 320px;
             overflow: hidden;
-            border: 1px solid rgba(184,134,11,0.25);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            background: #17364d;
-            box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+            background: var(--surface);
+            box-shadow: var(--shadow-modal);
             z-index: 30;
             display: none;
         }
@@ -223,28 +323,31 @@
             justify-content: space-between;
             gap: 10px;
             padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-2);
         }
         .filter-dropdown-action {
             border: none;
             background: transparent;
-            color: var(--benoro-gold);
+            color: var(--brand-gold-dark);
+            font-family: inherit;
             font-size: 0.72rem;
+            font-weight: 600;
             letter-spacing: 0.8px;
             text-transform: uppercase;
             cursor: pointer;
             padding: 0;
         }
+        .filter-dropdown-action:hover { text-decoration: underline; }
         .filter-dropdown-options {
             max-height: 240px;
             overflow-y: auto;
             padding: 6px 0;
         }
         .filter-dropdown-note {
-            color: var(--benoro-text-light);
+            color: var(--muted);
             font-size: 0.68rem;
             font-style: italic;
-            opacity: 0.85;
             white-space: nowrap;
         }
         /* The Town dropdown alone is wider and taller - it carries nested
@@ -259,96 +362,100 @@
         }
         /* A municipality row that holds only the cases whose place name
            could not be resolved - real and selectable, but not a place. */
-        .town-leftover span { color: var(--benoro-text-light); font-style: italic; }
+        .town-leftover span { color: var(--muted); font-style: italic; }
         .filter-dropdown-option {
             display: flex;
             align-items: center;
             gap: 10px;
             padding: 8px 12px;
             font-size: 0.8rem;
-            color: var(--benoro-text);
+            color: var(--ink);
             cursor: pointer;
         }
         .filter-dropdown-option:hover {
-            background: rgba(255,255,255,0.05);
+            background: var(--surface-3);
         }
         .filter-dropdown-option input {
-            accent-color: var(--benoro-gold);
+            accent-color: var(--brand-gold);
         }
         .filter-dropdown-empty {
             padding: 12px;
-            color: var(--benoro-text-light);
+            color: var(--muted);
             font-size: 0.8rem;
         }
         .filter-dropdown-help {
-            color: var(--benoro-text-light);
+            color: var(--muted);
             font-size: 0.72rem;
             display: none;
         }
 
         .results-header {
             display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid rgba(184,134,11,0.1);
+            margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border);
         }
-        .results-header h2 { font-family: 'Montserrat', sans-serif; font-size: 1.3rem; font-weight: 600; }
-        .case-count { color: var(--benoro-text-muted); font-size: 1rem; }
+        .results-header h2 { font-family: var(--serif); font-size: 1.7rem; font-weight: 600; color: var(--ink); }
+        .case-count { color: var(--muted); font-family: 'Montserrat', sans-serif; font-size: 1rem; font-weight: 500; }
 
         /* Property Cards */
         .cases-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 25px; }
         .case-search-group { flex: 1 1 320px; min-width: 220px; }
         .case-search {
             width: 100%; box-sizing: border-box;
-            padding: 9px 14px; border-radius: 8px;
-            border: 1px solid var(--benoro-border, rgba(212,168,75,0.35));
-            background: var(--benoro-card, #1a1a1a); color: var(--benoro-text, #e2e8f0);
-            font-size: 0.9rem;
+            padding: 9px 14px; border-radius: 6px; height: 40px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface); color: var(--ink);
+            font-family: inherit;
+            font-size: 0.85rem;
         }
-        .case-search:focus { outline: none; border-color: var(--benoro-gold, #d4a84b); }
+        .case-search:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .cases-load-more { grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 30px; }
         .load-more-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
-            padding: 12px 28px; border-radius: 8px; cursor: pointer;
-            font-size: 0.9rem; font-weight: 600;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            padding: 12px 28px; border-radius: 6px; cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem; font-weight: 600;
+            box-shadow: var(--shadow);
         }
-        .load-more-btn:hover { background: rgba(212,168,75,0.25); }
+        .load-more-btn:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
 
         .property-card {
-            background: var(--benoro-card); border-radius: 8px; overflow: hidden;
-            transition: all 0.3s; border: 1px solid var(--benoro-border);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            background: var(--surface); border-radius: 8px; overflow: hidden;
+            transition: all 0.3s; border: 1px solid var(--border);
+            box-shadow: var(--shadow);
         }
-        .property-card:hover { border-color: var(--benoro-gold); transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
-        .property-card.mortgage { border-left: 3px solid var(--benoro-gold); }
-        .property-card.tax-lien { border-left: 3px solid #f87171; }
-        .property-card.government { border-left: 3px solid #60a5fa; }
+        .property-card:hover { border-color: var(--brand-gold-light); transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+        .property-card.mortgage { border-left: 3px solid var(--brand-gold); }
+        .property-card.tax-lien { border-left: 3px solid var(--danger); }
+        .property-card.government { border-left: 3px solid var(--info); }
         .property-card.duplicate-address {
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(212,168,75,0.28);
+            box-shadow: var(--shadow), inset 0 0 0 1px var(--gold-border);
         }
 
-        .street-view-container { position: relative; width: 100%; height: 180px; background: var(--benoro-navy-dark); }
+        .street-view-container { position: relative; width: 100%; height: 180px; background: var(--surface-3); }
         .street-view-img { width: 100%; height: 100%; object-fit: cover; }
-        .no-image { display: flex; align-items: center; justify-content: center; height: 100%; color: #6b7280; font-size: 0.85rem; }
+        .no-image { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 0.85rem; }
         .type-badge {
             position: absolute; top: 10px; left: 10px; padding: 4px 10px; border-radius: 4px;
             font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+            box-shadow: 0 1px 3px rgba(35,35,35,0.2);
         }
-        .type-badge.mortgage { background: rgba(212,168,75,0.9); color: #152d42; }
-        .type-badge.tax-lien { background: rgba(248,113,113,0.9); color: white; }
-        .type-badge.government { background: rgba(96,165,250,0.9); color: white; }
+        .type-badge.mortgage { background: var(--brand-gold); color: var(--on-gold); }
+        .type-badge.tax-lien { background: var(--danger); color: var(--on-solid); }
+        .type-badge.government { background: var(--info); color: var(--on-solid); }
         .days-badge {
-            position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7);
-            color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
+            position: absolute; top: 10px; right: 10px; background: rgba(35,35,35,0.78);
+            color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;
         }
 
         .property-info { padding: 20px; }
         .address-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-        .property-address { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--benoro-white); }
+        .property-address { font-size: 1.05rem; font-weight: 600; margin-bottom: 4px; color: var(--ink); }
         /* Click the address to copy it. Only addresses we actually have are
            made clickable, so "Address pending" stays inert. */
         .property-address.copyable { cursor: pointer; }
-        .property-address.copyable:hover { text-decoration: underline dotted rgba(255,255,255,0.5); }
+        .property-address.copyable:hover { text-decoration: underline dotted var(--brand-gold); }
         .property-address.copy-done,
         .property-address.copy-failed { position: relative; }
         .property-address.copy-done::after,
@@ -362,15 +469,15 @@
             letter-spacing: 0.04em;
             vertical-align: middle;
             white-space: nowrap;
-            border: 1px solid rgba(134,239,172,0.45);
-            background: rgba(134,239,172,0.14);
-            color: #86efac;
+            border: 1px solid var(--success-border);
+            background: var(--success-tint);
+            color: var(--success);
         }
         .property-address.copy-failed::after {
             content: 'Copy failed';
-            border-color: rgba(252,165,165,0.45);
-            background: rgba(252,165,165,0.14);
-            color: #fca5a5;
+            border-color: var(--danger-border);
+            background: var(--danger-tint);
+            color: var(--danger);
         }
         .repeat-flag {
             display: inline-flex;
@@ -379,9 +486,9 @@
             padding: 3px 8px;
             margin-bottom: 4px;
             border-radius: 999px;
-            border: 1px solid rgba(212,168,75,0.45);
-            background: rgba(212,168,75,0.12);
-            color: #f5d89b;
+            border: 1px solid var(--gold-border-strong);
+            background: var(--brand-gold-tint);
+            color: var(--brand-gold-dark);
             font-size: 0.65rem;
             font-weight: 600;
             letter-spacing: 0.4px;
@@ -391,8 +498,8 @@
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: #e0bc6a;
-            box-shadow: 0 0 0 2px rgba(224,188,106,0.2);
+            background: var(--brand-gold);
+            box-shadow: 0 0 0 2px var(--gold-glow);
         }
         .sheriff-flag {
             display: inline-flex;
@@ -401,9 +508,9 @@
             padding: 3px 8px;
             margin-bottom: 4px;
             border-radius: 999px;
-            border: 1px solid rgba(248,113,113,0.5);
-            background: rgba(248,113,113,0.14);
-            color: #fecaca;
+            border: 1px solid var(--danger-border);
+            background: var(--danger-tint);
+            color: var(--danger);
             font-size: 0.65rem;
             font-weight: 600;
             letter-spacing: 0.4px;
@@ -413,10 +520,10 @@
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: #f87171;
-            box-shadow: 0 0 0 2px rgba(248,113,113,0.22);
+            background: var(--danger);
+            box-shadow: 0 0 0 2px var(--danger-glow);
         }
-        .property-location { color: var(--benoro-text-muted); font-size: 0.85rem; margin-bottom: 15px; }
+        .property-location { color: var(--ink-2); font-size: 0.85rem; margin-bottom: 15px; }
         .score-strip {
             display: flex;
             align-items: center;
@@ -430,21 +537,21 @@
             font-weight: 700;
             letter-spacing: 0.5px;
         }
-        .score-badge.grade-a { background: rgba(74,222,128,0.18); color: #4ade80; }
-        .score-badge.grade-b { background: rgba(96,165,250,0.18); color: #60a5fa; }
-        .score-badge.grade-c { background: rgba(251,191,36,0.18); color: #fbbf24; }
-        .score-badge.grade-d { background: rgba(251,146,60,0.18); color: #fb923c; }
-        .score-badge.grade-f { background: rgba(248,113,113,0.18); color: #f87171; }
-        .score-badge.urgency-medium { background: rgba(251,191,36,0.18); color: #fde68a; }
-        .score-badge.urgency-high { background: rgba(248,113,113,0.18); color: #fecaca; }
-        .score-badge.late-tax-lien { background: rgba(244,114,182,0.18); color: #f9a8d4; }
-        .score-badge.writ-countdown { background: rgba(251,146,60,0.18); color: #fdba74; }
-        .score-text { color: var(--benoro-text-muted); font-size: 0.75rem; }
+        .score-badge.grade-a { background: var(--success-tint); color: var(--success); }
+        .score-badge.grade-b { background: var(--info-tint); color: var(--info); }
+        .score-badge.grade-c { background: var(--warning-tint); color: var(--warning); }
+        .score-badge.grade-d { background: var(--orange-tint); color: var(--orange); }
+        .score-badge.grade-f { background: var(--danger-tint); color: var(--danger); }
+        .score-badge.urgency-medium { background: var(--warning-tint); color: var(--warning); }
+        .score-badge.urgency-high { background: var(--danger-tint); color: var(--danger); }
+        .score-badge.late-tax-lien { background: var(--pink-tint); color: var(--pink); }
+        .score-badge.writ-countdown { background: var(--orange-tint); color: var(--orange); }
+        .score-text { color: var(--muted); font-size: 0.75rem; }
         .score-explain {
             margin: 8px 0 12px;
-            border: 1px solid rgba(255,255,255,0.08);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            background: rgba(255,255,255,0.02);
+            background: var(--surface-2);
             overflow: hidden;
         }
         .score-explain > summary {
@@ -453,12 +560,12 @@
             padding: 8px 10px;
             font-size: 0.75rem;
             font-weight: 600;
-            color: var(--benoro-gold);
+            color: var(--brand-gold-dark);
             user-select: none;
         }
         .score-explain > summary::-webkit-details-marker { display: none; }
         .score-explain-body {
-            border-top: 1px solid rgba(255,255,255,0.06);
+            border-top: 1px solid var(--border);
             padding: 8px 10px 10px;
         }
         .score-breakdown-row {
@@ -466,10 +573,10 @@
             justify-content: space-between;
             gap: 10px;
             font-size: 0.72rem;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             margin-bottom: 4px;
         }
-        .score-breakdown-row b { color: var(--benoro-white); font-weight: 600; }
+        .score-breakdown-row b { color: var(--ink); font-weight: 600; }
         .urgency-note {
             margin-top: 8px;
             padding: 8px 10px;
@@ -478,111 +585,113 @@
             line-height: 1.35;
         }
         .urgency-note.medium {
-            background: rgba(251,191,36,0.10);
-            border: 1px solid rgba(251,191,36,0.18);
-            color: #fde68a;
+            background: var(--warning-tint);
+            border: 1px solid var(--warning-border);
+            color: var(--warning-ink);
         }
         .urgency-note.high {
-            background: rgba(248,113,113,0.10);
-            border: 1px solid rgba(248,113,113,0.20);
-            color: #fecaca;
+            background: var(--danger-tint);
+            border: 1px solid var(--danger-border-soft);
+            color: var(--danger);
         }
         .score-upside {
             margin-top: 8px;
-            border: 1px solid rgba(255,255,255,0.06);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            background: rgba(255,255,255,0.02);
+            background: var(--surface);
         }
         .score-upside > summary {
             cursor: pointer;
             list-style: none;
             padding: 7px 9px;
             font-size: 0.72rem;
-            color: #9fd3b0;
+            font-weight: 600;
+            color: var(--success);
             user-select: none;
         }
         .score-upside > summary::-webkit-details-marker { display: none; }
         .score-upside ul {
             margin: 0;
             padding: 0 12px 10px 22px;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             font-size: 0.7rem;
             line-height: 1.35;
         }
         .action-strip {
             margin-top: 10px;
             padding: 8px;
-            background: rgba(255,255,255,0.04);
-            border-left: 2px solid var(--benoro-gold);
+            background: var(--surface-2);
+            border-left: 2px solid var(--brand-gold);
             font-size: 0.75rem;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             line-height: 1.35;
         }
 
         .property-details { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px; }
         .detail-item { font-size: 0.85rem; }
-        .detail-label { color: #6b7280; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
-        .detail-value { color: #f3f4f6; margin-top: 2px; }
+        .detail-label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+        .detail-value { color: var(--ink); margin-top: 2px; }
 
         .value-row {
             display: flex; gap: 15px; padding: 10px 0; margin-bottom: 10px;
-            border-top: 1px solid var(--benoro-border); border-bottom: 1px solid var(--benoro-border);
+            border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
         }
         .value-item { flex: 1; text-align: center; }
-        .value-amount { font-family: 'Montserrat', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--benoro-gold); }
-        .value-label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+        .value-amount { font-family: 'Montserrat', sans-serif; font-size: 0.95rem; font-weight: 600; color: var(--brand-gold-dark); }
+        .value-label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
         .property-footer {
             display: flex; justify-content: space-between; align-items: center;
-            padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);
+            padding-top: 15px; border-top: 1px solid var(--border);
         }
         .maps-link {
-            background: #4285f4; color: white !important; padding: 6px 12px;
+            background: #1A73E8; color: #fff !important; padding: 6px 12px;
             border-radius: 6px; font-size: 0.8rem; text-decoration: none;
         }
-        .maps-link:hover { background: #3367d6; }
+        .maps-link:hover { background: #1765CC; }
         .wipp-link {
             display: inline-flex; align-items: center;
             padding: 3px 9px; border-radius: 999px;
-            border: 1px solid rgba(96,165,250,0.45);
-            background: rgba(96,165,250,0.12);
-            color: #bfdbfe !important;
+            border: 1px solid var(--info-border);
+            background: var(--info-tint);
+            color: var(--info) !important;
             font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
             text-decoration: none; white-space: nowrap;
         }
-        .wipp-link:hover { background: rgba(96,165,250,0.28); color: #eff6ff !important; }
+        .wipp-link:hover { background: var(--info-tint-hover); color: var(--info-hover) !important; }
         .tag-pill {
             display: inline-flex; align-items: center; gap: 3px;
-            background: rgba(184,134,11,0.15); border: 1px solid rgba(184,134,11,0.3);
-            color: var(--benoro-gold); border-radius: 4px; padding: 3px 6px;
+            background: var(--brand-gold-tint); border: 1px solid var(--gold-border);
+            color: var(--brand-gold-dark); border-radius: 4px; padding: 3px 6px;
             font-size: 0.72rem; font-weight: 600; white-space: nowrap;
         }
         .tag-pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 0.7rem; line-height: 1; opacity: 0.6; }
         .tag-pill button:hover { opacity: 1; }
         .tag-input {
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 4px; color: #e2e8f0; font-size: 0.75rem; padding: 4px 8px;
+            background: var(--surface); border: 1px solid var(--border-strong);
+            border-radius: 4px; color: var(--ink); font-size: 0.75rem; padding: 4px 8px;
             width: 100px; font-family: inherit;
         }
-        .tag-input:focus { outline: none; border-color: rgba(184,134,11,0.5); }
+        .tag-input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .notes-area {
-            width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
-            color: #e2e8f0; font-size: 0.8rem; padding: 7px 9px; resize: vertical;
+            width: 100%; box-sizing: border-box; background: var(--surface);
+            border: 1px solid var(--border-strong); border-radius: 6px;
+            color: var(--ink); font-size: 0.8rem; padding: 7px 9px; resize: vertical;
             font-family: inherit; min-height: 38px; line-height: 1.4;
         }
-        .notes-area:focus { outline: none; border-color: rgba(184,134,11,0.5); }
+        .notes-area:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
 
-        .no-results { text-align: center; padding: 60px 20px; color: var(--benoro-text-muted); }
-        .loading { text-align: center; padding: 60px 20px; }
-        .spinner { width: 40px; height: 40px; border: 3px solid rgba(16,185,129,0.2); border-top-color: var(--benoro-gold); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+        .no-results { text-align: center; padding: 60px 20px; color: var(--muted); }
+        .loading { text-align: center; padding: 60px 20px; color: var(--ink-2); }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--brand-gold-tint); border-top-color: var(--brand-gold); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Google API Key - Collapsible Dropdown */
         .api-dropdown {
-            background: var(--benoro-card); 
-            border: 1px solid rgba(184,134,11,0.15);
-            border-radius: 4px; 
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            border-radius: 8px;
             margin-bottom: 25px;
             overflow: hidden;
         }
@@ -595,17 +704,18 @@
             transition: background 0.2s;
         }
         .api-dropdown-header:hover {
-            background: rgba(255,255,255,0.03);
+            background: var(--surface-2);
         }
         .api-dropdown-title {
             font-size: 0.85rem;
-            color: var(--benoro-text-muted);
+            font-weight: 500;
+            color: var(--ink-2);
             display: flex;
             align-items: center;
             gap: 10px;
         }
         .api-dropdown-arrow {
-            color: var(--benoro-text-muted);
+            color: var(--brand-gold);
             transition: transform 0.3s;
             font-size: 0.7rem;
         }
@@ -615,7 +725,8 @@
         .api-dropdown-content {
             display: none;
             padding: 15px 20px 20px 20px;
-            border-top: 1px solid rgba(255,255,255,0.05);
+            border-top: 1px solid var(--border);
+            background: var(--surface-2);
         }
         .api-dropdown.open .api-dropdown-content {
             display: block;
@@ -626,25 +737,27 @@
             gap: 10px;
             flex-wrap: wrap;
         }
-        .api-key-row input { 
-            width: 300px; 
-            padding: 8px 12px; 
-            border-radius: 6px; 
-            border: 1px solid #374151; 
-            background: #1f2937; 
-            color: #f3f4f6;
+        .api-key-row input {
+            width: 300px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
         }
-        .api-key-row button { 
-            padding: 8px 15px; 
-            border-radius: 6px; 
-            border: none; 
-            background: var(--benoro-gold); 
-            color: var(--benoro-navy-dark); 
-            cursor: pointer; 
-            font-weight: 500;
+        .api-key-row input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
+        .api-key-row button {
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: none;
+            background: var(--brand-gold);
+            color: var(--on-gold);
+            cursor: pointer;
+            font-weight: 600;
         }
+        .api-key-row button:hover { background: var(--brand-gold-hover); }
         .api-help-link {
-            color: var(--benoro-gold);
+            color: var(--brand-gold-dark);
             font-size: 0.8rem;
             text-decoration: none;
             margin-left: 10px;
@@ -658,20 +771,22 @@
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             font-size: 0.8rem;
         }
         .streetview-mode-row select {
             padding: 7px 10px;
             border-radius: 6px;
-            border: 1px solid #374151;
-            background: #1f2937;
-            color: #f3f4f6;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
+            font-family: inherit;
             font-size: 0.8rem;
         }
+        .streetview-mode-row select:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
         .streetview-mode-note {
             font-size: 0.75rem;
-            color: var(--benoro-text-light);
+            color: var(--muted);
         }
         .mode-lock-row {
             display: flex;
@@ -679,52 +794,62 @@
             gap: 10px;
             flex-wrap: wrap;
             margin-bottom: 10px;
-            color: var(--benoro-text-muted);
+            color: var(--ink-2);
             font-size: 0.8rem;
         }
         .mode-lock-note {
             font-size: 0.75rem;
-            color: var(--benoro-text-light);
+            color: var(--muted);
         }
         .mode-unlock-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
             border-radius: 6px;
             padding: 6px 10px;
+            font-family: inherit;
             font-size: 0.75rem;
+            font-weight: 500;
             cursor: pointer;
         }
+        .mode-unlock-btn:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
         .load-photo-btn {
-            border: 1px solid rgba(212,168,75,0.7);
-            background: rgba(212,168,75,0.15);
-            color: #f5d89b;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--ink);
             border-radius: 6px;
             padding: 6px 10px;
+            font-family: inherit;
             font-size: 0.75rem;
+            font-weight: 500;
             cursor: pointer;
         }
         .load-photo-btn:hover {
-            background: rgba(212,168,75,0.25);
+            border-color: var(--brand-gold);
+            color: var(--brand-gold-dark);
         }
         .retry-photo-btn {
             position: absolute;
             right: 10px;
             bottom: 10px;
             z-index: 3;
-            border: 1px solid rgba(147,197,253,0.75);
-            background: rgba(15,23,42,0.72);
-            color: #dbeafe;
+            border: 1px solid var(--border-strong);
+            background: var(--photo-pill-bg);
+            color: var(--ink);
             border-radius: 6px;
             padding: 5px 9px;
+            font-family: inherit;
             font-size: 0.7rem;
+            font-weight: 500;
             cursor: pointer;
+            box-shadow: 0 1px 3px rgba(35,35,35,0.15);
             backdrop-filter: blur(2px);
         }
         .retry-photo-btn:hover {
-            background: rgba(30,41,59,0.9);
+            background: var(--surface);
+            border-color: var(--brand-gold);
+            color: var(--brand-gold-dark);
         }
-
         @media (max-width: 1200px) {
             .actions-bar {
                 grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -738,6 +863,17 @@
             }
             .cases-grid { grid-template-columns: 1fr; }
             .property-details { grid-template-columns: 1fr; }
+            .container { padding: 0 16px; }
+            header { margin-bottom: 20px; }
+            .header-inner { flex-wrap: wrap; gap: 8px 16px; padding: 0 16px; }
+            .header-logo { height: 44px; }
+            .page-title-section { order: 3; flex-basis: 100%; }
+            .page-title { font-size: 1.3rem; }
+            .nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; flex: 1; }
+            .nav-links a { margin-left: 0; font-size: 0.68rem; letter-spacing: 0.6px; }
+            .stats-summary { gap: 18px 28px; padding: 20px; justify-content: center; }
+            .stat-value { font-size: 2.1rem; }
+            .login-box { padding: 36px 26px; }
         }
     </style>
 </head>
@@ -745,7 +881,7 @@
     <!-- Login -->
     <div class="login-overlay" id="loginOverlay">
         <div class="login-box">
-            <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-01.png" alt="Benoro Development" class="login-logo">
+            <img src="/images/blake-logo-stacked.png" alt="Blake Management" class="login-logo">
             <p class="login-subtitle">Camden County Pipeline</p>
             <input type="password" id="passwordInput" placeholder="Enter password" onkeypress="if(event.key==='Enter')login()">
             <button onclick="login()">Continue</button>
@@ -757,7 +893,7 @@
         <header>
             <div class="header-inner">
                 <div class="logo-section">
-                    <img src="/images/BENORO%20Variations%20PNG%20(no%20background)-03.png" alt="Benoro Development" class="header-logo">
+                    <img src="/images/blake-logo-horizontal.png" alt="Blake Management" class="header-logo">
                 </div>
                 <div class="page-title-section">
                     <div class="page-title">Camden County &mdash; Lis Pendens Pipeline</div>
@@ -776,7 +912,7 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Loading...</span>
                 </div>
-                <div id="enrichmentInfo" style="color: var(--benoro-text-light); font-size: 0.8rem;"></div>
+                <div id="enrichmentInfo" style="color: var(--muted); font-size: 0.8rem;"></div>
             </div>
 
             <!-- Google API Key - Collapsible -->
@@ -808,7 +944,7 @@
             <!-- CSV Upload -->
             <div class="upload-section" id="uploadSection">
                 <h3>Upload Camden County Lis Pendens CSV</h3>
-                <p>Export from the <a href="#" style="color: var(--benoro-gold);">Camden County Clerk's document search</a> - select Lis Pendens filings for your target month</p>
+                <p>Export from the <a href="#" style="color: var(--brand-gold-dark);">Camden County Clerk's document search</a> - select Lis Pendens filings for your target month</p>
                 <input type="file" id="csvUpload" class="upload-input" accept=".csv" onchange="handleFileUpload(event)">
                 <label for="csvUpload" class="upload-label">Choose CSV File</label>
                 <div class="csv-status" id="csvStatus">Checking for existing data...</div>
@@ -821,31 +957,31 @@
                     <div class="stat-label">Total Cases</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="mortgageCount" style="color: var(--benoro-gold);">-</div>
+                    <div class="stat-value" id="mortgageCount" style="color: var(--brand-gold);">-</div>
                     <div class="stat-label">Mortgage Foreclosures</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="taxLienCount" style="color: #f87171;">-</div>
+                    <div class="stat-value" id="taxLienCount" style="color: var(--danger);">-</div>
                     <div class="stat-label">Tax Lien</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="openCount" style="color: var(--benoro-success);">-</div>
+                    <div class="stat-value" id="openCount" style="color: var(--success);">-</div>
                     <div class="stat-label">Open Cases</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="reinstatedCount" style="color: #93c5fd;">-</div>
+                    <div class="stat-value" id="reinstatedCount" style="color: var(--info);">-</div>
                     <div class="stat-label">Reinstated</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="closedCount" style="color: #f87171;">-</div>
+                    <div class="stat-value" id="closedCount" style="color: var(--danger);">-</div>
                     <div class="stat-label">Closed/Dismissed</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="stayCount" style="color: #f87171;">-</div>
+                    <div class="stat-value" id="stayCount" style="color: var(--danger);">-</div>
                     <div class="stat-label">Bankruptcy Stay</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-value" id="recheckCount" style="color: var(--benoro-warning);">-</div>
+                    <div class="stat-value" id="recheckCount" style="color: var(--warning);">-</div>
                     <div class="stat-label">Recheck</div>
                 </div>
             </div>
@@ -1223,7 +1359,6 @@
         function isSaleRun(caseObj) {
             return caseHasAnySignal(caseObj, ['WRIT RETURN']);
         }
-
         // True only when the 150-day writ clock (N.J.S.A. 2A:50-64) still has days left.
         // Null means no countdown at all -- sale stay, or a writ whose filing date didn't parse.
         function hasLiveSaleClock(caseObj) {
@@ -1472,7 +1607,7 @@
         function buildStreetViewErrorHtml(streetViewUrl, mapsUrl) {
             return `<div class="no-image" style="flex-direction:column;gap:8px;">
                 <button class="load-photo-btn" onclick="retryStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Retry Photo</button>
-                <a href="${mapsUrl}" target="_blank" style="font-size:0.72rem;color:#93c5fd;text-decoration:none;">Open in Maps</a>
+                <a href="${mapsUrl}" target="_blank" style="font-size:0.72rem;color:var(--info);font-weight:500;text-decoration:none;">Open in Maps</a>
             </div>`;
         }
 
@@ -2021,7 +2156,7 @@
                     <summary>Score Breakdown</summary>
                     <div class="score-explain-body">
                         ${rows.map(([label, val]) => `<div class="score-breakdown-row"><span>${label}</span><b>${val >= 0 ? '+' : ''}${val}</b></div>`).join('')}
-                        <div class="score-breakdown-row" style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);">
+                        <div class="score-breakdown-row" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">
                             <span>Total</span><b>${total}</b>
                         </div>
                         ${urgencyHtml}
@@ -2279,16 +2414,16 @@
             if (!hasAddr) {
                 streetViewHtml = `<div class="no-image" style="cursor:pointer;flex-direction:column;gap:8px;" onclick="manualAddress('${c.instrumentNumber}')">
                     Address not yet resolved<br>
-                    <span style="font-size:0.7rem;color:var(--benoro-gold);">Click to enter manually</span>
+                    <span style="font-size:0.7rem;color:var(--brand-gold-dark);font-weight:600;">Click to enter manually</span>
                 </div>`;
             } else if (!canLoadStreetView) {
-                streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;text-decoration:none;">
+                streetViewHtml = `<a href="${mapsUrl}" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--ink-2);text-decoration:none;">
                     <div style="text-align:center;">Click for Maps<br><small>Sign in to load street photos</small></div>
                 </a>`;
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
                     <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}')">Load Photo</button>
-                    <span style="font-size:0.72rem;color:var(--benoro-text-light);">${effectiveMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
+                    <span style="font-size:0.72rem;color:var(--muted);">${effectiveMode === 'open-only' ? 'Closed/other case: on-demand' : 'On-demand mode'}</span>
                 </div>`;
             } else {
                 streetViewHtml = renderStreetViewAnchor(streetViewUrl, mapsUrl, false);
@@ -2320,20 +2455,20 @@
             const prevScore = Array.isArray(c.scoreHistory) && c.scoreHistory.length > 0 ? c.scoreHistory[c.scoreHistory.length - 1].score : null;
             const scoreDelta = prevScore !== null ? c.sellerScore - prevScore : null;
             const deltaHtml = scoreDelta !== null && scoreDelta !== 0
-                ? `<span style="font-size:0.75rem;font-weight:700;color:${scoreDelta > 0 ? '#4ade80' : '#f87171'};margin-left:6px;">${scoreDelta > 0 ? '▲' : '▼'}${Math.abs(scoreDelta)}</span>`
+                ? `<span style="font-size:0.75rem;font-weight:700;color:${scoreDelta > 0 ? 'var(--success)' : 'var(--danger)'};margin-left:6px;">${scoreDelta > 0 ? '▲' : '▼'}${Math.abs(scoreDelta)}</span>`
                 : '';
 
             // Court status badge
             let courtHtml = '';
             if (c.courtStatus) {
                 const colors = {
-                    'OPEN': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', icon: '●' },
-                    'REINSTATED': { bg: 'rgba(59,130,246,0.15)', text: '#60a5fa', icon: '◍' },
-                    'CLOSED': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '○' },
-                    'STAY': { bg: 'rgba(248,113,113,0.15)', text: '#f87171', icon: '◉' },
-                    'RECHECK': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', icon: '◐' }
+                    'OPEN': { bg: 'var(--success-tint)', text: 'var(--success)', icon: '●' },
+                    'REINSTATED': { bg: 'var(--info-tint)', text: 'var(--info)', icon: '◍' },
+                    'CLOSED': { bg: 'var(--danger-tint)', text: 'var(--danger)', icon: '○' },
+                    'STAY': { bg: 'var(--danger-tint)', text: 'var(--danger)', icon: '◉' },
+                    'RECHECK': { bg: 'var(--warning-tint)', text: 'var(--warning)', icon: '◐' }
                 };
-                const cs = colors[c.courtStatus] || { bg: 'rgba(148,163,184,0.15)', text: '#94a3b8', icon: '○' };
+                const cs = colors[c.courtStatus] || { bg: 'var(--surface-3)', text: 'var(--ink-2)', icon: '○' };
                 const statusNote = c.courtStatusNote ? String(c.courtStatusNote).trim() : '';
                 const statusNoteDisplay = formatCourtStatusNote(statusNote);
                 courtHtml = `
@@ -2341,9 +2476,9 @@
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' - ' + c.courtDisposition : ''}</span>
                         </div>
-                        ${c.courtDocketNumber ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
-                        ${c.courtDispositionDate ? `<div style="color:#94a3b8;font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
-                        ${(c.courtStatus === 'RECHECK' && statusNoteDisplay) ? `<div style="color:#e2e8f0;font-size:0.75rem;margin-top:6px;line-height:1.35;">Reason: ${statusNoteDisplay}</div>` : ''}
+                        ${c.courtDocketNumber ? `<div style="color:var(--ink-2);font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
+                        ${c.courtDispositionDate ? `<div style="color:var(--ink-2);font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
+                        ${(c.courtStatus === 'RECHECK' && statusNoteDisplay) ? `<div style="color:var(--ink);font-size:0.75rem;margin-top:6px;line-height:1.35;">Reason: ${statusNoteDisplay}</div>` : ''}
                     </div>`;
             }
 
@@ -2431,8 +2566,8 @@
                             ${hasAddr ? `
                                 <div style="display:flex;gap:8px;">
                                     <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
-                                    <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Zillow</a>
-                                    <a href="#" onclick="event.preventDefault();manualAddress('${c.instrumentNumber}','${(c.propertyAddress||'').replace(/'/g,"\\'")}')" style="background:#4b5563;color:white!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Edit Addr</a>
+                                    <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" style="background:#006AFF;color:#fff!important;padding:6px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Zillow</a>
+                                    <a href="#" onclick="event.preventDefault();manualAddress('${c.instrumentNumber}','${(c.propertyAddress||'').replace(/'/g,"\\'")}')" style="background:var(--surface);border:1px solid var(--border-strong);color:var(--ink)!important;padding:5px 12px;border-radius:6px;font-size:0.8rem;text-decoration:none;">Edit Addr</a>
                                 </div>
                             ` : '<span></span>'}
                         </div>
@@ -2525,50 +2660,50 @@ async function checkCourtStatus(testMode = false) {
     const modal = document.createElement('div');
     modal.id = 'courtStatusModal';
     modal.innerHTML = `
-        <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
-            <div style="background:#1e293b;border-radius:12px;padding:24px;max-width:560px;width:90%;color:#e2e8f0;font-family:system-ui,sans-serif;border:1px solid #334155">
-                <h2 style="margin:0 0 12px;color:#38bdf8;font-size:1.2rem">Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
-                <p style="color:#94a3b8;font-size:.9rem;margin:0 0 16px;line-height:1.5">
+        <div style="position:fixed;inset:0;background:var(--backdrop);z-index:10000;display:flex;align-items:center;justify-content:center" onclick="if(event.target===this)this.remove()">
+            <div style="background:var(--surface);border-radius:12px;padding:24px;max-width:560px;width:90%;max-height:92vh;overflow-y:auto;color:var(--ink);font-family:'Montserrat',sans-serif;border:1px solid var(--border);box-shadow:var(--shadow-modal)">
+                <h2 style="margin:0 0 12px;color:var(--ink);font-family:var(--serif);font-weight:600;font-size:1.6rem">Court Status Checker${testMode ? ' (Test Mode - 10 cases)' : ''}</h2>
+                <p style="color:var(--ink-2);font-size:.85rem;margin:0 0 16px;line-height:1.5">
                     This runs directly in your browser to avoid CAPTCHA blocks. Pick a batch mode, then follow the steps:
                 </p>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px">
-                    <button onclick="setCourtCmdMode('refresh', false, ${testMode ? 'true' : 'false'})" style="background:#2563eb;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">New Batch</button>
-                    <button onclick="setCourtCmdMode('refresh', true, ${testMode ? 'true' : 'false'})" style="background:#0f766e;color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">Continue Batch</button>
-                    <button onclick="setCourtCmdMode('default', false, ${testMode ? 'true' : 'false'})" style="background:#334155;color:#cbd5e1;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.8rem">New Cases</button>
+                    <button onclick="setCourtCmdMode('refresh', false, ${testMode ? 'true' : 'false'})" style="background:var(--brand-gold);color:var(--on-gold);border:1px solid var(--brand-gold);padding:8px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:.78rem">New Batch</button>
+                    <button onclick="setCourtCmdMode('refresh', true, ${testMode ? 'true' : 'false'})" style="background:var(--success);color:var(--on-solid);border:1px solid var(--success);padding:8px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:.78rem">Continue Batch</button>
+                    <button onclick="setCourtCmdMode('default', false, ${testMode ? 'true' : 'false'})" style="background:var(--surface);color:var(--ink);border:1px solid var(--border-strong);padding:8px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:.78rem">New Cases</button>
                 </div>
-                <div id="courtCmdMode" style="color:#93c5fd;font-size:.8rem;margin:0 0 12px">Mode: Start new OPEN refresh batch</div>
+                <div id="courtCmdMode" style="color:var(--brand-gold-dark);font-weight:600;font-size:.8rem;margin:0 0 12px">Mode: Start new OPEN refresh batch</div>
                 <div style="margin-bottom:16px">
                     <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
-                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">1</span>
+                        <span style="background:var(--brand-gold);color:var(--on-gold);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">1</span>
                         <div>
-                            <b style="color:#e2e8f0">Log into NJ Courts</b><br>
-                            <a href="https://portal.njcourts.gov" target="_blank" style="color:#38bdf8;font-size:.85rem">portal.njcourts.gov</a>
-                            <span style="color:#64748b;font-size:.85rem"> -> Find a Case -> Search Civil and Foreclosure Cases</span>
+                            <b style="color:var(--ink)">Log into NJ Courts</b><br>
+                            <a href="https://portal.njcourts.gov" target="_blank" style="color:var(--brand-gold-dark);font-weight:600;font-size:.85rem">portal.njcourts.gov</a>
+                            <span style="color:var(--muted);font-size:.85rem"> -> Find a Case -> Search Civil and Foreclosure Cases</span>
                         </div>
                     </div>
                     <div style="display:flex;gap:10px;align-items:start;margin-bottom:12px">
-                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">2</span>
+                        <span style="background:var(--brand-gold);color:var(--on-gold);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">2</span>
                         <div>
-                            <b style="color:#e2e8f0">Open the console</b><br>
-                            <span style="color:#94a3b8;font-size:.85rem">Press <kbd style="background:#334155;padding:2px 6px;border-radius:3px;font-size:.8rem">F12</kbd> then click the <b>Console</b> tab</span>
+                            <b style="color:var(--ink)">Open the console</b><br>
+                            <span style="color:var(--ink-2);font-size:.85rem">Press <kbd style="background:var(--surface-3);border:1px solid var(--border-strong);color:var(--ink);padding:1px 6px;border-radius:3px;font-size:.8rem">F12</kbd> then click the <b>Console</b> tab</span>
                         </div>
                     </div>
                     <div style="display:flex;gap:10px;align-items:start">
-                        <span style="background:#38bdf8;color:#0f172a;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">3</span>
+                        <span style="background:var(--brand-gold);color:var(--on-gold);border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0">3</span>
                         <div>
-                            <b style="color:#e2e8f0">Paste this and press Enter:</b>
+                            <b style="color:var(--ink)">Paste this and press Enter:</b>
                         </div>
                     </div>
                 </div>
                 <div style="position:relative">
-                    <pre id="courtCmd" style="background:#0a0f1a;border:1px solid #334155;border-radius:8px;padding:12px;font-size:.78rem;overflow-x:auto;color:#38bdf8;margin:0;white-space:pre-wrap;word-break:break-all;cursor:pointer" onclick="copyCourtCmd()" title="Click to copy">${command}</pre>
-                    <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">Copy</button>
+                    <pre id="courtCmd" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px 70px 12px 12px;font-size:.78rem;overflow-x:auto;color:var(--info);margin:0;white-space:pre-wrap;word-break:break-all;cursor:pointer" onclick="copyCourtCmd()" title="Click to copy">${command}</pre>
+                    <button onclick="copyCourtCmd()" style="position:absolute;top:6px;right:6px;background:var(--surface);color:var(--ink-2);border:1px solid var(--border-strong);font-family:inherit;padding:4px 10px;border-radius:4px;font-size:.75rem;cursor:pointer">Copy</button>
                 </div>
-                <p style="color:#64748b;font-size:.78rem;margin:8px 0 0;text-align:center">
+                <p style="color:var(--muted);font-size:.76rem;margin:8px 0 0;text-align:center;line-height:1.45">
                     A progress panel will appear on the NJ Courts page. Results save automatically, and refresh batches can be resumed later.
                 </p>
                 <div style="text-align:right;margin-top:12px">
-                    <button onclick="this.closest('#courtStatusModal').remove()" style="background:#334155;color:#94a3b8;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:.85rem">Close</button>
+                    <button onclick="this.closest('#courtStatusModal').remove()" style="background:var(--surface);color:var(--ink);border:1px solid var(--border-strong);padding:8px 16px;border-radius:6px;cursor:pointer;font-family:inherit;font-weight:600;font-size:.8rem">Close</button>
                 </div>
             </div>
         </div>
