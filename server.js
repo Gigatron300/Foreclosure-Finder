@@ -43,8 +43,10 @@ const CAMDEN_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'camden-annotations.
 // Survives any CSV upload order so resolved addresses are never lost or re-resolved.
 const CAMDEN_ENRICH_CACHE_FILE = path.join(CONFIG.outputDir, 'camden-enrichment-cache.json');
 const STREETVIEW_CACHE_DIR = path.join(CONFIG.outputDir, 'streetview-cache');
-const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '4000', 10);
-const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(30 * 24 * 60 * 60 * 1000), 10);
+const STREETVIEW_CACHE_MAX_FILES = parseInt(process.env.STREETVIEW_CACHE_MAX_FILES || '8000', 10);
+// Street View imagery rarely changes, so a year keeps Google to about one paid request per property.
+const STREETVIEW_CACHE_TTL_MS = parseInt(process.env.STREETVIEW_CACHE_TTL_MS || String(365 * 24 * 60 * 60 * 1000), 10);
+const LOADED_PHOTOS_FILE = path.join(CONFIG.outputDir, 'loaded-photos.json');
 
 async function ensureDataDir() {
   try { await fs.mkdir(CONFIG.outputDir, { recursive: true }); } catch (e) {}
@@ -409,6 +411,61 @@ app.get('/api/streetview', async (req, res) => {
   } catch (error) {
     console.error('Street View proxy error:', error.message);
     return res.status(500).json({ error: 'Street View proxy failed' });
+  }
+});
+
+// ============== LOADED PHOTOS ==============
+// Cards someone clicked "Load Photo" on, per page, so every browser shows those
+// photos from the Street View cache instead of a button. Keyed by case number
+// (MontCo) or property id (Sheriff Sales).
+const LOADED_PHOTO_PAGES = ['sheriff', 'montco'];
+let loadedPhotosReady = null;
+let loadedPhotosWrite = Promise.resolve();
+
+function readLoadedPhotos() {
+  if (!loadedPhotosReady) {
+    loadedPhotosReady = readJsonFileSafe(LOADED_PHOTOS_FILE, {})
+      .then(data => data || {})
+      .catch(err => { loadedPhotosReady = null; throw err; });
+  }
+  return loadedPhotosReady;
+}
+
+app.get('/api/loaded-photos/:page', checkAuth, async (req, res) => {
+  if (!LOADED_PHOTO_PAGES.includes(req.params.page)) return res.status(404).json({ error: 'Unknown page' });
+  try {
+    const state = await readLoadedPhotos();
+    res.json({ ids: state[req.params.page] || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/loaded-photos/:page', checkAuth, async (req, res) => {
+  const page = req.params.page;
+  if (!LOADED_PHOTO_PAGES.includes(page)) return res.status(404).json({ error: 'Unknown page' });
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : [])
+    .filter(id => typeof id === 'string' && id && id.length <= 200)
+    .slice(0, 5000);
+  try {
+    const state = await readLoadedPhotos();
+    const set = new Set(state[page] || []);
+    const before = set.size;
+    ids.forEach(id => set.add(id));
+    if (set.size !== before) {
+      state[page] = Array.from(set);
+      // Chain writes so two clicks at once can't interleave the temp-file swap.
+      loadedPhotosWrite = loadedPhotosWrite.catch(() => {}).then(async () => {
+        await ensureDataDir();
+        const tmp = LOADED_PHOTOS_FILE + '.tmp';
+        await fs.writeFile(tmp, JSON.stringify(state));
+        await fs.rename(tmp, LOADED_PHOTOS_FILE);
+      });
+      await loadedPhotosWrite;
+    }
+    res.json({ success: true, count: set.size });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

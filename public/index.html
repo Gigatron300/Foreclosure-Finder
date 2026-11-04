@@ -1319,6 +1319,31 @@
             try {
                 localStorage.setItem(SHERIFF_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
             } catch (e) {}
+            saveLoadedPhotosToServer([propertyId]);
+        }
+
+        // The server holds the shared list so other browsers show these photos too;
+        // localStorage is this browser's copy, so photos still show before the server answers.
+        function saveLoadedPhotosToServer(ids) {
+            if (!ids.length) return Promise.resolve();
+            return authFetch(`${API_BASE}/api/loaded-photos/sheriff`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            }).catch(() => {});
+        }
+
+        async function syncLoadedPhotos() {
+            try {
+                const r = await authFetch(`${API_BASE}/api/loaded-photos/sheriff`);
+                if (!r.ok) return;
+                const serverIds = new Set((await r.json()).ids || []);
+                const set = getLoadedPhotos();
+                // Photos loaded here before the shared list existed go up once.
+                saveLoadedPhotosToServer(Array.from(set).filter(id => !serverIds.has(id)));
+                serverIds.forEach(id => set.add(id));
+                localStorage.setItem(SHERIFF_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
+            } catch (e) {}
         }
 
         // Login function
@@ -1510,7 +1535,10 @@
                 if (county) params.append('county', county);
                 if (city) params.append('city', city);
                 
-                const response = await authFetch(`${API_BASE}/api/properties?${params}`);
+                const [response] = await Promise.all([
+                    authFetch(`${API_BASE}/api/properties?${params}`),
+                    syncLoadedPhotos()
+                ]);
                 if (response.status === 401) {
                     showLogin();
                     return;

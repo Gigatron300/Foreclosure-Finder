@@ -1180,6 +1180,31 @@
             try {
                 localStorage.setItem(PIPELINE_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
             } catch (e) {}
+            saveLoadedPhotosToServer([caseNumber]);
+        }
+
+        // The server holds the shared list so other browsers show these photos too;
+        // localStorage is this browser's copy, so photos still show before the server answers.
+        function saveLoadedPhotosToServer(ids) {
+            if (!ids.length) return Promise.resolve();
+            return fetch('/api/loaded-photos/montco', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+                body: JSON.stringify({ ids })
+            }).catch(() => {});
+        }
+
+        async function syncLoadedPhotos() {
+            try {
+                const r = await fetch('/api/loaded-photos/montco', { headers: { 'X-Auth-Token': authToken } });
+                if (!r.ok) return;
+                const serverIds = new Set((await r.json()).ids || []);
+                const set = getLoadedPhotos();
+                // Photos loaded here before the shared list existed go up once.
+                saveLoadedPhotosToServer(Array.from(set).filter(id => !serverIds.has(id)));
+                serverIds.forEach(id => set.add(id));
+                localStorage.setItem(PIPELINE_LOADED_PHOTOS_KEY, JSON.stringify(Array.from(set)));
+            } catch (e) {}
         }
 
         function primaryParcelKey(parcelNumber) {
@@ -1838,7 +1863,8 @@
                     fetch(`/api/pipeline?sortBy=${sortBy}&sortOrder=desc`, {
                         headers: { 'X-Auth-Token': authToken }
                     }),
-                    getMontcoSheriffAddressKeys()
+                    getMontcoSheriffAddressKeys(),
+                    syncLoadedPhotos()
                 ]);
                 const data = await response.json();
 
