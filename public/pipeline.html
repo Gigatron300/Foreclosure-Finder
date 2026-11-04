@@ -1031,10 +1031,11 @@
                 <div class="streetview-mode-row" id="streetViewModeRow">
                     <label for="streetViewMode">Photo loading:</label>
                     <select id="streetViewMode" onchange="saveStreetViewMode()">
-                        <option value="on-demand">On-demand (recommended)</option>
+                        <option value="open-only">Auto-load OPEN only (recommended)</option>
+                        <option value="on-demand">On-demand all cards</option>
                         <option value="auto">Auto-load all cards</option>
                     </select>
-                    <span class="streetview-mode-note">On-demand only calls Google when you click "Load Photo".</span>
+                    <span class="streetview-mode-note">OPEN-only mode auto-loads active cases and keeps CLOSED NOW cases as click-to-load.</span>
                 </div>
             </div>
         </div>
@@ -1148,7 +1149,7 @@
 
     <script>
         let authToken = localStorage.getItem('pipelineAuth');
-        const PIPELINE_DEFAULT_STREETVIEW_MODE = 'on-demand';
+        const PIPELINE_DEFAULT_STREETVIEW_MODE = 'open-only';
         const PIPELINE_LOADED_PHOTOS_KEY = 'pipelineLoadedPhotos';
         let streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
         let streetViewModeUnlocked = false;
@@ -1559,7 +1560,7 @@
 
             if (!streetViewModeRequiresPasskey) {
                 streetViewModeUnlocked = true;
-                streetViewMode = localStorage.getItem('pipelineStreetViewMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
+                streetViewMode = localStorage.getItem('pipelinePhotoMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
             } else {
                 streetViewModeUnlocked = false;
                 streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
@@ -1586,7 +1587,7 @@
                     return;
                 }
                 streetViewModeUnlocked = true;
-                streetViewMode = localStorage.getItem('pipelineStreetViewMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
+                streetViewMode = localStorage.getItem('pipelinePhotoMode') || PIPELINE_DEFAULT_STREETVIEW_MODE;
                 renderStreetViewModeControls();
                 loadData();
             } catch (e) {
@@ -1619,8 +1620,8 @@
                 return;
             }
             const mode = document.getElementById('streetViewMode').value;
-            streetViewMode = mode === 'auto' ? 'auto' : 'on-demand';
-            localStorage.setItem('pipelineStreetViewMode', streetViewMode);
+            streetViewMode = (mode === 'auto' || mode === 'open-only' || mode === 'on-demand') ? mode : 'open-only';
+            localStorage.setItem('pipelinePhotoMode', streetViewMode);
             loadData();
         }
 
@@ -2009,7 +2010,9 @@
                 ? `/api/streetview?token=${encodeURIComponent(authToken)}&size=400x200&location=${encodedAddress}`
                 : '';
             const previouslyLoaded = c.caseNumber && getLoadedPhotos().has(c.caseNumber);
-            const autoLoadThisCard = getEffectiveStreetViewMode() === 'auto' || previouslyLoaded;
+            // "Open" is every case not flagged CLOSED NOW, the same rule as the Hide Closed filter.
+            const effectiveMode = getEffectiveStreetViewMode();
+            const autoLoadThisCard = effectiveMode === 'auto' || (effectiveMode === 'open-only' && !c.liveClosed) || previouslyLoaded;
 
             // Google Maps URL
             const mapsUrl = c.propertyAddress
@@ -2026,7 +2029,7 @@
             } else if (!autoLoadThisCard) {
                 streetViewHtml = `<div class="no-image" style="flex-direction:column;gap:8px;">
                     <button class="load-photo-btn" onclick="loadStreetViewImage(this, '${streetViewUrl}', '${mapsUrl}', '${c.caseNumber}')">Load Photo</button>
-                    <span class="ondemand-note">On-demand mode</span>
+                    <span class="ondemand-note">${effectiveMode === 'open-only' ? 'Closed case: on-demand' : 'On-demand mode'}</span>
                 </div>`;
             } else {
                 streetViewHtml = `<a href="${mapsUrl}" target="_blank">
