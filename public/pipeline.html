@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="/theme.js"></script>
+    <script src="/nav-access.js"></script>
     <title>Pre-Foreclosure Pipeline | Blake Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1000,9 +1001,9 @@
                     <div class="page-title">Montgomery County &mdash; Pre-Foreclosure Pipeline</div>
                 </div>
                 <nav class="nav-links">
-                    <a href="/">Sheriff Sales</a>
-                    <a href="/pipeline.html" class="active">MontCo Pipeline</a>
-                    <a href="/camden.html">Camden Pipeline</a>
+                    <a href="/" data-tab="sheriff">Sheriff Sales</a>
+                    <a href="/pipeline.html" data-tab="montco" class="active">MontCo Pipeline</a>
+                    <a href="/camden.html" data-tab="camden">Camden Pipeline</a>
                 </nav>
             </div>
         </header>
@@ -1578,6 +1579,7 @@
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
+                            syncNavTabs(authToken);
                             initStreetViewModeControls().finally(() => loadData());
                             checkCsvStatus();
                             checkCourtSession();
@@ -1622,6 +1624,7 @@
                     // The server expects the password itself as the auth token
                     authToken = password;
                     localStorage.setItem('pipelineAuth', authToken);
+                    syncNavTabs(authToken);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
                     initStreetViewModeControls().finally(() => loadData());

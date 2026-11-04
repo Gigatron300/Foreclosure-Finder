@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="/theme.js"></script>
+    <script src="/nav-access.js"></script>
     <title>Foreclosure Property Finder</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1159,9 +1160,9 @@
                     <p class="page-tag">Camden + Montgomery County</p>
                 </div>
                 <nav class="nav-links">
-                    <a href="/" class="active">Sheriff Sales</a>
-                    <a href="/pipeline.html">MontCo Pipeline</a>
-                    <a href="/camden.html">Camden Pipeline</a>
+                    <a href="/" data-tab="sheriff" class="active">Sheriff Sales</a>
+                    <a href="/pipeline.html" data-tab="montco">MontCo Pipeline</a>
+                    <a href="/camden.html" data-tab="camden">Camden Pipeline</a>
                 </nav>
             </div>
         </header>
@@ -1353,6 +1354,7 @@
         function showMainContent() {
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('mainContent').classList.add('visible');
+            syncNavTabs(authToken);
         }
 
         // Show login, hide main content

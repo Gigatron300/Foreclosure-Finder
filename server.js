@@ -20,6 +20,8 @@ if (!SITE_PASSWORD) {
   console.error('SITE_PASSWORD environment variable is required. Set it before starting the server.');
   process.exit(1);
 }
+// Optional second password that opens Sheriff Sales and the MontCo Pipeline but not Camden.
+const PARTNER_PASSWORD = process.env.PARTNER_PASSWORD || '';
 const STREETVIEW_MODE_PASSKEY = process.env.STREETVIEW_MODE_PASSKEY || '';
 
 app.use(cors());
@@ -270,9 +272,16 @@ async function markCourtRefreshBatchProgress(batchId, instrumentNumber, status =
   return batch;
 }
 
+// Tabs a password can open, or null when it isn't a site password at all.
+function tabsFor(token) {
+  if (token && token === SITE_PASSWORD) return ['sheriff', 'montco', 'camden'];
+  if (PARTNER_PASSWORD && token === PARTNER_PASSWORD) return ['sheriff', 'montco'];
+  return null;
+}
+
 app.post('/api/auth', (req, res) => {
-  const { password } = req.body;
-  if (password === SITE_PASSWORD) res.json({ success: true });
+  const tabs = tabsFor(req.body?.password);
+  if (tabs) res.json({ success: true, tabs });
   else res.status(401).json({ success: false, error: 'Invalid password' });
 });
 
@@ -289,15 +298,25 @@ app.get('/api/nj-courts-creds', (req, res) => {
 
 const checkAuth = (req, res, next) => {
   const authHeader = req.headers['x-auth-token'];
-  if (authHeader === SITE_PASSWORD) next();
+  if (tabsFor(authHeader)) next();
   else res.status(401).json({ error: 'Unauthorized' });
 };
 
 function isAuthorized(req) {
   const authHeader = req.headers['x-auth-token'];
   const tokenQuery = req.query.token;
-  return authHeader === SITE_PASSWORD || tokenQuery === SITE_PASSWORD;
+  return !!(tabsFor(authHeader) || tabsFor(tokenQuery));
 }
+
+// Every Camden endpoint sits behind this, so a password without the Camden tab
+// gets a 403 here whichever Camden route it tries.
+app.use('/api/camden', (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const tabs = tabsFor(req.headers['x-auth-token'] || req.query.token);
+  if (!tabs) return res.status(401).json({ error: 'Unauthorized' });
+  if (!tabs.includes('camden')) return res.status(403).json({ error: 'No access to the Camden Pipeline' });
+  next();
+});
 
 app.get('/api/streetview-mode/config', checkAuth, (req, res) => {
   res.json({ requiresPasskey: !!STREETVIEW_MODE_PASSKEY });

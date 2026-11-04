@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="/theme.js"></script>
+    <script src="/nav-access.js"></script>
     <title>Camden County Pipeline | Blake Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -899,9 +900,9 @@
                     <div class="page-title">Camden County &mdash; Lis Pendens Pipeline</div>
                 </div>
                 <nav class="nav-links">
-                    <a href="/">Sheriff Sales</a>
-                    <a href="/pipeline.html">MontCo Pipeline</a>
-                    <a href="/camden.html" class="active">Camden Pipeline</a>
+                    <a href="/" data-tab="sheriff">Sheriff Sales</a>
+                    <a href="/pipeline.html" data-tab="montco">MontCo Pipeline</a>
+                    <a href="/camden.html" data-tab="camden" class="active">Camden Pipeline</a>
                 </nav>
             </div>
         </header>
@@ -1296,12 +1297,15 @@
             if (authToken) {
                 fetch('/api/camden', { headers: { 'X-Auth-Token': authToken } })
                     .then(r => {
-                        if (r.status === 401) {
+                        if (r.status === 403) {
+                            showCamdenNoAccess();
+                        } else if (r.status === 401) {
                             localStorage.removeItem('pipelineAuth');
                             document.getElementById('loginOverlay').style.display = 'flex';
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
+                            syncNavTabs(authToken);
                             initStreetViewModeControls().finally(() => loadData());
                             checkCsvStatus();
                         }
@@ -1651,14 +1655,29 @@
                 if (data.success) {
                     authToken = password;
                     localStorage.setItem('pipelineAuth', authToken);
+                    syncNavTabs(authToken);
+                    if (!(data.tabs || []).includes('camden')) {
+                        showCamdenNoAccess();
+                        return;
+                    }
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
                     initStreetViewModeControls().finally(() => loadData());
                     checkCsvStatus();
                 } else {
-                    document.getElementById('loginError').style.display = 'block';
+                    const err = document.getElementById('loginError');
+                    err.textContent = 'Invalid password';
+                    err.style.display = 'block';
                 }
             });
+        }
+
+        // A valid password that doesn't include Camden: keep the overlay up and point elsewhere.
+        function showCamdenNoAccess() {
+            document.getElementById('loginOverlay').style.display = 'flex';
+            const err = document.getElementById('loginError');
+            err.innerHTML = 'This password doesn’t have access to the Camden Pipeline. <a href="/pipeline.html">Go to the MontCo Pipeline</a>';
+            err.style.display = 'block';
         }
 
         async function checkCsvStatus() {
