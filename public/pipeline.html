@@ -1040,7 +1040,7 @@
         </div>
         
         <!-- CSV / Excel Upload Section -->
-        <div class="upload-section" id="uploadSection">
+        <div class="upload-section" id="uploadSection" style="display:none;">
             <h3>Upload Court Data</h3>
             <p>Export "Complaint In Mortgage Foreclosure" cases from <a href="https://courtsapp.montcopa.org/psi/v/search/case" target="_blank">Montgomery County Courts</a> (CSV or Excel)</p>
             <input type="file" id="csvUpload" class="upload-input" accept=".csv,.xlsx,.xls" onchange="handleFileUpload(event)">
@@ -1049,7 +1049,7 @@
         </div>
 
         <!-- Court Session (Cloudflare "verify you are human" gate) -->
-        <div class="upload-section" id="sessionSection">
+        <div class="upload-section" id="sessionSection" style="display:none;">
             <h3>Court Session</h3>
             <p>The court site now shows a "verify you are human" check that the server can't clear on its own. Paste a fresh session so scrapes can read case dockets. (Property addresses work without this; dockets and scores do not.)</p>
             <ol class="upload-steps">
@@ -1604,10 +1604,8 @@
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
-                            syncNavTabs(authToken);
+                            syncNavTabs(authToken).then(showCourtDataSections);
                             initStreetViewModeControls().finally(() => loadData());
-                            checkCsvStatus();
-                            checkCourtSession();
                         }
                     });
             } else {
@@ -1649,18 +1647,26 @@
                     // The server expects the password itself as the auth token
                     authToken = password;
                     localStorage.setItem('pipelineAuth', authToken);
-                    syncNavTabs(authToken);
+                    syncNavTabs(authToken).then(showCourtDataSections);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
                     initStreetViewModeControls().finally(() => loadData());
-                    checkCsvStatus();
-                    checkCourtSession();
                 } else {
                     document.getElementById('loginError').style.display = 'block';
                 }
             });
         }
         
+        // Upload Court Data and Court Session are for the site password only; the
+        // server refuses them for the partner password, so they stay hidden for it.
+        function showCourtDataSections(access) {
+            if (!access || !access.owner) return;
+            document.getElementById('uploadSection').style.display = '';
+            document.getElementById('sessionSection').style.display = '';
+            checkCsvStatus();
+            checkCourtSession();
+        }
+
         async function checkCsvStatus() {
             try {
                 const response = await fetch('/api/pipeline/csv-status', { headers: { 'X-Auth-Token': authToken } });

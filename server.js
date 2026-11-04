@@ -281,9 +281,13 @@ function tabsFor(token) {
   return null;
 }
 
+function isOwner(token) {
+  return !!token && token === SITE_PASSWORD;
+}
+
 app.post('/api/auth', (req, res) => {
   const tabs = tabsFor(req.body?.password);
-  if (tabs) res.json({ success: true, tabs });
+  if (tabs) res.json({ success: true, tabs, owner: isOwner(req.body.password) });
   else res.status(401).json({ success: false, error: 'Invalid password' });
 });
 
@@ -318,6 +322,14 @@ app.use('/api/camden', (req, res, next) => {
   if (!tabs) return res.status(401).json({ error: 'Unauthorized' });
   if (!tabs.includes('camden')) return res.status(403).json({ error: 'No access to the Camden Pipeline' });
   next();
+});
+
+// MontCo court-data upload and the court session stay with the site password.
+app.use(['/api/montco/session', '/api/pipeline/upload-csv', '/api/pipeline/csv-status'], (req, res, next) => {
+  const token = req.headers['x-auth-token'];
+  if (isOwner(token)) return next();
+  if (tabsFor(token)) return res.status(403).json({ error: 'Court data is managed by the site owner' });
+  res.status(401).json({ error: 'Unauthorized' });
 });
 
 app.get('/api/streetview-mode/config', checkAuth, (req, res) => {

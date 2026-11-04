@@ -16,7 +16,8 @@
         }
     }
 
-    // Pages call this once they know the password is good.
+    // Pages call this once they know the password is good. Resolves to the
+    // server's answer ({ tabs, owner }) or null.
     window.syncNavTabs = function (token) {
         if (!token) return Promise.resolve(null);
         return fetch('/api/auth', {
@@ -30,7 +31,7 @@
                 if (!Array.isArray(tabs)) return null;
                 try { localStorage.setItem(KEY, JSON.stringify(tabs)); } catch (e) {}
                 apply(tabs);
-                return tabs;
+                return data;
             })
             .catch(function () { return null; });
     };
