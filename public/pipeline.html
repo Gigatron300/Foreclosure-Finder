@@ -2523,8 +2523,9 @@
         // Find Mortgage Parcels result for a case: 'owner' | 'address' | 'none' | 'error',
         // or '' when it was never checked (it had a CSV parcel number, or hasn't been run yet).
         function parcelMatchCategory(c) {
-            if (c.parcelMatchStatus) return c.parcelMatchStatus;
+            // A card showing "Parcel Matched" is always owner-confirmed, whatever a later run saved.
             if (c.addressSource === 'parcel-match') return 'owner';
+            if (c.parcelMatchStatus) return c.parcelMatchStatus;
             if (c.parcelMatch && c.parcelMatch.confidence === 'address') return 'address';
             return '';
         }

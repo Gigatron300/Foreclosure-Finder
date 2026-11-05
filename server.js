@@ -1101,7 +1101,15 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
       const CONCURRENCY = 5;
       for (let i = 0; i < targets.length; i += CONCURRENCY) {
         await Promise.all(targets.slice(i, i + CONCURRENCY).map(async (c) => {
-          // On a re-run, a parcel-match case's address is already the parcel's own, which matches itself.
+          // Owner-confirmed cases are settled. Don't look them up again: their address is now the
+          // parcel layer's own spelling ("22 SAW MILL RUN CONDO 22"), which may not parse back
+          // into the same lookup, and a miss would mislabel a confirmed match as "no match".
+          if (c.addressSource === 'parcel-match') {
+            c.parcelMatchStatus = 'owner';
+            lastParcelMatchStatus.matched++;
+            lastParcelMatchStatus.processed++;
+            return;
+          }
           try {
             const match = await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant });
             const applied = applyParcelMatch(c, match);

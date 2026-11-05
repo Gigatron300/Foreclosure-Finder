@@ -20,7 +20,8 @@ const NAME_ABBREV = {
   FIRST: '1ST', SECOND: '2ND', THIRD: '3RD', FOURTH: '4TH', FIFTH: '5TH',
   SIXTH: '6TH', SEVENTH: '7TH', EIGHTH: '8TH', NINTH: '9TH', TENTH: '10TH'
 };
-const UNIT_RE = /\s+(?:APT|APARTMENT|UNIT|STE|SUITE|BLDG|BUILDING|FL|FLOOR|RM|ROOM|LOT|#)\b.*$|\s+#.*$/;
+// The parcel layer writes units as "CONDO 22" / "UNIT B"; court addresses use APT, #, etc.
+const UNIT_RE = /\s+(?:APT|APARTMENT|UNIT|CONDO|STE|SUITE|BLDG|BUILDING|FL|FLOOR|RM|ROOM|LOT|#)\b.*$|\s+#.*$/;
 // Tokens in caption names that are never a surname.
 const NAME_STOPWORDS = new Set([
   'THE', 'AND', 'ESTATE', 'OF', 'AS', 'ADMINISTRATOR', 'ADMINISTRATRIX', 'EXECUTOR', 'EXECUTRIX', 'HEIR', 'HEIRS',
@@ -102,7 +103,8 @@ async function matchParcelByAddress({ street, zip, defendant }) {
   // Street name spelled differently (e.g. "VALLEYVIEW"): retry on the first word, then let zip/owner narrow it.
   if (rows.length === 0 && parsed.name.includes(' ')) {
     const first = parsed.name.split(' ')[0];
-    if (first.length >= 4) rows = await queryParcels(`LOC_NO=${parsed.number} AND LOC_STR LIKE '${sqlEsc(first)}%'`);
+    // 3 letters is enough ("SAW MILL"): house number, zip and owner still narrow it down.
+    if (first.length >= 3) rows = await queryParcels(`LOC_NO=${parsed.number} AND LOC_STR LIKE '${sqlEsc(first)}%'`);
   }
   if (rows.length === 0) return null;
 
