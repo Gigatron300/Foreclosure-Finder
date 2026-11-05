@@ -325,8 +325,13 @@ app.use('/api/camden', (req, res, next) => {
   next();
 });
 
-// MontCo court-data upload and the court session stay with the site password.
-app.use(['/api/montco/session', '/api/pipeline/upload-csv', '/api/pipeline/csv-status'], (req, res, next) => {
+// MontCo court-data upload, the court session, scraping and data-maintenance actions
+// stay with the site password. (Prefix match: '/api/pipeline/scrape' also covers
+// /scrape/status and /scrape/stop.)
+app.use([
+  '/api/montco/session', '/api/pipeline/upload-csv', '/api/pipeline/csv-status',
+  '/api/pipeline/scrape', '/api/pipeline/clear', '/api/pipeline/match-parcels', '/api/pipeline/rescan-parcels'
+], (req, res, next) => {
   const token = req.headers['x-auth-token'];
   if (isOwner(token)) return next();
   if (tabsFor(token)) return res.status(403).json({ error: 'Court data is managed by the site owner' });
