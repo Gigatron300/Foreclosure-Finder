@@ -1193,7 +1193,7 @@
     </div>
 
     <script>
-        let authToken = localStorage.getItem('pipelineAuth');
+        let authToken = siteAuth.get();
         const PIPELINE_DEFAULT_STREETVIEW_MODE = 'open-only';
         const PIPELINE_LOADED_PHOTOS_KEY = 'pipelineLoadedPhotos';
         let streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
@@ -1645,7 +1645,7 @@
                 fetch('/api/pipeline', { headers: { 'X-Auth-Token': authToken } })
                     .then(r => {
                         if (r.status === 401) {
-                            localStorage.removeItem('pipelineAuth');
+                            siteAuth.clear();
                             document.getElementById('loginOverlay').style.display = 'flex';
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
@@ -1692,7 +1692,7 @@
                 if (data.success) {
                     // The server expects the password itself as the auth token
                     authToken = password;
-                    localStorage.setItem('pipelineAuth', authToken);
+                    siteAuth.set(authToken);
                     syncNavTabs(authToken).then(showCourtDataSections);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';

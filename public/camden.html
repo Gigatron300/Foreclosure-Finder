@@ -1162,7 +1162,7 @@
     </div>
 
     <script>
-        let authToken = localStorage.getItem('pipelineAuth');
+        let authToken = siteAuth.get();
         const CAMDEN_DEFAULT_STREETVIEW_MODE = 'open-only';
         let streetViewMode = CAMDEN_DEFAULT_STREETVIEW_MODE;
         let streetViewModeUnlocked = false;
@@ -1309,7 +1309,7 @@
                         if (r.status === 403) {
                             showCamdenNoAccess();
                         } else if (r.status === 401) {
-                            localStorage.removeItem('pipelineAuth');
+                            siteAuth.clear();
                             document.getElementById('loginOverlay').style.display = 'flex';
                         } else {
                             document.getElementById('loginOverlay').style.display = 'none';
@@ -1663,7 +1663,7 @@
             .then(data => {
                 if (data.success) {
                     authToken = password;
-                    localStorage.setItem('pipelineAuth', authToken);
+                    siteAuth.set(authToken);
                     syncNavTabs(authToken);
                     if (!(data.tabs || []).includes('camden')) {
                         showCamdenNoAccess();

@@ -1297,7 +1297,7 @@
         const API_BASE = window.location.origin;
         let allProperties = [];
         let filteredProperties = [];
-        let authToken = sessionStorage.getItem('authToken') || '';
+        let authToken = siteAuth.get();
         let scrapeCheckInterval = null;
         const streetViewCacheVersion = 'v2';
         const SHERIFF_LOADED_PHOTOS_KEY = 'sheriffLoadedPhotos';
@@ -1360,7 +1360,7 @@
                 
                 if (response.ok) {
                     authToken = password;
-                    sessionStorage.setItem('authToken', authToken);
+                    siteAuth.set(authToken);
                     showMainContent();
                     errorEl.classList.remove('show');
                     checkDataStatus();
@@ -1386,7 +1386,7 @@
         function showLogin() {
             document.getElementById('loginScreen').classList.remove('hidden');
             document.getElementById('mainContent').classList.remove('visible');
-            sessionStorage.removeItem('authToken');
+            siteAuth.clear();
             authToken = '';
         }
 
