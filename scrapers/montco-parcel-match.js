@@ -145,7 +145,19 @@ async function matchParcelByAddress({ street, zip, defendant }) {
  * defendant address (and its warning) but record the parcel and who owns it now.
  */
 function applyParcelMatch(c, match) {
-  if (!match) return null;
+  if (!match) {
+    // A re-run that no longer finds an address-only match drops it, so the card doesn't
+    // keep a parcel number nothing supports any more.
+    if (c.parcelMatch && c.parcelMatch.confidence === 'address') {
+      if (c.parcelNumber === c.parcelMatch.parcel) c.parcelNumber = '';
+      c.propertyOwner = '';
+      c.propertyMunicipality = '';
+      delete c.parcelMatch;
+    }
+    c.parcelMatchStatus = 'none';
+    return null;
+  }
+  c.parcelMatchStatus = match.confidence;
   c.parcelMatch = {
     parcel: match.parcel,
     confidence: match.confidence,

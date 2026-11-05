@@ -1330,7 +1330,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         if (!c.parcelNumber && c.propertyAddress) {
           try {
             applyParcelMatch(c, await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant }));
-          } catch (e) { /* parcel layer unreachable: keep the defendant address */ }
+          } catch (e) { c.parcelMatchStatus = 'error'; /* parcel layer unreachable: keep the defendant address */ }
         }
       }
       c.remarks = data.remarks || '';
@@ -1375,6 +1375,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         propertyMunicipality: c.propertyMunicipality || '',
         addressSource: c.addressSource || '',
         parcelMatch: c.parcelMatch || null,
+        parcelMatchStatus: c.parcelMatchStatus || '',
         remarks: c.remarks || '',
         mortgageBook: c.mortgageBook || '',
         mortgagePage: c.mortgagePage || '',

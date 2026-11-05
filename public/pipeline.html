@@ -600,6 +600,36 @@
             margin-bottom: 5px;
             color: var(--ink);
         }
+        /* Click the address to copy it (same behavior as Camden). */
+        .property-address.copyable { cursor: pointer; }
+        .property-address.copyable:hover { text-decoration: underline dotted var(--brand-gold); }
+        .property-address.copy-done::after,
+        .property-address.copy-failed::after {
+            content: 'Copied';
+            margin-left: 8px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            vertical-align: middle;
+            white-space: nowrap;
+            border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+            background: var(--success-tint);
+            color: var(--success);
+        }
+        .property-address.copy-failed::after {
+            content: 'Copy failed';
+            border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+            background: var(--danger-tint);
+            color: var(--danger);
+        }
+        .zillow-link {
+            background: #006AFF; color: #fff !important;
+            padding: 6px 12px; border-radius: 6px; font-size: 0.8rem;
+            text-decoration: none !important;
+        }
+        .zillow-link:hover { background: #0057D9; }
         .property-location {
             color: var(--ink-2);
             font-size: 0.85rem;
@@ -1118,6 +1148,14 @@
                 <option value="mortgage">Mortgages</option>
                 <option value="lien">Liens</option>
                 <option value="other">Other</option>
+            </select>
+
+            <select id="parcelMatchFilter" onchange="loadData()" title="Results of Find Mortgage Parcels, for cases with no parcel number in the court CSV">
+                <option value="all">All Parcel Matches</option>
+                <option value="owner">Owner-confirmed</option>
+                <option value="address">Address-only</option>
+                <option value="none">No match</option>
+                <option value="error">Errors</option>
             </select>
 
             <div class="filter-dropdown-group" style="min-width: 200px;">
@@ -1908,6 +1946,13 @@
                     cases = cases.filter(c => (c.caseTypeKind || 'other') === typeFilter);
                 }
 
+                // Filter by Find Mortgage Parcels result (counts come from the unfiltered data)
+                updateParcelMatchFilterCounts(data.cases || []);
+                const parcelMatchFilter = document.getElementById('parcelMatchFilter').value;
+                if (parcelMatchFilter && parcelMatchFilter !== 'all') {
+                    cases = cases.filter(c => parcelMatchCategory(c) === parcelMatchFilter);
+                }
+
                 // Filter sweet spot only if enabled
                 if (sweetSpotOnly) {
                     cases = cases.filter(c => c.inSweetSpot);
@@ -2007,6 +2052,8 @@
             // Build Street View URL
             const fullAddress = `${address}, ${city}, ${state} ${zip}`;
             const encodedAddress = encodeURIComponent(fullAddress);
+            // What clicking the address copies: exactly what the card shows.
+            const copyText = [address, city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
             
             // Google Street View Static API URL
             const canLoadStreetView = c.propertyAddress && authToken;
@@ -2099,7 +2146,7 @@
                     </div>
                     <div class="property-info">
                         <div class="address-row">
-                            <div class="property-address">${address}</div>
+                            <div class="property-address${c.propertyAddress ? ' copyable' : ''}"${c.propertyAddress ? ` data-copy="${escapeAttr(copyText)}" title="Click to copy: ${escapeAttr(copyText)}" onclick="copyAddressFromCard(this)"` : ''}>${address}</div>
                             ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV">CLOSED NOW</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
@@ -2201,7 +2248,10 @@
                         
                         <div class="property-footer">
                             <a href="${c.detailUrl}" target="_blank">Court Record -></a>
-                            ${c.propertyAddress ? `<a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>` : ''}
+                            ${c.propertyAddress ? `<span style="display:flex;gap:8px;">
+                                <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
+                                <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" class="zillow-link">Zillow</a>
+                            </span>` : ''}
                         </div>
                     </div>
                     ${stackSectionHtml}
@@ -2464,6 +2514,65 @@
         }
 
         function exportCSV() { window.open('/api/pipeline/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
+
+        // Find Mortgage Parcels result for a case: 'owner' | 'address' | 'none' | 'error',
+        // or '' when it was never checked (it had a CSV parcel number, or hasn't been run yet).
+        function parcelMatchCategory(c) {
+            if (c.parcelMatchStatus) return c.parcelMatchStatus;
+            if (c.addressSource === 'parcel-match') return 'owner';
+            if (c.parcelMatch && c.parcelMatch.confidence === 'address') return 'address';
+            return '';
+        }
+
+        const PARCEL_MATCH_LABELS = { all: 'All Parcel Matches', owner: 'Owner-confirmed', address: 'Address-only', none: 'No match', error: 'Errors' };
+        function updateParcelMatchFilterCounts(allCases) {
+            const counts = { owner: 0, address: 0, none: 0, error: 0 };
+            for (const c of allCases) {
+                const k = parcelMatchCategory(c);
+                if (k in counts) counts[k]++;
+            }
+            for (const opt of document.getElementById('parcelMatchFilter').options) {
+                opt.textContent = opt.value === 'all'
+                    ? PARCEL_MATCH_LABELS.all
+                    : `${PARCEL_MATCH_LABELS[opt.value]} (${counts[opt.value] || 0})`;
+            }
+        }
+
+        // Clicking a card's address copies it. The async clipboard API needs a secure
+        // context and can be blocked, so a hidden-textarea fallback covers those cases.
+        async function copyTextToClipboard(text) {
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                }
+            } catch (e) { /* blocked or unavailable - try the legacy path */ }
+            try {
+                const scratch = document.createElement('textarea');
+                scratch.value = text;
+                scratch.setAttribute('readonly', '');
+                scratch.style.position = 'fixed';
+                scratch.style.top = '-1000px';
+                scratch.style.opacity = '0';
+                document.body.appendChild(scratch);
+                scratch.select();
+                const ok = document.execCommand('copy');
+                document.body.removeChild(scratch);
+                return ok;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function copyAddressFromCard(el) {
+            const text = el.dataset.copy || '';
+            if (!text) return;
+            const ok = await copyTextToClipboard(text);
+            el.classList.remove('copy-done', 'copy-failed');
+            el.classList.add(ok ? 'copy-done' : 'copy-failed');
+            clearTimeout(el._copyTimer);
+            el._copyTimer = setTimeout(() => el.classList.remove('copy-done', 'copy-failed'), 1500);
+        }
 
         function escapeAttr(s) {
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

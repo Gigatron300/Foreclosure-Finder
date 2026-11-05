@@ -1104,6 +1104,8 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
             else if (applied === 'address') lastParcelMatchStatus.addressOnly++;
             else lastParcelMatchStatus.unmatched++;
           } catch (e) {
+            // Leave any earlier match in place; only the status says this check failed.
+            c.parcelMatchStatus = 'error';
             lastParcelMatchStatus.errors++;
           }
           lastParcelMatchStatus.processed++;
