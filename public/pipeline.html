@@ -438,6 +438,8 @@
         .address-warning-flag.defendant-source { border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); background: var(--warning-tint); color: var(--warning); }
         .out-of-county .address-warning-dot { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent); }
         .defendant-source .address-warning-dot { background: var(--warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 18%, transparent); }
+        .address-warning-flag.parcel-matched { border: 1px solid color-mix(in srgb, var(--success) 35%, transparent); background: var(--success-tint); color: var(--success); }
+        .parcel-matched .address-warning-dot { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 18%, transparent); }
         .closed-flag {
             display: inline-flex; align-items: center; gap: 4px;
             background: var(--danger); color: var(--on-solid);
@@ -1094,6 +1096,7 @@
             <button class="btn btn-outline filter-danger" onclick="stopScrape()" id="stopScrapeBtn" style="display:none;" title="Finish the cases in progress, save progress, and stop. The next Process All picks up where this left off.">Stop</button>
             <button class="btn btn-outline filter-danger" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline filter-danger" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
+            <button class="btn btn-outline" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="For cases with no parcel number (mortgage foreclosures), look up the defendant's address on the county parcel map. If the parcel's owner is the defendant, the card switches to that parcel. Uses cases already scraped -- no court scrape.">Find Mortgage Parcels</button>
             <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
@@ -2101,7 +2104,8 @@
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
-                            ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="Address came from the defendant's mailing address (parcel lookup ${c.addressSource === 'defendant-fallback' ? 'failed' : 'unavailable'}) — may not be the actual property"><span class="address-warning-dot"></span>Defendant Addr</span>` : ''}
+                            ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>Defendant Addr</span>` : ''}
+                            ${c.addressSource === 'parcel-match' ? `<span class="address-warning-flag parcel-matched" title="${escapeAttr(`Defendant address matched parcel ${c.parcelNumber} owned by ${(c.parcelMatch && c.parcelMatch.owner) || 'the defendant'}${c.propertyMunicipality ? ' (' + c.propertyMunicipality + ')' : ''}`)}"><span class="address-warning-dot"></span>Parcel Matched</span>` : ''}
                         </div>
                         <div class="property-location">${location}</div>
                         
@@ -2126,6 +2130,11 @@
                                 <div class="detail-label">Plaintiff</div>
                                 <div class="detail-value">${truncate(c.plaintiff, 20) || 'N/A'}</div>
                             </div>
+                            ${c.mortgageBook && c.addressSource !== 'parcel-match' && !(c.parcelNumber && !c.parcelMatch) ? `
+                            <div class="detail-item" title="Recorded mortgage (from the case Remarks). Look up this book/page at the Recorder of Deeds to find the parcel.">
+                                <div class="detail-label">Mortgage</div>
+                                <div class="detail-value">Bk ${c.mortgageBook} / Pg ${c.mortgagePage}</div>
+                            </div>` : ''}
                         </div>
                         
                         <!-- Score Breakdown Dropdown -->
@@ -2288,7 +2297,7 @@
                 }
                 
                 if (response.status === 429) {
-                    alert('Processing already in progress. Please wait.');
+                    alert(result.error || 'Processing already in progress. Please wait.');
                     btn.disabled = false;
                     testBtn.disabled = false;
                     btn.innerHTML = 'Process All';
@@ -2455,6 +2464,65 @@
         }
 
         function exportCSV() { window.open('/api/pipeline/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
+
+        function escapeAttr(s) {
+            return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        }
+
+        function defendantAddrTooltip(c) {
+            let t = `Address came from the defendant's mailing address (parcel lookup ${c.addressSource === 'defendant-fallback' ? 'failed' : 'unavailable'}) — may not be the actual property`;
+            if (c.parcelMatch && c.parcelMatch.confidence === 'address') {
+                t += `. This address is parcel ${c.parcelMatch.parcel}, but it's owned by ${c.parcelMatch.owner || 'someone else'}, not the defendant (sold, or held in another name).`;
+            }
+            if (c.mortgageBook) t += ` Mortgage Bk ${c.mortgageBook} / Pg ${c.mortgagePage}.`;
+            return t;
+        }
+
+        async function matchMortgageParcels() {
+            const btn = document.getElementById('matchParcelsBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Starting...';
+            try {
+                const startResp = await fetch('/api/pipeline/match-parcels', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' }
+                });
+                const startResult = await startResp.json();
+                if (!startResp.ok) throw new Error(startResult.error || 'Matching failed to start');
+                if (startResult.done) {
+                    alert(startResult.message || 'Nothing to match.');
+                    return;
+                }
+
+                const total = startResult.status.total;
+                while (true) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const statusResp = await fetch('/api/pipeline/match-parcels/status', { headers: { 'X-Auth-Token': authToken } });
+                    const statusResult = await statusResp.json();
+                    const s = statusResult.status;
+                    if (s) btn.innerHTML = `Matching ${s.processed || 0}/${total}...`;
+                    if (!statusResult.inProgress) {
+                        if (s && s.status === 'completed') {
+                            alert(`Checked ${total} case(s) without a parcel number:\n` +
+                                `  Parcel matched (owner is the defendant): ${s.matched}\n` +
+                                `  Address is a parcel, different owner: ${s.addressOnly}\n` +
+                                `  No parcel at that address: ${s.unmatched}` +
+                                (s.errors ? `\n  Couldn't check (parcel map error): ${s.errors}` : ''));
+                            await loadData();
+                        } else {
+                            alert('Matching failed: ' + ((s && s.error) || 'unknown error'));
+                        }
+                        break;
+                    }
+                }
+            } catch (error) {
+                alert('Matching failed: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
 
         async function rescanLienParcels() {
             const btn = document.getElementById('rescanBtn');

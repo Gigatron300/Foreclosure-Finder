@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { fetchParcelAddress } = require('./scrapers/montco-courts');
+const { matchParcelByAddress, applyParcelMatch } = require('./scrapers/montco-parcel-match');
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
 const { containsWholeWords, shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
@@ -829,6 +830,9 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
   if (isPipelineScrapingInProgress) {
     return res.status(429).json({ error: 'Pipeline scrape already in progress', status: lastPipelineScrapeStatus });
   }
+  if (isParcelMatchInProgress) {
+    return res.status(429).json({ error: 'Parcel matching is running; try again when it finishes.' });
+  }
   
   // Check if CSV exists
   try {
@@ -1045,6 +1049,87 @@ app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
 
 app.get('/api/pipeline/rescan-parcels/status', checkAuth, (req, res) => {
   res.json({ inProgress: isRescanInProgress, status: lastRescanStatus });
+});
+
+// Find parcels for cases with no parcel number (mortgage foreclosures) by matching the
+// defendant address on the county parcel layer. Runs over already-scraped cases; no court scrape.
+let isParcelMatchInProgress = false;
+let lastParcelMatchStatus = null;
+
+app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
+  if (isParcelMatchInProgress) {
+    return res.status(429).json({ error: 'Parcel matching is already running.', status: lastParcelMatchStatus });
+  }
+  if (isPipelineScrapingInProgress || isRescanInProgress) {
+    return res.status(429).json({ error: 'A scrape or re-scan is running; try again when it finishes.' });
+  }
+
+  let pipeline;
+  try {
+    pipeline = JSON.parse(await fs.readFile(PIPELINE_DATA_FILE, 'utf8'));
+  } catch (e) {
+    return res.status(404).json({ error: 'No pipeline data found.' });
+  }
+
+  // No CSV parcel number, or one we matched before (re-run picks up layer updates).
+  // Only defendant-sourced addresses: a parcel-sourced address needs no matching.
+  const targets = (pipeline.cases || []).filter(c =>
+    c.propertyAddress &&
+    (!c.parcelNumber || c.parcelMatch) &&
+    (c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback' || c.addressSource === 'parcel-match')
+  );
+
+  if (targets.length === 0) {
+    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, errors: 0, completed: new Date().toISOString() };
+    return res.json({ done: true, message: 'No cases without a parcel number to match.', status: lastParcelMatchStatus });
+  }
+
+  isParcelMatchInProgress = true;
+  lastParcelMatchStatus = {
+    status: 'running', started: new Date().toISOString(),
+    total: targets.length, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, errors: 0
+  };
+  res.json({ done: false, message: `Matching ${targets.length} cases`, status: lastParcelMatchStatus });
+
+  (async () => {
+    try {
+      const CONCURRENCY = 5;
+      for (let i = 0; i < targets.length; i += CONCURRENCY) {
+        await Promise.all(targets.slice(i, i + CONCURRENCY).map(async (c) => {
+          // On a re-run, a parcel-match case's address is already the parcel's own, which matches itself.
+          try {
+            const match = await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant });
+            const applied = applyParcelMatch(c, match);
+            if (applied === 'owner') lastParcelMatchStatus.matched++;
+            else if (applied === 'address') lastParcelMatchStatus.addressOnly++;
+            else lastParcelMatchStatus.unmatched++;
+          } catch (e) {
+            lastParcelMatchStatus.errors++;
+          }
+          lastParcelMatchStatus.processed++;
+        }));
+      }
+
+      pipeline.lastUpdated = new Date().toISOString();
+      await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
+
+      lastParcelMatchStatus.status = 'completed';
+      lastParcelMatchStatus.completed = new Date().toISOString();
+      const s = lastParcelMatchStatus;
+      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.unmatched} no match, ${s.errors} errors`);
+    } catch (error) {
+      lastParcelMatchStatus.status = 'error';
+      lastParcelMatchStatus.error = error.message;
+      lastParcelMatchStatus.completed = new Date().toISOString();
+      console.error('[match-parcels] error:', error);
+    } finally {
+      isParcelMatchInProgress = false;
+    }
+  })();
+});
+
+app.get('/api/pipeline/match-parcels/status', checkAuth, (req, res) => {
+  res.json({ inProgress: isParcelMatchInProgress, status: lastParcelMatchStatus });
 });
 
 app.get('/api/pipeline/export/csv', async (req, res) => {

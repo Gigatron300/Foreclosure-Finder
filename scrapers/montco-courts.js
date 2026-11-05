@@ -4,6 +4,7 @@ const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const { matchParcelByAddress, applyParcelMatch, parseMortgageBookPage } = require('./montco-parcel-match');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1124,7 +1125,10 @@ async function scrapeMontgomeryCourts(options = {}) {
           const rc = summaryRows[ri].querySelectorAll('td, th');
           if (rc.length === 2) {
             const label = (rc[0].textContent || '').trim().replace(/:$/, '').toLowerCase();
-            if (label === 'status') { result.liveStatus = (rc[1].textContent || '').trim(); break; }
+            if (label === 'status' && !result.liveStatus) result.liveStatus = (rc[1].textContent || '').trim();
+            // Mortgage cases put the recorded mortgage here: "MORTGAGE BK# 11527 PAGE 1951"
+            if (label === 'remarks' && !result.remarks) result.remarks = (rc[1].textContent || '').trim();
+            if (result.liveStatus && result.remarks) break;
           }
         }
 
@@ -1320,7 +1324,19 @@ async function scrapeMontgomeryCourts(options = {}) {
         c.propertyOwner = '';
         c.propertyMunicipality = '';
         c.addressSource = c.parcelNumber ? 'defendant-fallback' : 'defendant';
+
+        // No parcel number from the CSV (mortgage foreclosures): look the defendant
+        // address up on the parcel layer and confirm the owner is the defendant.
+        if (!c.parcelNumber && c.propertyAddress) {
+          try {
+            applyParcelMatch(c, await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant }));
+          } catch (e) { /* parcel layer unreachable: keep the defendant address */ }
+        }
       }
+      c.remarks = data.remarks || '';
+      const bookPage = parseMortgageBookPage(c.remarks);
+      c.mortgageBook = bookPage ? bookPage.book : '';
+      c.mortgagePage = bookPage ? bookPage.page : '';
       c.detailUrl = currentUrl;
       c.judgmentAmount = data.judgmentAmount != null ? data.judgmentAmount : null;
 
@@ -1358,6 +1374,10 @@ async function scrapeMontgomeryCourts(options = {}) {
         propertyOwner: c.propertyOwner || '',
         propertyMunicipality: c.propertyMunicipality || '',
         addressSource: c.addressSource || '',
+        parcelMatch: c.parcelMatch || null,
+        remarks: c.remarks || '',
+        mortgageBook: c.mortgageBook || '',
+        mortgagePage: c.mortgagePage || '',
         inMontgomeryCounty: c.inMontgomeryCounty,
         hasJudgement: c.hasJudgement,
         status: c.status,
@@ -1448,12 +1468,13 @@ async function scrapeMontgomeryCourts(options = {}) {
   const withAddr = results.filter(r => r.propertyAddress).length;
   const inMontCo = results.filter(r => r.inMontgomeryCounty).length;
   const fromParcel = results.filter(r => r.addressSource === 'parcel').length;
+  const fromParcelMatch = results.filter(r => r.addressSource === 'parcel-match').length;
   const fromDefendant = results.filter(r => r.addressSource === 'defendant' || r.addressSource === 'defendant-fallback').length;
   const closedNow = results.filter(r => r.liveClosed).length;
 
   console.log(`\n✅ Done: ${results.length} cases`);
   console.log(`   ${withAddr} with addresses (${inMontCo} in Montgomery County)`);
-  console.log(`   Address source: ${fromParcel} from parcel API, ${fromDefendant} from defendant addr`);
+  console.log(`   Address source: ${fromParcel} from parcel API, ${fromParcelMatch} matched by defendant address, ${fromDefendant} from defendant addr`);
   if (closedNow > 0) console.log(`   🔴 ${closedNow} case(s) now show CLOSED on the court page (were OPEN in the CSV)`);
   console.log(`   Grades: A=${grades.A} B=${grades.B} C=${grades.C} D=${grades.D} F=${grades.F}`);
   if (authGateHits > 0) {
