@@ -755,7 +755,9 @@ function resolveCaseTypeCode(codes, csvCaseType) {
 const MONTCO_RESULT_CAP = 1000;
 
 // Group CSV cases by (year-month, exact CaseType from CSV), then harvest each bucket.
-async function harvestUrlCacheFromCSV(browser, cases, session) {
+const HARVEST_MAX_CONSECUTIVE_FAILURES = 3;
+
+async function harvestUrlCacheFromCSV(browser, cases, session, shouldStop = () => false) {
   const codes = await discoverCaseTypeCodes(browser, session);
   if (Object.keys(codes).length === 0) {
     console.log('   ⚠️ Could not discover CaseType codes; skipping harvest');
@@ -781,7 +783,9 @@ async function harvestUrlCacheFromCSV(browser, cases, session) {
   const merged = new Map();
   const unresolved = new Set();
   const cappedBuckets = [];
+  let consecutiveFailures = 0;
   for (const [key, csvCount] of groups) {
+    if (shouldStop()) break;
     const sep = key.indexOf('|');
     const ym = key.slice(0, sep); // "2026-04"
     const caseType = key.slice(sep + 1);
@@ -810,8 +814,15 @@ async function harvestUrlCacheFromCSV(browser, cases, session) {
       if (m.size >= MONTCO_RESULT_CAP) {
         cappedBuckets.push(`${caseType} ${ym} (${m.size} hits)`);
       }
+      consecutiveFailures = 0;
     } catch (err) {
       console.log(`   harvest failed for "${caseType}" ${ym}: ${(err.message || '').slice(0, 80)}`);
+      // Each failure costs a 30s timeout; when the search page is down, 100+ buckets
+      // would burn the better part of an hour. Give up and let per-case search handle it.
+      if (++consecutiveFailures >= HARVEST_MAX_CONSECUTIVE_FAILURES) {
+        console.log(`   ⚠️ ${consecutiveFailures} harvest failures in a row — skipping the rest of the harvest (per-case search will cover those cases)`);
+        break;
+      }
     }
   }
   if (unresolved.size > 0) {
@@ -828,6 +839,8 @@ async function scrapeMontgomeryCourts(options = {}) {
   const testMode = options.testMode || false;
   const urlCache = options.urlCache || {};
   const enableHarvest = options.enableHarvest !== false;
+  // Polled between cases; when true, workers finish their current case and the run stops.
+  const shouldStop = typeof options.shouldStop === 'function' ? options.shouldStop : () => false;
 
   // Session cookies clear the Cloudflare/Turnstile gate. Prefer an explicit
   // option, fall back to the saved session file on disk.
@@ -884,7 +897,7 @@ async function scrapeMontgomeryCourts(options = {}) {
     if (uncached.length >= 50) {
       const harvestBrowser = await launchBrowser();
       try {
-        const harvested = await harvestUrlCacheFromCSV(harvestBrowser, uncached, session);
+        const harvested = await harvestUrlCacheFromCSV(harvestBrowser, uncached, session, shouldStop);
         let added = 0;
         for (const [k, v] of harvested) {
           if (!urlCache[k]) { urlCache[k] = v; added++; }
@@ -960,6 +973,19 @@ async function scrapeMontgomeryCourts(options = {}) {
 
   let authGateHits = 0; // court pages redirected to the Cloudflare gate (session missing/expired)
 
+  // Save what we have so the next run resumes, then bail out without returning a partial list.
+  const stopRun = async () => {
+    if (!testMode) {
+      await saveCheckpoint(CONFIG.progressPath, { savedAt: new Date().toISOString(), csvSig, results, urlCache });
+    }
+    console.log(`   ⏹️ Stopped by user: ${results.length} cases scraped so far${testMode ? '' : ' (progress saved; next run resumes)'}`);
+    const err = new Error('Scrape stopped');
+    err.code = 'SCRAPE_STOPPED';
+    err.scrapedSoFar = results.length;
+    throw err;
+  };
+  if (shouldStop()) await stopRun();
+
   for (let chunkStart = 0; chunkStart < targets.length; chunkStart += restartEvery) {
     const chunkEnd = Math.min(chunkStart + restartEvery, targets.length);
     console.log(`   🔄 Browser restart (cases ${chunkStart + 1}-${chunkEnd})...`);
@@ -984,6 +1010,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         });
 
         while (true) {
+          if (shouldStop()) break;
           const i = nextIndex++;
           if (i >= chunkEnd) break;
           const c = targets[i];
@@ -1389,6 +1416,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         urlCache
       });
     }
+    if (shouldStop()) await stopRun();
     await delay(500);
   }
 

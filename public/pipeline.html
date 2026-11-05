@@ -1091,6 +1091,7 @@
         <div class="actions-bar">
             <button class="btn btn-secondary" onclick="refreshData(false)" id="refreshBtn">Process All</button>
             <button class="btn btn-secondary" onclick="refreshData(true)" id="testBtn">Test (10 only)</button>
+            <button class="btn btn-outline filter-danger" onclick="stopScrape()" id="stopScrapeBtn" style="display:none;" title="Finish the cases in progress, save progress, and stop. The next Process All picks up where this left off.">Stop</button>
             <button class="btn btn-outline filter-danger" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline filter-danger" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
             <button class="btn btn-outline" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
@@ -1606,7 +1607,7 @@
                             document.getElementById('loginOverlay').style.display = 'none';
                             document.getElementById('mainContent').style.display = 'block';
                             syncNavTabs(authToken).then(showCourtDataSections);
-                            initStreetViewModeControls().finally(() => loadData());
+                            initStreetViewModeControls().finally(() => { loadData(); resumeScrapeWatch(); });
                         }
                     });
             } else {
@@ -1651,7 +1652,7 @@
                     syncNavTabs(authToken).then(showCourtDataSections);
                     document.getElementById('loginOverlay').style.display = 'none';
                     document.getElementById('mainContent').style.display = 'block';
-                    initStreetViewModeControls().finally(() => loadData());
+                    initStreetViewModeControls().finally(() => { loadData(); resumeScrapeWatch(); });
                 } else {
                     document.getElementById('loginError').style.display = 'block';
                 }
@@ -2295,31 +2296,8 @@
                     return;
                 }
                 
-                // Poll for completion
-                const checkStatus = async () => {
-                    const statusRes = await fetch('/api/pipeline/scrape/status', { headers: { 'X-Auth-Token': authToken } });
-                    const status = await statusRes.json();
-                    
-                    if (status.inProgress) {
-                        setTimeout(checkStatus, 3000);
-                    } else {
-                        btn.disabled = false;
-                        testBtn.disabled = false;
-                        btn.innerHTML = 'Process All';
-                        testBtn.innerHTML = 'Test (10 only)';
-                        loadData();
-                        checkCsvStatus();
-                        
-                        if (status.lastStatus?.status === 'completed') {
-                            const modeText = status.lastStatus.testMode ? ' (TEST MODE)' : '';
-                            alert(`Done${modeText}! Found ${status.lastStatus.casesFound} properties (${status.lastStatus.withAddress || 0} with addresses).`);
-                        } else if (status.lastStatus?.error) {
-                            alert('Error: ' + status.lastStatus.error);
-                        }
-                    }
-                };
-                setTimeout(checkStatus, 3000);
-                
+                watchScrape(true);
+
             } catch (error) {
                 btn.disabled = false;
                 testBtn.disabled = false;
@@ -2327,6 +2305,96 @@
                 testBtn.innerHTML = 'Test (10 only)';
                 alert('Error: ' + error.message);
             }
+        }
+
+        // Poll a running scrape (started here, by the nightly schedule, or in another tab)
+        // and show the Stop button until it ends. `notify` controls the end-of-run alert.
+        let scrapeWatchActive = false;
+        function watchScrape(notify) {
+            if (scrapeWatchActive) return;
+            scrapeWatchActive = true;
+            const btn = document.getElementById('refreshBtn');
+            const testBtn = document.getElementById('testBtn');
+            const stopBtn = document.getElementById('stopScrapeBtn');
+            btn.disabled = true;
+            testBtn.disabled = true;
+            if (!/Processing|Testing/.test(btn.innerHTML + testBtn.innerHTML)) btn.innerHTML = 'Processing...';
+            stopBtn.style.display = '';
+
+            const checkStatus = async () => {
+                let status;
+                try {
+                    const statusRes = await fetch('/api/pipeline/scrape/status', { headers: { 'X-Auth-Token': authToken } });
+                    status = await statusRes.json();
+                } catch (e) {
+                    setTimeout(checkStatus, 5000);
+                    return;
+                }
+
+                if (status.inProgress) {
+                    if (status.stopRequested) {
+                        stopBtn.disabled = true;
+                        stopBtn.innerHTML = 'Stopping...';
+                    }
+                    setTimeout(checkStatus, 3000);
+                    return;
+                }
+
+                scrapeWatchActive = false;
+                btn.disabled = false;
+                testBtn.disabled = false;
+                btn.innerHTML = 'Process All';
+                testBtn.innerHTML = 'Test (10 only)';
+                stopBtn.style.display = 'none';
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = 'Stop';
+                loadData();
+                checkCsvStatus();
+
+                if (!notify) return;
+                const last = status.lastStatus || {};
+                if (last.status === 'completed') {
+                    const modeText = last.testMode ? ' (TEST MODE)' : '';
+                    alert(`Done${modeText}! Found ${last.casesFound} properties (${last.withAddress || 0} with addresses).`);
+                } else if (last.status === 'stopped') {
+                    alert(last.testMode
+                        ? 'Test scrape stopped.'
+                        : `Stopped. ${last.scrapedSoFar || 0} cases scraped so far are saved; Process All will pick up where this left off. The cards on this page are unchanged until a run finishes.`);
+                } else if (last.error) {
+                    alert('Error: ' + last.error);
+                }
+            };
+            setTimeout(checkStatus, 3000);
+        }
+
+        async function stopScrape() {
+            if (!confirm('Stop the scrape? Cases in progress will finish, then it stops. Progress is saved and the next Process All resumes from there.')) return;
+            const stopBtn = document.getElementById('stopScrapeBtn');
+            stopBtn.disabled = true;
+            stopBtn.innerHTML = 'Stopping...';
+            try {
+                const r = await fetch('/api/pipeline/scrape/stop', { method: 'POST', headers: { 'X-Auth-Token': authToken } });
+                const result = await r.json();
+                if (!result.stopping) {
+                    stopBtn.disabled = false;
+                    stopBtn.innerHTML = 'Stop';
+                    if (result.message) alert(result.message);
+                }
+            } catch (e) {
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = 'Stop';
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // On page load, pick up a scrape that's already running so Stop is available.
+        async function resumeScrapeWatch() {
+            try {
+                const r = await fetch('/api/pipeline/scrape/status', { headers: { 'X-Auth-Token': authToken } });
+                if (!r.ok) return;
+                const status = await r.json();
+                if (status.inProgress) watchScrape(false);
+            } catch (e) { /* not fatal */ }
         }
         
         function lockClearButton() {

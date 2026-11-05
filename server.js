@@ -822,6 +822,8 @@ app.post('/api/pipeline/clear', checkAuth, async (req, res) => {
 
 let isPipelineScrapingInProgress = false;
 let lastPipelineScrapeStatus = null;
+let pipelineStopRequested = false; // set by the Stop button; polled by the scraper between cases
+const pipelineShouldStop = () => pipelineStopRequested;
 
 app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
   if (isPipelineScrapingInProgress) {
@@ -841,6 +843,7 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
   const testMode = req.body.testMode === true;
   
   isPipelineScrapingInProgress = true;
+  pipelineStopRequested = false;
   lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', testMode };
   res.json({ message: testMode ? 'Test scrape started (10 cases)' : 'Pipeline scrape started', status: lastPipelineScrapeStatus });
   
@@ -848,7 +851,8 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
     const options = {
       enableEnrichment: req.body.enableEnrichment !== false,
       maxCasesToEnrich: req.body.maxCasesToEnrich || 25,
-      testMode: testMode
+      testMode: testMode,
+      shouldStop: pipelineShouldStop
     };
     const cases = await runPipelineScraper(options);
     const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
@@ -856,14 +860,28 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
     cases.forEach(c => grades[c.leadGrade || 'C']++);
     lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'completed', casesFound: cases.length, withAddress, grades, testMode };
   } catch (error) {
-    lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'error', error: error.message };
+    lastPipelineScrapeStatus = error.code === 'SCRAPE_STOPPED'
+      ? { completed: new Date().toISOString(), status: 'stopped', scrapedSoFar: error.scrapedSoFar || 0, testMode }
+      : { completed: new Date().toISOString(), status: 'error', error: error.message };
   } finally {
     isPipelineScrapingInProgress = false;
+    pipelineStopRequested = false;
   }
 });
 
+// Stop a running MontCo scrape. Workers finish the case they're on, progress is
+// checkpointed, and the existing pipeline data is left untouched.
+app.post('/api/pipeline/scrape/stop', checkAuth, (req, res) => {
+  if (!isPipelineScrapingInProgress) {
+    return res.json({ stopping: false, message: 'No scrape is running.' });
+  }
+  pipelineStopRequested = true;
+  console.log('⏹️ Stop requested for MontCo scrape');
+  res.json({ stopping: true });
+});
+
 app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
-  res.json({ inProgress: isPipelineScrapingInProgress, lastStatus: lastPipelineScrapeStatus });
+  res.json({ inProgress: isPipelineScrapingInProgress, stopRequested: pipelineStopRequested, lastStatus: lastPipelineScrapeStatus });
 });
 
 // ---- Montco court session (Cloudflare/Turnstile gate) ----
@@ -2014,10 +2032,11 @@ function scheduleNightlyPipelineScrape() {
       }
       
       isPipelineScrapingInProgress = true;
+      pipelineStopRequested = false;
       lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', scheduled: true };
       
       try {
-        const cases = await runPipelineScraper({ enableEnrichment: false });
+        const cases = await runPipelineScraper({ enableEnrichment: false, shouldStop: pipelineShouldStop });
         const grades = { A: 0, B: 0, C: 0, D: 0, F: 0 };
         const withAddress = cases.filter(c => c.propertyAddress).length;
         cases.forEach(c => grades[c.leadGrade || 'C']++);
@@ -2031,15 +2050,21 @@ function scheduleNightlyPipelineScrape() {
         };
         console.log(`   ✅ Scheduled scrape complete: ${cases.length} cases (${withAddress} with addresses)`);
       } catch (error) {
-        lastPipelineScrapeStatus = { 
-          completed: new Date().toISOString(), 
-          status: 'error', 
-          error: error.message,
-          scheduled: true 
-        };
-        console.log(`   ❌ Scheduled scrape error: ${error.message}`);
+        if (error.code === 'SCRAPE_STOPPED') {
+          lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'stopped', scrapedSoFar: error.scrapedSoFar || 0, scheduled: true };
+          console.log('   ⏹️ Scheduled scrape stopped by user');
+        } else {
+          lastPipelineScrapeStatus = {
+            completed: new Date().toISOString(),
+            status: 'error',
+            error: error.message,
+            scheduled: true
+          };
+          console.log(`   ❌ Scheduled scrape error: ${error.message}`);
+        }
       } finally {
         isPipelineScrapingInProgress = false;
+        pipelineStopRequested = false;
       }
       
       // Schedule the next one

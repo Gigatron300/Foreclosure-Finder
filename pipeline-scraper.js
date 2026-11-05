@@ -53,7 +53,7 @@ async function runPipelineScraper(options = {}) {
 
   try {
     // Scrape Montgomery County Courts
-    const montcoCases = await scrapeMontgomeryCourts({ testMode: config.testMode, urlCache });
+    const montcoCases = await scrapeMontgomeryCourts({ testMode: config.testMode, urlCache, shouldStop: config.shouldStop });
     allCases.push(...montcoCases);
     
     // Property enrichment for top leads
@@ -80,6 +80,8 @@ async function runPipelineScraper(options = {}) {
     // Can add more court sources here in the future
     
   } catch (error) {
+    // A user stop must not fall through and overwrite pipeline.json with a partial list.
+    if (error && error.code === 'SCRAPE_STOPPED') throw error;
     console.error('Scraper error:', error);
   }
   
