@@ -60,7 +60,11 @@ function parcelKey(raw) {
 }
 
 async function launch() {
-  const opts = { headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] };
+  const opts = {
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+      '--disable-extensions', '--js-flags=--max-old-space-size=256']
+  };
   if (process.env.CHROME_PATH) opts.executablePath = process.env.CHROME_PATH;
   return puppeteer.launch(opts);
 }
@@ -82,11 +86,12 @@ async function waitForFrame(page, name, urlTest, timeout = 30000) {
 
 async function login(page) {
   const { user, pass } = credentials();
-  await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForSelector('form[name="loginform"] input[name="username"]', { timeout: 30000 });
   await page.type('form[name="loginform"] input[name="username"]', user);
   await page.type('form[name="loginform"] input[name="password"]', pass);
   await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {}),
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
     page.evaluate(() => document.loginform.submit())
   ]);
   await delay(1500);
@@ -121,7 +126,7 @@ async function searchParcel(page, rawParcel) {
   if (!parcel) throw new Error(`Bad parcel number: ${rawParcel}`);
 
   const body = frameNamed(page, 'bodyframe');
-  await body.goto(SEARCH_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+  await body.goto(SEARCH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const criteria = await waitForFrame(page, 'criteriaframe', (u) => /dynCriteria/.test(u));
   const dyn = await waitForFrame(page, 'dynSearchFrame', (u) => /searchCriteria/.test(u));
   await criteria.waitForFunction(() => window.$ && $('#PARCELNUM').length && typeof executeSearch === 'function', { timeout: 20000 });
@@ -209,21 +214,27 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
     browser = await launch();
     page = await browser.newPage();
     await page.setViewport({ width: 1400, height: 1000 });
+    const t = Date.now();
     await login(page);
+    console.log(`   📚 Recorder login ok (${Math.round((Date.now() - t) / 1000)}s)`);
     sinceLogin = 0;
   };
 
+  console.log(`   📚 Recorder: ${todo.length} parcel(s) to look up`);
   try {
     await open();
     for (const p of todo) {
       if (shouldStop()) break;
       if (sinceLogin >= CONFIG.relogEvery) await open();
+      const t0 = Date.now();
       try {
         const r = await searchParcel(page, p.raw);
+        console.log(`   📚 ${r.parcel}: ${r.total ?? 0} documents (${Math.round((Date.now() - t0) / 1000)}s) [${result.checked + result.failed + 1}/${todo.length}]`);
         cache[p.key] = { parcel: r.parcel, fetchedAt: new Date().toISOString(), total: r.total, truncated: r.truncated, text: r.text };
         result.checked++;
       } catch (e) {
         result.failed++;
+        console.log(`   📚 ${p.raw}: FAILED after ${Math.round((Date.now() - t0) / 1000)}s: ${e.message}`);
         cache[p.key] = { ...(cache[p.key] || {}), lastError: e.message, lastErrorAt: new Date().toISOString() };
         // A broken session fails every later search; start a fresh one.
         try { await open(); } catch (e2) { throw e2; }
@@ -296,7 +307,7 @@ if (require.main === module) {
       try {
         const page = await browser.newPage();
         await login(page);
-        await frameNamed(page, 'bodyframe').goto(SEARCH_URL, { waitUntil: 'networkidle2' });
+        await frameNamed(page, 'bodyframe').goto(SEARCH_URL, { waitUntil: 'domcontentloaded' });
         await delay(4000);
         await fs.writeFile(path.join(dir, 'search.txt'), await describeFrames(page));
         console.log('Wrote', dir);
