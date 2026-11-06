@@ -1770,6 +1770,45 @@
             if (c) Object.assign(c, patch);
         }
 
+        // Notes and tags are saved on the server, so a tab that loads later sees them. This keeps
+        // tabs that are already open in sync: Camden and Camden Track (or two of either) in this
+        // browser tell each other about each saved edit and update the card in place.
+        const caseEditChannel = (typeof BroadcastChannel === 'function') ? new BroadcastChannel('camden-case-edits') : null;
+
+        function applySavedEdit(instrumentNumber, patch) {
+            patchCachedCase(instrumentNumber, patch);
+            if (caseEditChannel) {
+                try { caseEditChannel.postMessage({ instrumentNumber, patch }); } catch (e) { /* not fatal */ }
+            }
+        }
+
+        if (caseEditChannel) {
+            caseEditChannel.onmessage = (event) => {
+                const { instrumentNumber, patch } = event.data || {};
+                if (!instrumentNumber || !patch) return;
+                const before = camdenDataCache && Array.isArray(camdenDataCache.cases)
+                    ? camdenDataCache.cases.find(x => x.instrumentNumber === instrumentNumber)
+                    : null;
+                const wasTracked = !!(before && (before.userTags || []).includes('TRACK'));
+                patchCachedCase(instrumentNumber, patch);
+
+                if (Array.isArray(patch.userTags)) {
+                    const nowTracked = patch.userTags.includes('TRACK');
+                    // The card list itself changes: a card joins/leaves Camden Track, or a tag filter is on.
+                    if ((TRACK_VIEW && wasTracked !== nowTracked) || getSelectedCheckboxValues('tagFilterOptions').length) {
+                        loadData(false);
+                    } else {
+                        renderTagPills(instrumentNumber, patch.userTags);
+                    }
+                }
+                if (typeof patch.userNotes === 'string') {
+                    const box = document.querySelector(`textarea[data-notes-for="${instrumentNumber}"]`);
+                    // Don't overwrite a note someone is typing in this tab.
+                    if (box && document.activeElement !== box) box.value = patch.userNotes;
+                }
+            };
+        }
+
         async function fetchCamdenData(forceRefresh = false) {
             if (!forceRefresh && camdenDataCache) return camdenDataCache;
             if (!forceRefresh && camdenDataCachePromise) return camdenDataCachePromise;
@@ -2609,7 +2648,7 @@
 
                         <div style="margin-top:10px;">
                             <textarea class="notes-area" placeholder="Add notes..."
-                                onblur="saveNotes('${c.instrumentNumber}', this.value)">${(c.userNotes || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
+                                data-notes-for="${c.instrumentNumber}" onblur="saveNotes('${c.instrumentNumber}', this.value)">${(c.userNotes || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
                         </div>
 
                         <div class="property-footer">
@@ -2888,7 +2927,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
                 else {
-                    patchCachedCase(instrumentNumber, { userTags: newTags });
+                    applySavedEdit(instrumentNumber, { userTags: newTags });
                     if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
                 }
             } catch (e) {
@@ -2911,7 +2950,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 const result = await r.json();
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
                 else {
-                    patchCachedCase(instrumentNumber, { userTags: newTags });
+                    applySavedEdit(instrumentNumber, { userTags: newTags });
                     if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
                 }
             } catch (e) {
@@ -2932,7 +2971,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                     alert('Error saving notes: ' + (result.error || 'Unknown error'));
                     return;
                 }
-                patchCachedCase(instrumentNumber, { userNotes: notes });
+                applySavedEdit(instrumentNumber, { userNotes: notes });
             } catch (e) {
                 console.error('Error saving notes:', e);
                 alert('Error saving notes: ' + e.message);
