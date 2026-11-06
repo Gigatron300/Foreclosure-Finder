@@ -675,15 +675,6 @@
         }
         .tag-pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 0.7rem; line-height: 1; opacity: 0.6; }
         .tag-pill button:hover { opacity: 1; }
-        .quick-tag {
-            background: var(--surface); border: 1px solid var(--border-strong);
-            color: var(--muted); border-radius: 4px; padding: 3px 8px;
-            font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em;
-            cursor: pointer; font-family: inherit; white-space: nowrap;
-        }
-        .quick-tag:hover { color: var(--ink); }
-        .quick-tag.visited.on { background: var(--info-tint); border-color: var(--info-border); color: var(--info); }
-        .quick-tag.track.on { background: var(--success-tint); border-color: var(--success-border); color: var(--success); }
         .tag-input {
             background: var(--surface); border: 1px solid var(--border-strong);
             border-radius: 4px; color: var(--ink); font-size: 0.75rem; padding: 4px 8px;
@@ -1155,6 +1146,8 @@
             </div>
 
             <datalist id="tagSuggestions">
+                <option value="TRACK">
+                <option value="VISITED">
                 <option value="PASS">
                 <option value="PURSUE">
                 <option value="MAYBE">
@@ -2887,26 +2880,13 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
             container.innerHTML = buildTagAreaHtml(instrumentNumber, tags);
         }
 
-        // VISITED and TRACK are ordinary tags (so they sync and show in the Tag filter),
-        // shown as one-click toggles instead of pills.
-        const QUICK_TAGS = ['VISITED', 'TRACK'];
-
+        // VISITED and TRACK are ordinary tags picked from the Add tag suggestions; a card
+        // tagged TRACK shows on Camden Track.
         function buildTagAreaHtml(instrumentNumber, tags) {
-            const toggles = QUICK_TAGS.map(tag => {
-                const on = tags.includes(tag);
-                return `<button type="button" class="quick-tag ${tag.toLowerCase()}${on ? ' on' : ''}" aria-pressed="${on}" title="${on ? 'Click to remove' : 'Click to mark'} ${tag}" onclick="toggleQuickTag('${instrumentNumber}','${tag}')">${on ? '✓ ' : ''}${tag}</button>`;
-            }).join('');
-            const pills = tags.filter(tag => !QUICK_TAGS.includes(tag)).map(tag =>
+            const pills = tags.map(tag =>
                 `<span class="tag-pill">${tag}<button onclick="removeTag('${instrumentNumber}','${tag.replace(/'/g, "\\'")}')">✕</button></span>`
             ).join('');
-            return toggles + pills + `<input type="text" list="tagSuggestions" placeholder="Add tag..." class="tag-input" onblur="addTag('${instrumentNumber}',this.value,this)" onkeydown="if(event.key==='Enter'){addTag('${instrumentNumber}',this.value,this);event.preventDefault()}" />`;
-        }
-
-        function toggleQuickTag(instrumentNumber, tag) {
-            const container = document.querySelector(`[data-tags-for="${instrumentNumber}"]`);
-            const currentTags = container ? JSON.parse(container.getAttribute('data-current-tags') || '[]') : [];
-            if (currentTags.includes(tag)) removeTag(instrumentNumber, tag);
-            else addTag(instrumentNumber, tag);
+            return pills + `<input type="text" list="tagSuggestions" placeholder="Add tag..." class="tag-input" onblur="addTag('${instrumentNumber}',this.value,this)" onkeydown="if(event.key==='Enter'){addTag('${instrumentNumber}',this.value,this);event.preventDefault()}" />`;
         }
 
         async function addTag(instrumentNumber, tag, inputEl) {
