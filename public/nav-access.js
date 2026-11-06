@@ -4,49 +4,80 @@
 (function () {
     var KEY = 'navTabs';
 
-    // One saved login for every page. Sheriff Sales used to keep its own copy
-    // (sessionStorage 'authToken') apart from MontCo/Camden (localStorage
-    // 'pipelineAuth'), so signing in on one tab left a different password
-    // active on the others.
+    // One login per visit, shared by every page. It lives in sessionStorage, which
+    // a browser tab keeps while you click between Sheriff Sales / MontCo / Camden
+    // but which is gone when the site is opened fresh, so the site asks for the
+    // password each visit instead of signing in as whoever used it last.
+    // Open site tabs talk over a BroadcastChannel so that:
+    //  - a new site tab opened while another is signed in picks up that login,
+    //  - signing in or out in one tab does the same in the others.
     var AUTH_KEY = 'siteAuth';
-    var LEGACY_LOCAL = 'pipelineAuth';
-    var LEGACY_SESSION = 'authToken';
 
-    function dropLegacy() {
-        try { localStorage.removeItem(LEGACY_LOCAL); } catch (e) {}
-        try { sessionStorage.removeItem(LEGACY_SESSION); } catch (e) {}
+    // Saved logins from earlier versions would keep auto-signing in; remove them.
+    try {
+        localStorage.removeItem(AUTH_KEY);       // the shared, persistent login
+        localStorage.removeItem('pipelineAuth'); // older MontCo/Camden copy
+        sessionStorage.removeItem('authToken');  // older Sheriff Sales copy
+    } catch (e) {}
+
+    function readToken() {
+        try { return sessionStorage.getItem(AUTH_KEY) || ''; } catch (e) { return ''; }
+    }
+    function writeToken(token) {
+        try {
+            if (token) sessionStorage.setItem(AUTH_KEY, token);
+            else sessionStorage.removeItem(AUTH_KEY);
+        } catch (e) {}
     }
 
+    var channel = (typeof BroadcastChannel === 'function') ? new BroadcastChannel('site-auth') : null;
+    function post(msg) { if (channel) { try { channel.postMessage(msg); } catch (e) {} } }
+
     window.siteAuth = {
-        get: function () {
-            try {
-                var t = localStorage.getItem(AUTH_KEY);
-                if (t) return t;
-                // First load after the change: adopt an old saved login once.
-                // The per-tab Sheriff login is the more recent of the two.
-                var legacy = null;
-                try { legacy = sessionStorage.getItem(LEGACY_SESSION); } catch (e) {}
-                if (!legacy) legacy = localStorage.getItem(LEGACY_LOCAL);
-                dropLegacy();
-                if (legacy) { localStorage.setItem(AUTH_KEY, legacy); return legacy; }
-            } catch (e) {}
-            return '';
-        },
+        get: readToken,
         set: function (token) {
-            try { localStorage.setItem(AUTH_KEY, token); } catch (e) {}
-            dropLegacy();
+            var had = readToken();
+            writeToken(token);
+            if (token && token !== had) post({ type: 'signin', token: token });
         },
         clear: function () {
-            try { localStorage.removeItem(AUTH_KEY); localStorage.removeItem(KEY); } catch (e) {}
-            dropLegacy();
+            var had = readToken();
+            writeToken('');
+            try { localStorage.removeItem(KEY); } catch (e) {}
+            // Only a tab that was signed in signs the others out; a fresh tab
+            // showing its login screen must not.
+            if (had) post({ type: 'signout' });
         }
     };
 
-    // Signing in or out in one tab reloads the others, so no open tab keeps
-    // acting as the previous password.
-    window.addEventListener('storage', function (e) {
-        if (e.key === AUTH_KEY) location.reload();
-    });
+    if (channel) {
+        channel.onmessage = function (e) {
+            var msg = e.data || {};
+            var mine = readToken();
+            if (msg.type === 'request' && mine) {
+                post({ type: 'token', token: mine });
+            } else if (msg.type === 'signin' && msg.token && msg.token !== mine) {
+                writeToken(msg.token);
+                location.reload();
+            } else if (msg.type === 'signout' && mine) {
+                writeToken('');
+                location.reload();
+            } else if (msg.type === 'token' && msg.token && !mine && waitingForHandoff) {
+                // Another open tab is signed in: use its login instead of asking again.
+                waitingForHandoff = false;
+                writeToken(msg.token);
+                location.reload();
+            }
+        };
+    }
+
+    // A tab that opens without a login asks the other open site tabs for theirs.
+    var waitingForHandoff = false;
+    if (channel && !readToken()) {
+        waitingForHandoff = true;
+        post({ type: 'request' });
+        setTimeout(function () { waitingForHandoff = false; }, 1500);
+    }
 
     function cached() {
         try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; }
