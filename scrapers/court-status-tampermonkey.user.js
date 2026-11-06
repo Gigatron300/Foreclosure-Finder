@@ -340,7 +340,7 @@
 // ==UserScript==
 // @name         NJ Courts Status Checker
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Auto-checks court case statuses from Camden pipeline data with auto-login CAPTCHA recovery
 // @match        https://portal.njcourts.gov/*
 // @match        https://portal-cloud.njcourts.gov/*
@@ -1250,7 +1250,7 @@
     const nameDisplay = activeName || '-';
     const modeText = state.mode === 'refresh'
       ? ((state.batch && state.batch.batchId) ? 'Refresh batch' : 'Refresh mode')
-      : 'New cases';
+      : (state.tracked ? 'Tracked cases' : 'New cases');
 
     panel.innerHTML = `
       <style>
@@ -1351,6 +1351,7 @@
         <button id="csc-btn-new" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#2563eb;color:#fff;">New Batch</button>
         <button id="csc-btn-resume" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#0f766e;color:#fff;">Continue Batch</button>
         <button id="csc-btn-standard" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#475569;color:#fff;">New Cases</button>
+        <button id="csc-btn-tracked" title="Re-check only the Camden cards marked TRACK (any status)" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#b7791f;color:#fff;">Tracked Cases</button>
         <button id="csc-btn-test" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#334155;color:#94a3b8;">Test Run (10)</button>
       </div>
     `;
@@ -1359,10 +1360,11 @@
     document.getElementById('csc-btn-new').addEventListener('click', () => startRun({ testMode: false, mode: 'refresh', resume: false }));
     document.getElementById('csc-btn-resume').addEventListener('click', () => startRun({ testMode: false, mode: 'refresh', resume: true }));
     document.getElementById('csc-btn-standard').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, blankOnly: true }));
+    document.getElementById('csc-btn-tracked').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, tracked: true }));
     document.getElementById('csc-btn-test').addEventListener('click', () => startRun({ testMode: true, mode: 'refresh', resume: false }));
   }
 
-  async function startRun({ testMode = false, mode = 'default', resume = false, blankOnly = false }) {
+  async function startRun({ testMode = false, mode = 'default', resume = false, blankOnly = false, tracked = false }) {
     const launcher = document.getElementById('csc-launcher');
     if (launcher) launcher.remove();
 
@@ -1373,7 +1375,9 @@
     let payload;
     try {
       let url = SERVER + '/api/camden/court-status-cases?token=' + encodeURIComponent(TOKEN) + (testMode ? '&test=true' : '');
-      if (blankOnly) {
+      if (tracked) {
+        url += '&tracked=true';
+      } else if (blankOnly) {
         url += '&blankOnly=true';
       }
       if (mode === 'refresh') {
@@ -1391,7 +1395,7 @@
     const batch = Array.isArray(payload) ? null : (payload?.batch || null);
 
     if (!cases.length) {
-      setStatusByType('info', payload?.message || 'No cases available.');
+      setStatusByType('info', payload?.message || (tracked ? 'No tracked cases. Mark cards TRACK on the Camden tab first.' : 'No cases available.'));
       return;
     }
 
@@ -1399,6 +1403,7 @@
       cases,
       batch,
       mode,
+      tracked,
       currentIndex: 0,
       step: 'FILL_AND_SEARCH',
       done: 0,

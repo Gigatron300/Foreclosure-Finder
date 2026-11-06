@@ -1689,12 +1689,24 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
     const data = JSON.parse(content);
     const testMode = req.query.test === 'true';
     const blankOnly = req.query.blankOnly === 'true';
+    // Tracked Cases (Tampermonkey): only cards tagged TRACK, whatever their status --
+    // a tracked case can be reinstated after closing, and there are only a handful.
+    const trackedOnly = req.query.tracked === 'true';
+    let trackedSet = null;
+    if (trackedOnly) {
+      const annotations = await readAnnotations();
+      trackedSet = new Set(Object.entries(annotations)
+        .filter(([, a]) => Array.isArray(a && a.userTags) && a.userTags.includes('TRACK'))
+        .map(([instrumentNumber]) => instrumentNumber));
+    }
 
     // Filter to cases that need court status
     let cases = (data.cases || []).filter(c => {
       const existingStatusRaw = (c.courtStatus || '').trim();
       const existingStatus = existingStatusRaw.toUpperCase();
-      if (blankOnly) {
+      if (trackedOnly) {
+        if (!trackedSet.has(c.instrumentNumber)) return false;
+      } else if (blankOnly) {
         if (existingStatusRaw) return false;
       } else {
         // Skip if already closed; OPEN cases can be re-scanned for richer docket/action data.
@@ -1712,7 +1724,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       cases = cases.slice(0, 10);
     }
 
-    console.log(`📋 Serving ${cases.length} cases for court status lookup${blankOnly ? ' (blank court status only)' : ''}${testMode ? ' (TEST MODE)' : ''}`);
+    console.log(`📋 Serving ${cases.length} cases for court status lookup${trackedOnly ? ' (tracked only)' : blankOnly ? ' (blank court status only)' : ''}${testMode ? ' (TEST MODE)' : ''}`);
     res.json(cases);
   } catch (error) {
     if (error.code === 'ENOENT') {
