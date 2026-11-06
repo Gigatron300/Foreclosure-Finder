@@ -394,6 +394,13 @@
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border);
         }
+        /* Camden Track (/camden-track): just the cards and the filter row. */
+        body.track-view .status-bar,
+        body.track-view .api-dropdown,
+        body.track-view .upload-section,
+        body.track-view .stats-summary,
+        body.track-view .actions-secondary,
+        body.track-view .actions-bar > .btn { display: none !important; }
         .results-header h2 { font-family: var(--serif); font-size: 1.7rem; font-weight: 600; color: var(--ink); }
         .case-count { color: var(--muted); font-family: 'Montserrat', sans-serif; font-size: 1rem; font-weight: 500; }
 
@@ -912,6 +919,7 @@
                     <a href="/" data-tab="sheriff">Sheriff Sales</a>
                     <a href="/pipeline.html" data-tab="montco">MontCo Pipeline</a>
                     <a href="/camden.html" data-tab="camden" class="active">Camden Pipeline</a>
+                    <a href="/camden-track" data-tab="camden">Camden Track</a>
                 </nav>
             </div>
         </header>
@@ -1163,6 +1171,25 @@
 
     <script>
         let authToken = siteAuth.get();
+
+        // Camden Track (/camden-track): same page, only cards tagged TRACK, and just the
+        // cards and filters on screen. CSS under body.track-view hides the rest.
+        const TRACK_VIEW = /^\/camden-track\/?$/.test(location.pathname);
+        if (TRACK_VIEW) {
+            document.body.classList.add('track-view');
+            document.title = 'Camden Track | Blake Management';
+            const title = document.querySelector('.page-title');
+            if (title) title.innerHTML = 'Camden County &mdash; Tracked';
+            document.querySelectorAll('.nav-links a').forEach(a => {
+                a.classList.toggle('active', a.getAttribute('href') === '/camden-track');
+            });
+            const caseHeading = document.querySelector('.results-header h2');
+            if (caseHeading && caseHeading.firstChild) caseHeading.firstChild.textContent = 'Tracked ';
+            // Deal Stage defaults to Active Opportunities on Camden; here every tracked card should show.
+            document.querySelectorAll('#dealStageFilterOptions input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+            const dealBtn = document.getElementById('dealStageFilterButton');
+            if (dealBtn) dealBtn.textContent = 'All Deal Stages';
+        }
         const CAMDEN_DEFAULT_STREETVIEW_MODE = 'open-only';
         let streetViewMode = CAMDEN_DEFAULT_STREETVIEW_MODE;
         let streetViewModeUnlocked = false;
@@ -1866,7 +1893,10 @@
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
                 }
 
-                const allCases = data.cases || [];
+                // Camden Track works from the tracked cards only, so filter options and counts describe them.
+                const allCases = TRACK_VIEW
+                    ? (data.cases || []).filter(c => (c.userTags || []).includes('TRACK'))
+                    : (data.cases || []);
                 let cases = allCases;
                 populateTagFilter(allCases);
                 populateTownFilter(allCases, selectedTowns);
@@ -1938,7 +1968,9 @@
                 document.getElementById('caseCount').textContent = `(${cases.length})`;
 
                 if (cases.length === 0) {
-                    grid.innerHTML = '<div class="no-results"><p>No cases found. Upload a CSV to get started.</p></div>';
+                    grid.innerHTML = TRACK_VIEW
+                        ? '<div class="no-results"><p>' + (allCases.length ? 'No tracked cards match these filters.' : 'No tracked cards yet. Mark a card TRACK on the Camden Pipeline tab and it shows up here.') + '</p></div>'
+                        : '<div class="no-results"><p>No cases found. Upload a CSV to get started.</p></div>';
                     return;
                 }
 
@@ -2857,7 +2889,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
                 else {
                     patchCachedCase(instrumentNumber, { userTags: newTags });
-                    if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
+                    if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
                 }
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);
@@ -2880,7 +2912,7 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 if (!result.success) { renderTagPills(instrumentNumber, currentTags); alert('Error: ' + (result.error || 'Unknown error')); }
                 else {
                     patchCachedCase(instrumentNumber, { userTags: newTags });
-                    if (getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
+                    if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData(false);
                 }
             } catch (e) {
                 renderTagPills(instrumentNumber, currentTags);

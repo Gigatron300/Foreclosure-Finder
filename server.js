@@ -491,6 +491,12 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Camden Track: the Camden page in a stripped-down mode showing only cards tagged TRACK.
+// Same page, so cards stay identical; its data comes from /api/camden (site password only).
+app.get('/camden-track', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'camden.html'));
+});
+
 app.use(express.static('public'));
 
 // ============== CSV UPLOAD ENDPOINT ==============
