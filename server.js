@@ -8,6 +8,10 @@ const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { fetchParcelAddress } = require('./scrapers/montco-courts');
 const { matchParcelByAddress, applyParcelMatch } = require('./scrapers/montco-parcel-match');
+const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
+const montcoRecorder = require('./scrapers/montco-recorder');
+const recorderParcelKey = montcoRecorder.parcelKey;
+const readRecorderCache = () => montcoRecorder.readCache();
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
 const { containsWholeWords, shouldSkipCourtSearchName } = require('./scrapers/search-skip-rules');
 // NOTE: nj-courts-status.js Puppeteer scraper removed - NJ Courts blocks datacenter IPs with CAPTCHA
@@ -32,6 +36,9 @@ app.use(express.text({ limit: '10mb', type: 'text/csv' }));
 const DATA_FILE = path.join(CONFIG.outputDir, CONFIG.outputFile);
 const PIPELINE_DATA_FILE = path.join(CONFIG.outputDir, PIPELINE_FILE);
 const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
+// User-entered payoff inputs per MontCo case (pasted Recorder index, other liens,
+// tax bill, rate). Kept apart from the scraped data so a re-scrape or clear keeps them.
+const MONTCO_PAYOFF_FILE = path.join(CONFIG.outputDir, 'montco-payoff.json');
 // Court session cookies (solved locally past the Cloudflare/Turnstile gate),
 // uploaded here so the headless scrape can reuse them. Path matches
 // montco-courts.js CONFIG.sessionPath so the scraper reads the same file.
@@ -330,7 +337,8 @@ app.use('/api/camden', (req, res, next) => {
 // /scrape/status and /scrape/stop.)
 app.use([
   '/api/montco/session', '/api/pipeline/upload-csv', '/api/pipeline/csv-status',
-  '/api/pipeline/scrape', '/api/pipeline/clear', '/api/pipeline/match-parcels', '/api/pipeline/rescan-parcels'
+  '/api/pipeline/scrape', '/api/pipeline/clear', '/api/pipeline/match-parcels', '/api/pipeline/rescan-parcels',
+  '/api/pipeline/recorder-refresh'
 ], (req, res, next) => {
   const token = req.headers['x-auth-token'];
   if (isOwner(token)) return next();
@@ -726,12 +734,85 @@ app.get('/api/export/csv', checkAuth, async (req, res) => {
 
 // ============== PIPELINE API (Montgomery County) ==============
 
+async function readPayoffInputs() {
+  try {
+    return JSON.parse(await fs.readFile(MONTCO_PAYOFF_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+async function writePayoffInputs(all) {
+  const tmp = MONTCO_PAYOFF_FILE + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(all, null, 2));
+  await fs.rename(tmp, MONTCO_PAYOFF_FILE);
+}
+
+// Estimates are computed per request so the "as of" date is always today.
+// Cases on the same parcel share one estimate: the open mortgage foreclosure is
+// the senior debt and every other court case on the parcel is a junior lien.
+const parcelKey = (c) => String(c.parcelNumber || '').split(',')[0].trim();
+
+// The mortgage case is the senior debt even when it reads CLOSED: the loan was
+// reinstated, modified, paid off or sold, and a municipal lien must never be
+// mistaken for the whole payoff. Prefer an open mortgage case, then a closed one.
+function pickSeniorCase(members) {
+  const newest = (arr) => [...arr].sort((a, b) => String(b.commencedDate || '').localeCompare(String(a.commencedDate || '')))[0];
+  const mortgages = members.filter(m => m.caseTypeKind === 'mortgage');
+  const openMortgages = mortgages.filter(m => !isClosedCase(m));
+  if (openMortgages.length) return newest(openMortgages);
+  if (mortgages.length) return newest(mortgages);
+  const open = members.filter(m => !isClosedCase(m));
+  return newest(open.length ? open : members);
+}
+
+// Inputs saved on any card of the parcel apply to the whole parcel (latest wins).
+function groupInputs(members, payoffInputs) {
+  return members.map(m => payoffInputs[m.caseNumber]).filter(Boolean)
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || {};
+}
+
+// recorderCache: { "<12-digit parcel>": { text, fetchedAt, total, truncated } } from
+// the automatic Recorder lookup. A pasted index on the card takes precedence.
+function attachPayoffs(cases, payoffInputs, recorderCache = {}) {
+  const groups = new Map();
+  for (const c of cases) {
+    const key = parcelKey(c) || `case:${c.caseNumber}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  for (const [key, members] of groups) {
+    const senior = pickSeniorCase(members);
+    const inputs = groupInputs(members, payoffInputs);
+    const auto = recorderCache[recorderParcelKey(key)];
+    const useAuto = !(inputs.recorderText || '').trim() && auto && auto.text != null && auto.fetchedAt;
+    let payoff;
+    try {
+      payoff = estimatePayoff(senior, {
+        ...inputs,
+        recorderText: useAuto ? auto.text : inputs.recorderText,
+        courtCases: members.filter(m => m !== senior)
+      });
+      payoff.seniorCase = senior.caseNumber;
+      payoff.recorderAuto = useAuto ? { fetchedAt: auto.fetchedAt, total: auto.total, truncated: !!auto.truncated } : null;
+    } catch (e) {
+      payoff = { error: e.message };
+    }
+    for (const m of members) {
+      m.payoff = payoff;
+      m.payoffInputs = inputs;
+    }
+  }
+  return cases;
+}
+
 app.get('/api/pipeline', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
     let cases = jsonData.cases;
-    
+    attachPayoffs(cases, await readPayoffInputs(), await readRecorderCache());
+
     if (req.query.grade) {
       const grades = req.query.grade.toUpperCase().split(',');
       cases = cases.filter(c => grades.includes(c.leadGrade));
@@ -798,9 +879,51 @@ app.get('/api/pipeline/case/:caseNumber', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
     const jsonData = JSON.parse(data);
+    attachPayoffs(jsonData.cases, await readPayoffInputs(), await readRecorderCache());
     const caseData = jsonData.cases.find(c => c.caseNumber === req.params.caseNumber);
     if (caseData) res.json(caseData);
     else res.status(404).json({ error: 'Case not found' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Save the payoff inputs for one case and return the fresh estimate.
+// Body: { recorderText, overrides: {"MTG 15325/2923": false}, otherLiens: [{name, amount}],
+//         annualTaxes, rate, originalAmount, originationDate }
+app.post('/api/pipeline/payoff/:caseNumber', checkAuth, async (req, res) => {
+  try {
+    const caseNumber = req.params.caseNumber;
+    const data = JSON.parse(await fs.readFile(PIPELINE_DATA_FILE, 'utf8'));
+    const caseData = (data.cases || []).find(c => c.caseNumber === caseNumber);
+    if (!caseData) return res.status(404).json({ error: 'Case not found' });
+
+    const b = req.body || {};
+    const str = (v, max) => (v == null ? '' : String(v)).slice(0, max);
+    const inputs = {
+      recorderText: str(b.recorderText, 200000),
+      overrides: {},
+      otherLiens: [],
+      annualTaxes: str(b.annualTaxes, 20),
+      rate: str(b.rate, 10),
+      originalAmount: str(b.originalAmount, 20),
+      originationDate: str(b.originationDate, 20),
+      updatedAt: new Date().toISOString()
+    };
+    if (b.overrides && typeof b.overrides === 'object') {
+      for (const [k, v] of Object.entries(b.overrides).slice(0, 200)) inputs.overrides[str(k, 40)] = !!v;
+    }
+    if (Array.isArray(b.otherLiens)) {
+      inputs.otherLiens = b.otherLiens.slice(0, 50)
+        .map(l => ({ name: str(l && l.name, 120), amount: str(l && l.amount, 20) }))
+        .filter(l => l.name || l.amount);
+    }
+
+    const all = await readPayoffInputs();
+    all[caseNumber] = inputs;
+    await writePayoffInputs(all);
+    attachPayoffs(data.cases, all, await readRecorderCache());
+    res.json(caseData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -858,6 +981,7 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
   const testMode = req.body.testMode === true;
   
   isPipelineScrapingInProgress = true;
+  recorderRefresh.stopRequested = true; // one browser at a time: a running Recorder refresh yields
   pipelineStopRequested = false;
   lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', testMode };
   res.json({ message: testMode ? 'Test scrape started (10 cases)' : 'Pipeline scrape started', status: lastPipelineScrapeStatus });
@@ -874,6 +998,7 @@ app.post('/api/pipeline/scrape', checkAuth, async (req, res) => {
     const withAddress = cases.filter(c => c.propertyAddress).length;
     cases.forEach(c => grades[c.leadGrade || 'C']++);
     lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'completed', casesFound: cases.length, withAddress, grades, testMode };
+    if (!testMode) setImmediate(() => runRecorderRefresh('after scrape'));
   } catch (error) {
     lastPipelineScrapeStatus = error.code === 'SCRAPE_STOPPED'
       ? { completed: new Date().toISOString(), status: 'stopped', scrapedSoFar: error.scrapedSoFar || 0, testMode }
@@ -897,6 +1022,55 @@ app.post('/api/pipeline/scrape/stop', checkAuth, (req, res) => {
 
 app.get('/api/pipeline/scrape/status', checkAuth, (req, res) => {
   res.json({ inProgress: isPipelineScrapingInProgress, stopRequested: pipelineStopRequested, lastStatus: lastPipelineScrapeStatus });
+});
+
+// ---- Recorder of Deeds index (automatic, after each court scrape) ----
+// Looks up each pipeline parcel that has an open case and hasn't been checked in
+// two weeks, one at a time. Needs RECORDER_USER / RECORDER_PASS in the environment.
+let recorderRefresh = { running: false, stopRequested: false, last: null, progress: null };
+
+async function runRecorderRefresh(reason = 'manual') {
+  if (recorderRefresh.running) return false;
+  if (!montcoRecorder.hasCredentials()) {
+    recorderRefresh.last = { status: 'skipped', reason: 'RECORDER_USER / RECORDER_PASS not set', at: new Date().toISOString() };
+    return false;
+  }
+  recorderRefresh = { running: true, stopRequested: false, last: recorderRefresh.last, progress: { started: new Date().toISOString(), reason } };
+  try {
+    const data = JSON.parse(await fs.readFile(PIPELINE_DATA_FILE, 'utf8'));
+    console.log(`📚 Recorder refresh (${reason}) starting`);
+    const result = await montcoRecorder.refreshRecorderIndex({
+      cases: data.cases || [],
+      shouldStop: () => recorderRefresh.stopRequested,
+      onProgress: (p) => { recorderRefresh.progress = { ...recorderRefresh.progress, ...p }; }
+    });
+    recorderRefresh.last = { status: recorderRefresh.stopRequested ? 'stopped' : 'completed', ...result, reason, at: new Date().toISOString() };
+    console.log(`📚 Recorder refresh done: ${result.checked} checked, ${result.failed} failed`);
+  } catch (e) {
+    recorderRefresh.last = { status: 'error', error: e.message, reason, at: new Date().toISOString() };
+    console.log(`📚 Recorder refresh failed: ${e.message}`);
+  } finally {
+    recorderRefresh.running = false;
+    recorderRefresh.progress = null;
+  }
+  return true;
+}
+
+app.post('/api/pipeline/recorder-refresh', checkAuth, (req, res) => {
+  if (recorderRefresh.running) return res.json({ started: false, message: 'Already running', state: recorderRefresh });
+  if (isPipelineScrapingInProgress) return res.status(429).json({ error: 'Court scrape is running; the Recorder refresh starts after it.' });
+  if (!montcoRecorder.hasCredentials()) return res.status(400).json({ error: 'RECORDER_USER / RECORDER_PASS are not set on the server.' });
+  runRecorderRefresh('manual');
+  res.json({ started: true });
+});
+
+app.post('/api/pipeline/recorder-refresh/stop', checkAuth, (req, res) => {
+  recorderRefresh.stopRequested = true;
+  res.json({ stopping: recorderRefresh.running });
+});
+
+app.get('/api/pipeline/recorder-refresh/status', checkAuth, (req, res) => {
+  res.json({ configured: montcoRecorder.hasCredentials(), ...recorderRefresh });
 });
 
 // ---- Montco court session (Cloudflare/Turnstile gate) ----
@@ -2150,6 +2324,7 @@ function scheduleNightlyPipelineScrape() {
       }
       
       isPipelineScrapingInProgress = true;
+      recorderRefresh.stopRequested = true; // one browser at a time: a running Recorder refresh yields
       pipelineStopRequested = false;
       lastPipelineScrapeStatus = { started: new Date().toISOString(), status: 'running', scheduled: true };
       
@@ -2167,6 +2342,7 @@ function scheduleNightlyPipelineScrape() {
           scheduled: true 
         };
         console.log(`   ✅ Scheduled scrape complete: ${cases.length} cases (${withAddress} with addresses)`);
+        setImmediate(() => runRecorderRefresh('after scheduled scrape'));
       } catch (error) {
         if (error.code === 'SCRAPE_STOPPED') {
           lastPipelineScrapeStatus = { completed: new Date().toISOString(), status: 'stopped', scrapedSoFar: error.scrapedSoFar || 0, scheduled: true };

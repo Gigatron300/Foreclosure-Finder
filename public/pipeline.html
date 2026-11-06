@@ -438,6 +438,8 @@
         .address-warning-flag.defendant-source { border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); background: var(--warning-tint); color: var(--warning); }
         .out-of-county .address-warning-dot { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent); }
         .defendant-source .address-warning-dot { background: var(--warning); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 18%, transparent); }
+        .address-warning-flag.lien-list { border: 1px solid color-mix(in srgb, var(--info) 35%, transparent); background: var(--info-tint); color: var(--info); }
+        .lien-list .address-warning-dot { background: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 18%, transparent); }
         .address-warning-flag.parcel-matched { border: 1px solid color-mix(in srgb, var(--success) 35%, transparent); background: var(--success-tint); color: var(--success); }
         .parcel-matched .address-warning-dot { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 18%, transparent); }
         .closed-flag {
@@ -822,6 +824,98 @@
         .event-type { color: var(--ink-2); }
         .docket-stat { font-size: 0.75rem; color: var(--muted); padding: 2px 0; }
 
+        /* Payoff estimate (senior + junior liens) */
+        .detail-value.payoff-none { color: var(--muted); font-weight: 500; font-size: 0.8rem; }
+        .payoff-details {
+            margin: 0 0 15px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .payoff-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            background: var(--surface-2);
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.85rem;
+            color: var(--ink-2);
+            flex-wrap: wrap;
+        }
+        .payoff-summary:hover { background: var(--surface-3); }
+        .payoff-summary .expand-icon { margin-left: auto; }
+        .payoff-tier {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.75rem;
+            background: var(--info-tint);
+            color: var(--info);
+        }
+        .payoff-tier.tier-a { background: var(--success-tint); color: var(--success); }
+        .payoff-tier.tier-c { background: var(--warning-tint); color: var(--warning); }
+        .payoff-tier.tier-none { background: var(--surface-3); color: var(--muted); }
+        .payoff-band { font-weight: 700; color: var(--brand-gold-dark); }
+        .payoff-body { padding: 12px 15px; font-size: 0.8rem; color: var(--ink-2); }
+        .payoff-basis { color: var(--muted); margin-bottom: 8px; }
+        .payoff-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+        .payoff-table th {
+            text-align: left;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 4px 0;
+        }
+        .payoff-table td { padding: 3px 0; border-bottom: 1px solid var(--surface-3); vertical-align: top; }
+        .payoff-table td.num, .payoff-table th.num {
+            text-align: right;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+            padding-left: 8px;
+        }
+        .payoff-table tr.subtotal td { font-weight: 700; color: var(--ink); border-bottom: none; }
+        .payoff-table tr.grand td { font-weight: 700; color: var(--brand-gold-dark); border-top: 2px solid var(--border-strong); border-bottom: none; }
+        .payoff-tag { font-size: 0.7rem; color: var(--success); margin-left: 4px; }
+        .payoff-tag.warn { color: var(--warning); }
+        .payoff-flags { margin: 0 0 10px; padding-left: 18px; color: var(--warning); }
+        .payoff-flags li { margin: 2px 0; }
+        .payoff-edit { border-top: 1px solid var(--border); padding-top: 10px; }
+        .payoff-edit label { display: block; font-weight: 600; margin: 8px 0 3px; font-size: 0.75rem; color: var(--ink-2); }
+        .payoff-edit .hint { font-weight: 400; color: var(--muted); }
+        .payoff-edit textarea, .payoff-edit input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--ink);
+            padding: 6px 8px;
+            font: inherit;
+            font-size: 0.8rem;
+        }
+        .payoff-edit textarea { min-height: 70px; resize: vertical; }
+        .payoff-edit textarea:focus, .payoff-edit input[type="text"]:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
+        .payoff-row-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .payoff-mortgage { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; font-size: 0.78rem; }
+        .payoff-mortgage input { margin-top: 2px; }
+        .payoff-save-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+        .payoff-save-btn {
+            background: var(--brand-gold);
+            color: var(--on-gold);
+            border: none;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .payoff-save-btn:hover { background: var(--brand-gold-hover); }
+        .payoff-save-btn:disabled { opacity: 0.6; cursor: default; }
+        .payoff-save-status { font-size: 0.75rem; color: var(--muted); }
+
         .maps-link {
             background: var(--info);
             color: var(--on-solid) !important;
@@ -1131,6 +1225,7 @@
             <button class="btn btn-outline filter-danger owner-only" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline filter-danger owner-only" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
             <button class="btn btn-outline owner-only" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="For cases with no parcel number (mortgage foreclosures), look up the defendant's address on the county parcel map. If the parcel's owner is the defendant, the card switches to that parcel. Uses cases already scraped -- no court scrape.">Find Mortgage Parcels</button>
+            <button class="btn btn-outline owner-only" onclick="refreshRecorder()" id="recorderBtn" title="Look up every pipeline parcel with an open case at the Recorder of Deeds (mortgages, satisfactions, deeds) for the payoff estimate. Runs automatically after each Process All; parcels checked in the last 2 weeks are skipped. Click again while running to stop.">Pull Recorder Data</button>
             <button class="btn btn-outline owner-only" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
             <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
@@ -1907,6 +2002,7 @@
         }
 
         async function loadData() {
+            pollRecorder();
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const selectedCities = getSelectedCheckboxValues('cityFilterOptions');
@@ -2143,7 +2239,7 @@
                 : '';
 
             return `
-                <div class="property-card ${sweetSpotClass}">
+                <div class="property-card ${sweetSpotClass}" data-case="${escapeAttr(c.caseNumber)}">
                     <div class="street-view-container">
                         ${streetViewHtml}
                         ${typeBadgeHtml}
@@ -2154,6 +2250,7 @@
                         <div class="address-row">
                             <div class="property-address${c.propertyAddress ? ' copyable' : ''}"${c.propertyAddress ? ` data-copy="${escapeAttr(copyText)}" title="Click to copy: ${escapeAttr(copyText)}" onclick="copyAddressFromCard(this)"` : ''}>${address}</div>
                             ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV">CLOSED NOW</span>` : ''}
+                            ${c.payoff && c.payoff.facts && c.payoff.facts.lienListFiled ? `<span class="address-warning-flag lien-list" title="${escapeAttr(`A Rule 3129 affidavit was filed${c.payoff.facts.lienListDate ? ' on ' + c.payoff.facts.lienListDate : ''}. It lists every lien holder of record: worth buying.`)}"><span class="address-warning-dot"></span>3129 on file: buy</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
@@ -2188,8 +2285,14 @@
                                 <div class="detail-label">Mortgage</div>
                                 <div class="detail-value">Bk ${c.mortgageBook} / Pg ${c.mortgagePage}</div>
                             </div>` : ''}
+                            <div class="detail-item" title="Estimated total payoff (first mortgage + known junior liens) from free public data. A range, not a payoff letter.">
+                                <div class="detail-label">Est. Payoff</div>
+                                ${payoffHeadline(c.payoff)}
+                            </div>
                         </div>
-                        
+
+                        ${renderPayoffSection(c)}
+
                         <!-- Score Breakdown Dropdown -->
                         <details class="score-details">
                             <summary class="score-summary">
@@ -2585,6 +2688,172 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
         }
 
+        // ---- Payoff estimate (computed server-side by scrapers/payoff-estimate.js) ----
+        function fmtK(n) {
+            if (n == null || isNaN(n)) return '';
+            return '$' + Math.round(n / 1000).toLocaleString('en-US') + 'K';
+        }
+        function fmtDollars(n) {
+            if (n == null || isNaN(n)) return '';
+            return '$' + Math.round(n).toLocaleString('en-US');
+        }
+        function fmtRange(b) {
+            if (!b) return '';
+            return Math.round(b.low) === Math.round(b.high) ? fmtDollars(b.low) : `${fmtDollars(b.low)} – ${fmtDollars(b.high)}`;
+        }
+        function payoffTotalBand(p) {
+            if (!p || p.error) return null;
+            return p.total || null;
+        }
+        function payoffHeadline(p) {
+            if (p && p.sold) return '<div class="detail-value payoff-none" title="A sheriff\'s deed is on record">Sold at sheriff sale</div>';
+            const band = payoffTotalBand(p);
+            if (!band) {
+                const liens = p && p.juniorTotal && p.juniorTotal.high > 0
+                    ? `Liens ${fmtK(p.juniorTotal.low)}–${fmtK(p.juniorTotal.high)} + mortgage?` : 'Needs Recorder data';
+                return `<div class="detail-value payoff-none" title="No judgment yet: paste the Recorder parcel search to estimate the mortgage">${liens}</div>`;
+            }
+            const noRecorder = !p.recorder || !p.recorder.rows;
+            const partial = noRecorder && p.juniorPlaintiff
+                ? ' <span title="Plaintiff is a home-equity lender: a first mortgage likely sits ahead of this loan and is not counted until Recorder data is added">+ 1st mtg?</span>'
+                : noRecorder ? ' <span title="Other mortgages unknown until Recorder data is added">*</span>' : '';
+            return `<div class="detail-value amount">${fmtK(band.low)}–${fmtK(band.high)}${partial}</div>`;
+        }
+
+        function renderPayoffSection(c) {
+            const p = c.payoff || {};
+            const inputs = c.payoffInputs || {};
+            const tierClass = p.tier === 'A' ? 'tier-a' : p.tier === 'C' ? 'tier-c' : 'tier-none';
+            const tierLabel = p.sold ? 'Sold' : p.seniorSatisfied ? 'Mortgage paid off'
+                : p.tier === 'A' ? 'From judgment' : p.tier === 'C' ? 'From recorded mortgage' : 'No estimate yet';
+            const band = payoffTotalBand(p);
+
+            const seniorRows = (p.seniorLines || []).map(l =>
+                `<tr><td>${escapeAttr(l.label)}</td><td class="num">${fmtRange(l)}</td></tr>`).join('');
+            const juniorRows = (p.juniors || []).map(j =>
+                `<tr><td>${escapeAttr(j.label)}${j.exact ? '<span class="payoff-tag">exact</span>' : ''}${j.negotiable ? '<span class="payoff-tag warn">negotiable</span>' : ''}${j.court ? '<span class="payoff-tag">court record</span>' : ''}${j.prior ? '<span class="payoff-tag warn">prior lien</span>' : ''}</td><td class="num">${fmtRange(j)}</td></tr>`).join('');
+
+            const table = p.senior ? `
+                <table class="payoff-table">
+                    <tr><th>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'}</th><th class="num">Low – High</th></tr>
+                    ${seniorRows}
+                    <tr class="subtotal"><td>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'} total</td><td class="num">${fmtRange(p.senior)}</td></tr>
+                    ${juniorRows ? `<tr><th colspan="2" style="padding-top:8px">Other liens</th></tr>${juniorRows}
+                    <tr class="subtotal"><td>Other liens total</td><td class="num">${fmtRange(p.juniorTotal)}</td></tr>` : ''}
+                    <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
+                </table>` : juniorRows ? `
+                <table class="payoff-table">
+                    <tr><th>${p.seniorSatisfied ? 'Remaining liens (mortgage satisfied)' : 'Known liens (mortgage not estimated yet)'}</th><th class="num">Low – High</th></tr>
+                    ${juniorRows}
+                    <tr class="subtotal"><td>Liens total</td><td class="num">${fmtRange(p.juniorTotal)}</td></tr>
+                </table>` : '';
+
+            const flags = (p.flags || []).length
+                ? `<ul class="payoff-flags">${p.flags.map(f => `<li>${escapeAttr(f)}</li>`).join('')}</ul>` : '';
+
+            const mortgages = (p.recorder && p.recorder.mortgages) || [];
+            const mortgageList = mortgages.length ? `
+                <label>Recorded mortgages <span class="hint">(unticked = paid off)</span></label>
+                ${mortgages.map(m => `
+                    <div class="payoff-mortgage">
+                        <input type="checkbox" data-key="${escapeAttr(m.key)}" data-auto="${m.autoOpen ? 1 : 0}" ${m.open ? 'checked' : ''}>
+                        <span>${escapeAttr(m.key)} · ${escapeAttr(m.recorded || '')} · ${m.amount != null ? fmtDollars(m.amount) : 'no amount'}${m.senior ? ' · <b>foreclosed loan</b>' : ''}${m.hud ? ' · HUD' : ''}${m.satisfiedBy ? ` · satisfied by ${escapeAttr(m.satisfiedBy)}` : ''}</span>
+                    </div>`).join('')}` : '';
+
+            const otherLiensText = (inputs.otherLiens || []).map(l => `${l.name}, ${l.amount}`).join('\n');
+
+            return `
+                <details class="payoff-details">
+                    <summary class="payoff-summary">
+                        <span class="payoff-tier ${tierClass}">${tierLabel}</span>
+                        ${band ? `<span class="payoff-band">${fmtK(band.low)} – ${fmtK(band.high)}</span>` : '<span>Payoff estimate</span>'}
+                        <span class="expand-icon">v</span>
+                    </summary>
+                    <div class="payoff-body">
+                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.asOf ? ` · as of ${escapeAttr(p.asOf)}` : ''}</div>
+                        ${p.recorderAuto ? `<div class="payoff-basis">Recorder index pulled automatically ${escapeAttr(String(p.recorderAuto.fetchedAt).slice(0, 10))} (${p.recorderAuto.total ?? '?'} documents${p.recorderAuto.truncated ? ', first 100 only' : ''}).</div>` : ''}
+                        ${table}
+                        ${flags}
+                        <div class="payoff-edit" data-case="${escapeAttr(c.caseNumber)}">
+                            <label>Recorder parcel search <span class="hint">(${p.recorderAuto ? 'pulled automatically; paste here only to override' : 'pulled automatically after each Process All; or paste the parcel search here'})</span></label>
+                            <textarea class="po-recorder" placeholder="MTG 15325 02923 ... Mortgage ($69,800.00) 07/16/2021 ...">${escapeAttr(inputs.recorderText || '')}</textarea>
+                            ${mortgageList}
+                            <label>Other liens <span class="hint">(one per line: name, amount — e.g. from the owner-name judgment search)</span></label>
+                            <textarea class="po-liens" placeholder="Borough of Bridgeport, 1250.00">${escapeAttr(otherLiensText)}</textarea>
+                            <div class="payoff-row-inputs">
+                                <div>
+                                    <label>Annual tax bill <span class="hint">(optional)</span></label>
+                                    <input type="text" class="po-taxes" inputmode="decimal" value="${escapeAttr(inputs.annualTaxes || '')}" placeholder="e.g. 4800">
+                                </div>
+                                <div>
+                                    <label>Mortgage rate % <span class="hint">(if known)</span></label>
+                                    <input type="text" class="po-rate" inputmode="decimal" value="${escapeAttr(inputs.rate || '')}" placeholder="${p.contractRate ? 'assumed ' + p.contractRate : 'e.g. 4.875'}">
+                                </div>
+                            </div>
+                            <div class="payoff-save-row">
+                                <button type="button" class="payoff-save-btn" onclick="savePayoff(this)">Save &amp; recalculate</button>
+                                <span class="payoff-save-status"></span>
+                            </div>
+                        </div>
+                    </div>
+                </details>`;
+        }
+
+        async function savePayoff(btn) {
+            const form = btn.closest('.payoff-edit');
+            const caseNumber = form.dataset.case;
+            const status = form.querySelector('.payoff-save-status');
+            const overrides = {};
+            form.querySelectorAll('.payoff-mortgage input[type="checkbox"]').forEach(cb => {
+                if (cb.checked !== (cb.dataset.auto === '1')) overrides[cb.dataset.key] = cb.checked;
+            });
+            const otherLiens = form.querySelector('.po-liens').value.split('\n').map(line => {
+                const m = line.trim().match(/^(.*?)[,\t]\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$/);
+                return m ? { name: m[1].trim(), amount: m[2].replace(/,/g, '') } : null;
+            }).filter(Boolean);
+            const body = {
+                recorderText: form.querySelector('.po-recorder').value,
+                overrides,
+                otherLiens,
+                annualTaxes: form.querySelector('.po-taxes').value.replace(/[$,\s]/g, ''),
+                rate: form.querySelector('.po-rate').value.replace(/[%\s]/g, '')
+            };
+            btn.disabled = true;
+            status.textContent = 'Saving…';
+            try {
+                const res = await fetch(`/api/pipeline/payoff/${encodeURIComponent(caseNumber)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+                    body: JSON.stringify(body)
+                });
+                const updated = await res.json();
+                if (!res.ok) throw new Error(updated.error || res.statusText);
+                // Update the in-memory case and repaint just this card, payoff section open.
+                const list = (montcoRenderState && montcoRenderState.cases) || [];
+                const target = list.find(x => x.caseNumber === caseNumber);
+                if (target) {
+                    target.payoff = updated.payoff;
+                    target.payoffInputs = updated.payoffInputs;
+                }
+                const card = btn.closest('.property-card');
+                if (card && target) {
+                    card.outerHTML = createPropertyCard(target);
+                    const fresh = document.querySelector(`.property-card[data-case="${CSS.escape(caseNumber)}"] .payoff-details`);
+                    if (fresh) {
+                        fresh.open = true;
+                        const s = fresh.querySelector('.payoff-save-status');
+                        if (s) s.textContent = 'Saved.';
+                    }
+                } else {
+                    status.textContent = 'Saved.';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                status.textContent = 'Save failed: ' + e.message;
+                btn.disabled = false;
+            }
+        }
+
         function defendantAddrTooltip(c) {
             let t = `Address came from the defendant's mailing address (parcel lookup ${c.addressSource === 'defendant-fallback' ? 'failed' : 'unavailable'}) — may not be the actual property`;
             if (c.parcelMatch && c.parcelMatch.confidence === 'address') {
@@ -2638,6 +2907,50 @@
                 btn.disabled = false;
                 btn.innerHTML = originalText;
             }
+        }
+
+        // Recorder of Deeds refresh: runs in the background on the server (also after
+        // each Process All). The button shows progress; clicking it while running stops it.
+        let recorderPollTimer = null;
+        async function refreshRecorder() {
+            const btn = document.getElementById('recorderBtn');
+            try {
+                const st = await (await fetch('/api/pipeline/recorder-refresh/status', { headers: { 'X-Auth-Token': authToken } })).json();
+                if (st.running) {
+                    await fetch('/api/pipeline/recorder-refresh/stop', { method: 'POST', headers: { 'X-Auth-Token': authToken } });
+                    btn.innerHTML = 'Stopping…';
+                    return;
+                }
+                const r = await fetch('/api/pipeline/recorder-refresh', { method: 'POST', headers: { 'X-Auth-Token': authToken } });
+                const j = await r.json();
+                if (!r.ok) throw new Error(j.error || r.statusText);
+                pollRecorder();
+            } catch (e) {
+                alert('Recorder refresh: ' + e.message);
+            }
+        }
+        async function pollRecorder() {
+            const btn = document.getElementById('recorderBtn');
+            if (!btn || !authToken) return;
+            clearTimeout(recorderPollTimer);
+            try {
+                const st = await (await fetch('/api/pipeline/recorder-refresh/status', { headers: { 'X-Auth-Token': authToken } })).json();
+                if (st.running) {
+                    const p = st.progress || {};
+                    btn.innerHTML = p.total != null ? `Recorder ${p.checked || 0}/${p.total} (stop)` : 'Recorder starting… (stop)';
+                    recorderPollTimer = setTimeout(pollRecorder, 4000);
+                } else {
+                    btn.innerHTML = 'Pull Recorder Data';
+                    if (st.last && st.last.at && st.last.at !== btn.dataset.lastAt) {
+                        const firstSeen = !btn.dataset.lastAt;
+                        btn.dataset.lastAt = st.last.at;
+                        btn.title = `Last run ${new Date(st.last.at).toLocaleString()}: ${st.last.status}` +
+                            (st.last.checked != null ? `, ${st.last.checked} checked, ${st.last.failed || 0} failed` : '') +
+                            (st.last.error ? ` (${st.last.error})` : '') + (st.last.reason && st.last.status === 'skipped' ? ` (${st.last.reason})` : '');
+                        if (!firstSeen) loadData();
+                    }
+                }
+            } catch (e) { /* status is best-effort */ }
         }
 
         async function rescanLienParcels() {

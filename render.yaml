@@ -11,3 +11,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Recorder of Deeds free account, used by the automatic parcel lookup.
+      # Set the values in the Render dashboard (never committed).
+      - key: RECORDER_USER
+        sync: false
+      - key: RECORDER_PASS
+        sync: false

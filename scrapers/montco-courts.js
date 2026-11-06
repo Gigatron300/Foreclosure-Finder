@@ -1108,6 +1108,7 @@ async function scrapeMontgomeryCourts(options = {}) {
             daysSinceLastFiling: null,
             hasServiceCompleted: false,
             docketEvents: [],
+            events: [],
             allText: '',
             allTypes: '',
             lastEventText: '',
@@ -1182,6 +1183,11 @@ async function scrapeMontgomeryCourts(options = {}) {
                 result.docket.lastEventType = (docketType || '').toUpperCase();
               }
 
+              // Full docket (compact) for the payoff estimate: judgment kind, writ, sale status.
+              if (filingDate || docketType || docketText) {
+                result.docket.events.push({ date: filingDate, type: docketType, text: docketText.substring(0, 300) });
+              }
+
               // Keep last 5 events
               if (ri >= rows.length - 5) {
                 result.docket.docketEvents.push({
@@ -1214,10 +1220,18 @@ async function scrapeMontgomeryCourts(options = {}) {
           if (amountIdx >= 0 && againstIdx >= 0 && forIdx >= 0) {
             const rows = table.querySelectorAll('tr');
             let latestAmount = null;
+            const dateIdx = headers.findIndex(h => h === 'date');
+            result.judgments = result.judgments || [];
             for (let ri = 1; ri < rows.length; ri++) {
               const cells = rows[ri].querySelectorAll('td');
               if (cells.length <= amountIdx) continue;
               const raw = (cells[amountIdx].textContent || '').trim();
+              result.judgments.push({
+                for: (cells[forIdx].textContent || '').trim(),
+                against: (cells[againstIdx].textContent || '').trim(),
+                date: dateIdx >= 0 && cells[dateIdx] ? (cells[dateIdx].textContent || '').trim() : '',
+                amount: raw
+              });
               const m = raw.match(/[\d,]+\.\d{2}|[\d,]+/);
               if (!m) continue;
               const num = parseFloat(m[0].replace(/,/g, ''));
@@ -1339,6 +1353,7 @@ async function scrapeMontgomeryCourts(options = {}) {
       c.mortgagePage = bookPage ? bookPage.page : '';
       c.detailUrl = currentUrl;
       c.judgmentAmount = data.judgmentAmount != null ? data.judgmentAmount : null;
+      c.judgments = data.judgments || [];
 
       // Live status read off the court page today (the CSV status can be stale).
       // Closed = a closed-type keyword and no open-type keyword.
@@ -1359,6 +1374,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         caseTypeKind: classifyCaseType(c.caseType),
         parcelNumber: c.parcelNumber || '',
         judgmentAmount: c.judgmentAmount != null ? c.judgmentAmount : null,
+        judgments: c.judgments || [],
         daysOpen: c.daysOpen,
         monthsOpen: c.monthsOpen,
         inSweetSpot: c.inSweetSpot,
@@ -1401,6 +1417,7 @@ async function scrapeMontgomeryCourts(options = {}) {
           daysSinceLastFiling: c.docket.daysSinceLastFiling || null,
           hasServiceCompleted: c.docket.hasServiceCompleted || false,
           recentEvents: c.docket.docketEvents || [],
+          events: c.docket.events || [],
           lastEventText: c.docket.lastEventText || '',
           lastEventType: c.docket.lastEventType || ''
         },
