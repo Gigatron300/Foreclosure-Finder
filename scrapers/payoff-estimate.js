@@ -573,8 +573,10 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
       : 'Plaintiff is a home-equity lender, so this is likely a 2nd mortgage. A first mortgage probably sits AHEAD of it and is NOT in this total until Recorder data is pulled.');
   }
   if (!rows.length) flags.push('No Recorder data yet, so other mortgages are unknown. It is pulled after each Process All (or click Pull Recorder Data).');
-  if (facts.lienListFiled) {
-    flags.push(`BUY: Rule 3129 affidavit filed${facts.lienListDate ? ' ' + facts.lienListDate : ''}. It names every lien holder of record (borough, Domestic Relations, Revenue, junior mortgages). Add their amounts under Other liens.`);
+  // A 3129 affidavit only matters while the foreclosure is live.
+  const lienListLive = facts.lienListFiled && !closedForeclosure;
+  if (lienListLive) {
+    flags.push(`Rule 3129 affidavit filed${facts.lienListDate ? ' ' + facts.lienListDate : ''}: it names every lien holder of record (borough, Domestic Relations, Revenue, junior mortgages), the easiest way to see everything that must be paid off.`);
   }
   if (facts.bankruptcyDischarged) flags.push('Bankruptcy discharged. The owner is not personally liable, but liens stay on the house, which gives you leverage to negotiate a junior lien down.');
   if (facts.writReturned) flags.unshift('STOP: the docket shows the writ returned or a sheriff sale outcome. The house may already be sold. Verify with the Sheriff (610-278-3331) before pricing.');
@@ -610,7 +612,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     },
     facts: {
       judgment: facts.judgment ? { ...facts.judgment, date: isoDate(facts.judgment.date) } : null,
-      writFiled: facts.writFiled, lienListFiled: facts.lienListFiled, lienListDate: facts.lienListDate,
+      writFiled: facts.writFiled, lienListFiled: lienListLive, lienListDate: facts.lienListDate,
       saleContinued: facts.saleContinued, writReturned: facts.writReturned,
       bankruptcy: facts.bankruptcy, bankruptcyDischarged: facts.bankruptcyDischarged
     },
