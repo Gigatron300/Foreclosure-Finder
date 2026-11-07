@@ -447,6 +447,7 @@
             background: var(--danger); color: var(--on-solid);
             font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
         }
+        .closed-flag.partial { background: var(--warning-tint); color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
 
         /* Filter dropdown */
         .filter-dropdown-group {
@@ -2067,9 +2068,8 @@
                 }
 
                 // Hide cases that read CLOSED on the court page today
-                if (hideClosed) {
-                    cases = cases.filter(c => !c.liveClosed);
-                }
+                // Hide Closed is applied after grouping by parcel (below): a parcel is
+                // hidden only when every case on it reads CLOSED.
 
                 // Annotate sheriff-sale matches before render
                 for (const c of cases) {
@@ -2110,8 +2110,11 @@
                 // Free-text search across the full grouped dataset (matches the primary
                 // card or any case stacked on its parcel).
                 let visibleCases = groupedCases;
+                if (hideClosed) {
+                    visibleCases = visibleCases.filter(c => (c._stackMembers || [c]).some(m => !m.liveClosed));
+                }
                 if (searchTerms.length) {
-                    visibleCases = groupedCases.filter(c => caseMatchesSearch(c, searchTerms));
+                    visibleCases = visibleCases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
 
                 // Update stats (before filtering for sweet spot only)
@@ -2251,7 +2254,7 @@
                     <div class="property-info">
                         <div class="address-row">
                             <div class="property-address${c.propertyAddress ? ' copyable' : ''}"${c.propertyAddress ? ` data-copy="${escapeAttr(copyText)}" title="Click to copy: ${escapeAttr(copyText)}" onclick="copyAddressFromCard(this)"` : ''}>${address}</div>
-                            ${c.liveClosed ? `<span class="closed-flag" title="Case reads &quot;${c.liveStatus || 'CLOSED'}&quot; on the court page today — it was OPEN in the uploaded CSV">CLOSED NOW</span>` : ''}
+                            ${closedBadge(c)}
                             ${c.payoff && c.payoff.facts && c.payoff.facts.lienListFiled ? `<span class="address-warning-flag lien-list" title="${escapeAttr(`A Rule 3129 affidavit was filed${c.payoff.facts.lienListDate ? ' on ' + c.payoff.facts.lienListDate : ''}. It lists every lien holder of record: worth buying.`)}"><span class="address-warning-dot"></span>3129 on file: buy</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
@@ -2688,6 +2691,31 @@
 
         function escapeAttr(s) {
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        }
+
+        // Closed badge for the whole parcel, not just the case the card shows:
+        // all closed -> CLOSED NOW; some closed -> "MORTGAGE CLOSED · 1 LIEN OPEN".
+        function kindCount(list, verb) {
+            const counts = {};
+            list.forEach(m => {
+                const k = m.caseTypeKind === 'mortgage' ? 'MORTGAGE' : m.caseTypeKind === 'lien' ? 'LIEN' : 'CASE';
+                counts[k] = (counts[k] || 0) + 1;
+            });
+            return Object.entries(counts).map(([k, n]) => {
+                const word = n > 1 ? k + 'S' : k;
+                return (n > 1 || verb === 'OPEN' ? `${n} ` : '') + `${word} ${verb}`;
+            }).join(' · ');
+        }
+        function closedBadge(c) {
+            const members = c._stackMembers || [c];
+            const closed = members.filter(m => m.liveClosed);
+            if (!closed.length) return '';
+            const open = members.filter(m => !m.liveClosed);
+            const detail = closed.map(m => `${m.caseNumber}: ${m.liveStatus || 'CLOSED'}`).join('; ');
+            if (!open.length) {
+                return `<span class="closed-flag" title="${escapeAttr('Reads CLOSED on the court page at last scrape (' + detail + ')')}">CLOSED NOW</span>`;
+            }
+            return `<span class="closed-flag partial" title="${escapeAttr('Closed on the court page: ' + detail + '. Still open: ' + open.map(m => m.caseNumber).join(', '))}">${kindCount(closed, 'CLOSED')} · ${kindCount(open, 'OPEN')}</span>`;
         }
 
         // ---- Payoff estimate (computed server-side by scrapers/payoff-estimate.js) ----
