@@ -202,6 +202,9 @@ function parseRecorderIndex(text) {
       // "Mortgage (ASSIGNMENT)" -> "Mortgage Assignment"; other qualifiers kept as-is.
       type = /assign/i.test(paren) && /^mortgage$/i.test(type) ? 'Mortgage Assignment' : `${type} (${paren.trim()})`;
     }
+    // "Court Order: Deed ($0.00)" is a court order recorded in the deed books, not a transfer.
+    const isOrder = /court\s+order\s*:?\s*$/i.test(chunk.slice(0, t.index));
+    if (isOrder) type = 'Court Order';
     const key = `${s.volume} ${s.book}/${s.page}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -213,7 +216,8 @@ function parseRecorderIndex(text) {
       type: type.replace(/\b\w/g, ch => ch.toUpperCase()).replace(/\bOf\b/, 'of'),
       amount: amountText ? money(amountText) : null,
       recorded: isoDate(toDate(t[3])),
-      parties: chunk.slice(0, t.index).replace(/\s*\+\s*/g, ' ').replace(/\s+\d\s+/g, ' / ').trim()
+      parties: chunk.slice(0, t.index).replace(/court\s+order\s*:?\s*$/i, '')
+        .replace(/\s*\+\s*/g, ' ').replace(/\s+\d\s+/g, ' / ').trim()
     });
   }
   return rows;
@@ -256,6 +260,12 @@ function personWords(text) {
   return new Set(String(text || '').toUpperCase().split(/[^A-Z]+/).filter(w => w.length > 2));
 }
 const sharesWord = (a, b) => [...a].some(w => b.has(w));
+// The lender's party group: second on a mortgage, first on a satisfaction.
+function lenderSide(r, kind) {
+  const g = partyGroups(r);
+  if (g.length < 2) return r.parties || '';
+  return kind === 'satisfaction' ? g[0] : g[1];
+}
 
 // Which recorded mortgages are still open. Each satisfaction cancels an earlier
 // unsatisfied mortgage of the SAME borrower, preferring one whose lender name it
@@ -267,7 +277,7 @@ function resolveOpenMortgages(rows, overrides = {}, asOf = new Date(), opts = {}
   const mortgages = rows.filter(isMortgage).map(r => ({ ...r, open: true, satisfiedBy: null }));
   // Owner names = grantees of deeds; their words never identify a lender.
   const ownerWords = new Set();
-  rows.filter(r => /^deed$/i.test(r.type)).forEach(r =>
+  rows.filter(r => /^deed/i.test(r.type)).forEach(r =>
     String(r.parties || '').toUpperCase().split(/[^A-Z]+/).forEach(w => w.length > 2 && ownerWords.add(w)));
   const assignments = rows.filter(r => /assign/i.test(r.type) && r.amount && r.recorded);
   const protect = new Set(opts.protect || []);
@@ -291,9 +301,12 @@ function resolveOpenMortgages(rows, overrides = {}, asOf = new Date(), opts = {}
     const sd = toDate(s.recorded);
     const older = candidates.filter(mt => sd && daysBetween(toDate(mt.recorded), sd) > 45);
     if (older.length) candidates = older;
-    const sw = lenderWords(s.parties, ownerWords);
-    const byName = candidates.find(mt => [...lenderWords(mt.parties, ownerWords)].some(w => sw.has(w)));
-    const target = byName || candidates[0];
+    const sw = lenderWords(lenderSide(s, 'satisfaction'), ownerWords);
+    const byName = sw.size ? candidates.find(mt => [...lenderWords(lenderSide(mt, 'mortgage'), ownerWords)].some(w => sw.has(w))) : null;
+    // A satisfaction signed only by MERS belongs to a MERS-registered loan.
+    const MERS_RE = /\bMERS\b|ELECTRONIC\s+REGISTRATION/i;
+    const byMers = MERS_RE.test(s.parties || '') ? candidates.find(mt => MERS_RE.test(mt.parties || '')) : null;
+    const target = byName || byMers || candidates[0];
     if (target) { target.open = false; target.satisfiedBy = s.key; }
   }
   const cutoff = isoDate(new Date(asOf.getFullYear() - 30, asOf.getMonth(), asOf.getDate()));
@@ -361,10 +374,24 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
         const m = rows.find(r => isMortgage(r) && r.amount === a.amount && r.recorded <= a.recorded);
         if (m && !protect.includes(m.key)) { protect.push(m.key); protectedBy = `assigned to the plaintiff ${a.recorded}`; }
       }
+      if (!protect.length) {
+        // Last resort: a mortgage made to the plaintiff itself. With a judgment, the
+        // loan whose face fits it best (judgments run ~10% over principal).
+        const named = rows.filter(r => isMortgage(r) && r.amount && !isHud(r) && sharesWord(lenderWords(r.parties, new Set()), pw));
+        const jAmt = facts.judgment && facts.judgment.amount;
+        const pick = jAmt
+          ? [...named].sort((a, b) => Math.abs(Math.log(jAmt / a.amount) - 0.1) - Math.abs(Math.log(jAmt / b.amount) - 0.1))[0]
+          : [...named].sort((a, b) => (b.recorded || '').localeCompare(a.recorded || ''))[0];
+        if (pick) { protect.push(pick.key); protectedBy = `mortgage made to the plaintiff${named.length > 1 ? ` (best fit of ${named.length})` : ''}`; }
+      }
     }
   }
+  // While the foreclosure is open its loan is unpaid by definition (a payoff ends the
+  // case), so no satisfaction closes it. Once the case is closed, only satisfactions
+  // recorded before the filing are ignored.
+  const caseOpen = !isClosedCase(c);
   const mortgages = resolveOpenMortgages(rows, inputs.overrides || {}, asOf, {
-    protect, protectUntil: c.commencedDate ? isoDate(toDate(c.commencedDate)) : null
+    protect, protectUntil: caseOpen ? null : (c.commencedDate ? isoDate(toDate(c.commencedDate)) : null)
   });
 
   let senior = mortgages.find(mt => mt.book === book && mt.page === page) || null;
@@ -439,6 +466,16 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     flags.unshift(`Sheriff's deed recorded ${sheriffDeed.recorded}: the property was already sold at sheriff sale.`);
   } else if (deedsAfter.length) {
     flags.unshift(`Deed recorded ${deedsAfter[0].recorded}, after the case was filed: ownership may have changed.`);
+  }
+  // Court orders recorded against the property (quiet title, reformation, federal cases).
+  const orders = rows.filter(r => r.type === 'Court Order' && r.recorded && (!caseFiled || toDate(r.recorded) >= addMonths(caseFiled, -24)));
+  for (const o of orders) {
+    const parties = [...new Set(String(o.parties || '').split(/\/ORDER|\s\/\s/i)
+      .map(s => s.replace(/^\d+\s+|^AKA\s+/i, '').trim()).filter(Boolean))].join(', ').slice(0, 160);
+    flags.push(`Court order recorded ${o.recorded} (${o.key}): ${parties}. Not a sale; read it before pricing.`);
+  }
+  if (rows.some(r => /UNITED STATES OF AMERICA|INTERNAL REVENUE|\bIRS\b/i.test(r.parties || '') && !isHud(r))) {
+    flags.unshift('The United States appears on the record: possible federal (IRS) lien. Its amount is filed with the Prothonotary, not the Recorder. If the US is a lienholder, it can redeem for up to a year after a sheriff sale (28 U.S.C. 2410).');
   }
 
   if (sheriffDeed) {
