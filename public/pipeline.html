@@ -2771,7 +2771,7 @@
                         <span class="expand-icon">v</span>
                     </summary>
                     <div class="payoff-body">
-                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.closingDate ? ` · priced to an assumed closing ${escapeAttr(p.closingDate)} (today + 60 days)` : ''}</div>
+                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.closingDate ? ` · as of ${escapeAttr(p.closingDate)}` : ''}</div>
                         ${p.carryPerMonth ? `<div class="payoff-basis">Carry ≈ ${fmtDollars(p.carryPerMonth)}/month: a 60-day slip adds ≈ ${fmtDollars(p.carryPerMonth * 2)}.</div>` : ''}
                         ${p.recorderAuto ? `<div class="payoff-basis">Recorder index pulled automatically ${escapeAttr(String(p.recorderAuto.fetchedAt).slice(0, 10))} (${p.recorderAuto.total ?? '?'} documents${p.recorderAuto.truncated ? ', first 100 only' : ''}).</div>` : ''}
                         ${table}

@@ -40,7 +40,7 @@ const ASSUMPTIONS = {
   legalRate: 0.06,            // PA legal rate on judgments
   courtLienRate: 0.10,        // municipal claims accrue up to 10%/yr plus costs
   monthsComplaintAfterDefault: 7, // first missed payment -> complaint filed
-  closingDays: 60,            // price to a closing date: today + 60 days (NJ skill convention)
+  closingDays: 0,             // price to today (set >0 to project to a later closing date)
   // Servicer advances, HIGH side (NJ payoff_math.py, calibrated on closed cases): with an
   // escrow/FHA tell, 8% of UPB per year in default; without one, 8% of UPB once.
   advancesHighPct: 0.08,
