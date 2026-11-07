@@ -40,6 +40,10 @@ const ASSUMPTIONS = {
   legalRate: 0.06,            // PA legal rate on judgments
   courtLienRate: 0.10,        // municipal claims accrue up to 10%/yr plus costs
   monthsComplaintAfterDefault: 7, // first missed payment -> complaint filed
+  closingDays: 60,            // price to a closing date: today + 60 days (NJ skill convention)
+  // Servicer advances, HIGH side (NJ payoff_math.py, calibrated on closed cases): with an
+  // escrow/FHA tell, 8% of UPB per year in default; without one, 8% of UPB once.
+  advancesHighPct: 0.08,
   junior: { rate: 0.08, unpaidFromYears: 1 }
 };
 
@@ -119,6 +123,8 @@ function extractDocketFacts(c) {
     lienListFiled: !!lienListEvent,
     lienListDate: lienListEvent ? lienListEvent.date : null,
     saleContinued: any(/CONTINUED SHERIFF SALE|SHERIFF SALE.*(CONTINU|POSTPON)|POSTPONE/),
+    // The sheriff returned the writ: either the sale happened or it was returned unexecuted.
+    writReturned: any(/WRIT.{0,20}RETURN|RETURN.{0,20}WRIT|SHERIFF.?S DEED|PROPERTY SOLD|SOLD TO/),
     bankruptcy: !!d.hasBankruptcy || any(/BANKRUPTCY/),
     bankruptcyDischarged: any(/DISCHARGE/),
     stayed: !!d.isStayed && !any(/STAY IS LIFTED|STAY LIFTED/),
@@ -307,7 +313,14 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
   const stage = stageOf(facts);
   const flags = [];
   const lines = [];
+  const closing = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate() + ASSUMPTIONS.closingDays);
   const rows = inputs.recorderText ? parseRecorderIndex(inputs.recorderText) : [];
+  // Escrow/FHA tell: a HUD partial-claim mortgage means an FHA loan, which escrows taxes.
+  const escrowTell = rows.some(r => isMortgage(r) && isHud(r)) ? 'HUD mortgage on record (FHA loan)' : null;
+  // HIGH advances = the larger of the flat per-year figure and the calibrated % of UPB.
+  const advancesHigh = (flatHigh, upb, years) => Math.max(flatHigh,
+    upb * ASSUMPTIONS.advancesHighPct * (escrowTell ? years : 1));
+  let perDiemHigh = 0, advancesPerYearHigh = 0;
   const mortgages = resolveOpenMortgages(rows, inputs.overrides || {}, asOf);
 
   // The foreclosed mortgage: match the docket Remarks book/page against the index.
@@ -337,8 +350,13 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
       .sort((a, b) => b.amount - a.amount)[0] || null;
     if (senior) flags.push(`Foreclosed loan assumed to be ${senior.key} (largest open mortgage). The docket did not name its book/page.`);
   }
-  const seniorAmount = money(inputs.originalAmount) ?? (senior && senior.amount);
-  const seniorDate = toDate(inputs.originationDate) || (senior && toDate(senior.recorded));
+  // A recorded modification after the foreclosed loan resets it: amortize from the
+  // modification's new principal and date (it can exceed the original note).
+  const mod = senior ? rows.filter(r => isModification(r) && r.amount && r.recorded && r.recorded > senior.recorded)
+    .sort((a, b) => b.recorded.localeCompare(a.recorded))[0] : null;
+  if (mod) flags.push(`Loan modified ${mod.recorded} ($${round(mod.amount).toLocaleString()}): estimate starts from the modification, not the original note.`);
+  const seniorAmount = money(inputs.originalAmount) ?? (mod ? mod.amount : senior && senior.amount);
+  const seniorDate = toDate(inputs.originationDate) || (mod ? toDate(mod.recorded) : senior && toDate(senior.recorded));
   const rateGiven = money(inputs.rate);
   const contractRate = rateGiven != null
     ? rateGiven / 100
@@ -405,7 +423,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     const j = facts.judgment;
     const jDate = j.date || toDate(c.docket && c.docket.lastFilingDate) || toDate(c.commencedDate);
     if (!j.dateKnown) flags.push('Judgment date not on file. Using the last docket date. Re-scan the case to fix.');
-    const days = daysBetween(jDate, asOf);
+    const days = daysBetween(jDate, closing);
     const lowRate = Math.min(contractRate || 0.04, ASSUMPTIONS.legalRate);
     const highRate = Math.max(contractRate || 0, ASSUMPTIONS.legalRate);
     const intLow = j.amount * 0.9 * lowRate / 365 * days;   // contract rate runs on principal only
@@ -417,7 +435,13 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     // advancing taxes (the first-mortgage servicer does that).
     const escrow = c.caseTypeKind === 'lien' || juniorPlaintiff
       ? { low: 0, high: 0 }
-      : escrowBand(daysBetween(escrowFrom, asOf) / 365, inputs);
+      : escrowBand(daysBetween(escrowFrom, closing) / 365, inputs);
+    if (!(c.caseTypeKind === 'lien' || juniorPlaintiff)) {
+      const yrs = daysBetween(escrowFrom, closing) / 365;
+      escrow.high = advancesHigh(escrow.high, j.amount * 0.9, yrs);
+      advancesPerYearHigh = yrs > 0 ? escrow.high / yrs : 0;
+    }
+    perDiemHigh = j.amount * highRate / 365;
 
     lines.push({ label: `Judgment (${isoDate(jDate)}${j.kind === 'default' ? ', default' : j.kind === 'summary' ? ', summary' : ''})`, low: j.amount, high: j.amount });
     lines.push({ label: `Interest since judgment (${days} days)`, low: intLow, high: intHigh });
@@ -438,8 +462,11 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     // Higher rate -> slower paydown and more interest, so it bounds the high side.
     const balLow = amortizedBalance(seniorAmount, rLow, 360, paid);
     const balHigh = amortizedBalance(seniorAmount, rHigh, 360, paid) * (looksModified ? 1.2 : 1);
-    const days = daysBetween(defaultDate, asOf);
+    const days = daysBetween(defaultDate, closing);
     const escrow = escrowBand(days / 365, inputs);
+    escrow.high = advancesHigh(escrow.high, balHigh, days / 365);
+    advancesPerYearHigh = days > 0 ? escrow.high / (days / 365) : 0;
+    perDiemHigh = balHigh * rHigh / 365;
 
     lines.push({ label: `Principal at default (~${isoDate(defaultDate)}), from $${round(seniorAmount).toLocaleString()} recorded ${isoDate(seniorDate)}`, low: balLow, high: balHigh });
     lines.push({ label: `Interest since default at ${(rLow * 100).toFixed(2)}–${(rHigh * 100).toFixed(2)}%`, low: balLow * rLow / 365 * days, high: balHigh * rHigh / 365 * days });
@@ -486,7 +513,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     }
     const sf = extractDocketFacts(s);
     const since = (sf.judgment && sf.judgment.date) || toDate(s.commencedDate) || asOf;
-    const yrs = daysBetween(since, asOf) / 365;
+    const yrs = daysBetween(since, closing) / 365;
     juniors.push({
       label: `${kind} ${s.caseNumber} (${who}), judgment`,
       low: amt,
@@ -518,7 +545,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     if (isHud(mt)) {
       juniors.push({ key: mt.key, label: `HUD partial claim ${mt.recorded} (0% interest, face = payoff)`, low: mt.amount, high: mt.amount, exact: true });
     } else {
-      const yrs = mt.recorded ? daysBetween(toDate(mt.recorded), asOf) / 365 : 0;
+      const yrs = mt.recorded ? daysBetween(toDate(mt.recorded), closing) / 365 : 0;
       const unpaidYrs = Math.max(0, yrs - ASSUMPTIONS.junior.unpaidFromYears);
       juniors.push({
         key: mt.key,
@@ -550,12 +577,16 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     flags.push(`BUY: Rule 3129 affidavit filed${facts.lienListDate ? ' ' + facts.lienListDate : ''}. It names every lien holder of record (borough, Domestic Relations, Revenue, junior mortgages). Add their amounts under Other liens.`);
   }
   if (facts.bankruptcyDischarged) flags.push('Bankruptcy discharged. The owner is not personally liable, but liens stay on the house, which gives you leverage to negotiate a junior lien down.');
+  if (facts.writReturned) flags.unshift('STOP: the docket shows the writ returned or a sheriff sale outcome. The house may already be sold. Verify with the Sheriff (610-278-3331) before pricing.');
   if (facts.saleContinued) flags.push('Sheriff sale was postponed. Check Bid4Assets for the new date.');
   if (facts.defendantHasLawyer) flags.push('Defendant has appeared or is contesting. Expect to deal through their lawyer.');
 
   const r = (b) => b ? { low: round(b.low), high: round(b.high) } : null;
   return {
     asOf: isoDate(asOf),
+    closingDate: isoDate(closing),
+    escrowTell,
+    carryPerMonth: tier ? round(perDiemHigh * 30.44 + advancesPerYearHigh / 12) : null,
     tier,
     stage,
     basis,
@@ -580,7 +611,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     facts: {
       judgment: facts.judgment ? { ...facts.judgment, date: isoDate(facts.judgment.date) } : null,
       writFiled: facts.writFiled, lienListFiled: facts.lienListFiled, lienListDate: facts.lienListDate,
-      saleContinued: facts.saleContinued,
+      saleContinued: facts.saleContinued, writReturned: facts.writReturned,
       bankruptcy: facts.bankruptcy, bankruptcyDischarged: facts.bankruptcyDischarged
     },
     flags

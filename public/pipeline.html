@@ -2697,9 +2697,10 @@
             if (n == null || isNaN(n)) return '';
             return '$' + Math.round(n).toLocaleString('en-US');
         }
+        // Conservative by design: the card shows the HIGH end only (quoting low risks a re-trade).
         function fmtRange(b) {
             if (!b) return '';
-            return Math.round(b.low) === Math.round(b.high) ? fmtDollars(b.low) : `${fmtDollars(b.low)} – ${fmtDollars(b.high)}`;
+            return fmtDollars(b.high);
         }
         function payoffTotalBand(p) {
             if (!p || p.error) return null;
@@ -2710,14 +2711,14 @@
             const band = payoffTotalBand(p);
             if (!band) {
                 const liens = p && p.juniorTotal && p.juniorTotal.high > 0
-                    ? `Liens ${fmtK(p.juniorTotal.low)}–${fmtK(p.juniorTotal.high)} + mortgage?` : 'Needs Recorder data';
+                    ? `Liens ${fmtK(p.juniorTotal.high)} + mortgage?` : 'Needs Recorder data';
                 return `<div class="detail-value payoff-none" title="No judgment yet: paste the Recorder parcel search to estimate the mortgage">${liens}</div>`;
             }
             const noRecorder = !p.recorder || !p.recorder.rows;
             const partial = noRecorder && p.juniorPlaintiff
                 ? ' <span title="Plaintiff is a home-equity lender: a first mortgage likely sits ahead of this loan and is not counted until Recorder data is added">+ 1st mtg?</span>'
                 : noRecorder ? ' <span title="Other mortgages unknown until Recorder data is added">*</span>' : '';
-            return `<div class="detail-value amount">${fmtK(band.low)}–${fmtK(band.high)}${partial}</div>`;
+            return `<div class="detail-value amount">${fmtK(band.high)}${partial}</div>`;
         }
 
         function renderPayoffSection(c) {
@@ -2735,7 +2736,7 @@
 
             const table = p.senior ? `
                 <table class="payoff-table">
-                    <tr><th>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'}</th><th class="num">Low – High</th></tr>
+                    <tr><th>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'}</th><th class="num">High</th></tr>
                     ${seniorRows}
                     <tr class="subtotal"><td>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'} total</td><td class="num">${fmtRange(p.senior)}</td></tr>
                     ${juniorRows ? `<tr><th colspan="2" style="padding-top:8px">Other liens</th></tr>${juniorRows}
@@ -2743,7 +2744,7 @@
                     <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
                 </table>` : juniorRows ? `
                 <table class="payoff-table">
-                    <tr><th>${p.seniorSatisfied ? 'Remaining liens (mortgage satisfied)' : 'Known liens (mortgage not estimated yet)'}</th><th class="num">Low – High</th></tr>
+                    <tr><th>${p.seniorSatisfied ? 'Remaining liens (mortgage satisfied)' : 'Known liens (mortgage not estimated yet)'}</th><th class="num">High</th></tr>
                     ${juniorRows}
                     <tr class="subtotal"><td>Liens total</td><td class="num">${fmtRange(p.juniorTotal)}</td></tr>
                 </table>` : '';
@@ -2766,11 +2767,12 @@
                 <details class="payoff-details">
                     <summary class="payoff-summary">
                         <span class="payoff-tier ${tierClass}">${tierLabel}</span>
-                        ${band ? `<span class="payoff-band">${fmtK(band.low)} – ${fmtK(band.high)}</span>` : '<span>Payoff estimate</span>'}
+                        ${band ? `<span class="payoff-band">${fmtK(band.high)}</span>` : '<span>Payoff estimate</span>'}
                         <span class="expand-icon">v</span>
                     </summary>
                     <div class="payoff-body">
-                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.asOf ? ` · as of ${escapeAttr(p.asOf)}` : ''}</div>
+                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.closingDate ? ` · priced to an assumed closing ${escapeAttr(p.closingDate)} (today + 60 days)` : ''}</div>
+                        ${p.carryPerMonth ? `<div class="payoff-basis">Carry ≈ ${fmtDollars(p.carryPerMonth)}/month: a 60-day slip adds ≈ ${fmtDollars(p.carryPerMonth * 2)}.</div>` : ''}
                         ${p.recorderAuto ? `<div class="payoff-basis">Recorder index pulled automatically ${escapeAttr(String(p.recorderAuto.fetchedAt).slice(0, 10))} (${p.recorderAuto.total ?? '?'} documents${p.recorderAuto.truncated ? ', first 100 only' : ''}).</div>` : ''}
                         ${table}
                         ${flags}
