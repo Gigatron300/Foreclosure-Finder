@@ -32,9 +32,9 @@ async function runScraper() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',
-      '--no-zygote',
-      '--js-flags=--max-old-space-size=256',
+      // --single-process / --no-zygote were memory savers for the 512MB instance;
+      // they make Chromium less stable, so they're dropped on the 2GB instance.
+      '--js-flags=--max-old-space-size=512',
       '--disable-extensions',
       '--disable-background-networking',
       '--disable-default-apps',

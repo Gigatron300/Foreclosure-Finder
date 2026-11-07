@@ -34,11 +34,13 @@ const MONTCO_TOWNS = [
 const CONFIG = {
   requestDelay: 500,
   pageLoadWait: 500,
-  batchSize: 30,
+  // Browser restarts every batchSize cases to release memory.
+  batchSize: parseInt(process.env.MONTCO_BATCH_SIZE || '60', 10),
   batchPause: 4000,
-  // One browser page at a time. Two concurrent Chromium contexts blew past the
-  // 512MB Render instance and triggered OOM restarts; 1 roughly halves peak memory.
-  concurrency: 1,
+  // Pages scraped in parallel. 1 was required on the 512MB instance (2 caused OOM
+  // restarts); the 2GB instance runs 3 comfortably. Override with MONTCO_CONCURRENCY
+  // (drop back to 1-2 if the court site starts rate-limiting or memory runs short).
+  concurrency: Math.max(1, parseInt(process.env.MONTCO_CONCURRENCY || '3', 10)),
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
@@ -60,7 +62,7 @@ async function launchBrowser() {
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--disable-extensions', '--disable-background-networking',
-      '--js-flags=--max-old-space-size=256'
+      '--js-flags=--max-old-space-size=512'
     ]
   });
 }

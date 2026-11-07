@@ -27,7 +27,7 @@ const CACHE_PATH = path.join(DATA_DIR, 'montco-recorder.json');
 
 const CONFIG = {
   maxAgeDays: 14,          // re-check a parcel at most every two weeks
-  pauseMs: 4000,           // between parcel searches
+  pauseMs: 2500,           // between parcel searches (kept polite: one search at a time)
   searchTimeoutMs: 45000,
   relogEvery: 60           // fresh session every N searches
 };
@@ -63,7 +63,7 @@ async function launch() {
   const opts = {
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
-      '--disable-extensions', '--js-flags=--max-old-space-size=256']
+      '--disable-extensions', '--js-flags=--max-old-space-size=512']
   };
   if (process.env.CHROME_PATH) opts.executablePath = process.env.CHROME_PATH;
   return puppeteer.launch(opts);
