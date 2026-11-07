@@ -2776,10 +2776,10 @@
                         ${flags}
                         <div class="payoff-edit" data-case="${escapeAttr(c.caseNumber)}">
                             <label>Recorder parcel search <span class="hint">(${p.recorderAuto ? 'pulled automatically; paste here only to override' : 'pulled automatically after each Process All; or paste the parcel search here'})</span></label>
-                            <textarea class="po-recorder" placeholder="MTG 15325 02923 ... Mortgage ($69,800.00) 07/16/2021 ...">${escapeAttr(inputs.recorderText || '')}</textarea>
+                            <textarea class="po-recorder" placeholder="(empty: using the automatic pull)">${escapeAttr(inputs.recorderText || '')}</textarea>
                             ${mortgageList}
                             <label>Other liens <span class="hint">(one per line: name, amount — e.g. from the owner-name judgment search)</span></label>
-                            <textarea class="po-liens" placeholder="Borough of Bridgeport, 1250.00">${escapeAttr(otherLiensText)}</textarea>
+                            <textarea class="po-liens" placeholder="Example: Township name, 1250.00">${escapeAttr(otherLiensText)}</textarea>
                             <div class="payoff-row-inputs">
                                 <div>
                                     <label>Annual tax bill <span class="hint">(optional)</span></label>
