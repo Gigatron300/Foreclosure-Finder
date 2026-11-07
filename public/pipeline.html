@@ -584,6 +584,7 @@
         .stack-row .stack-amount { color: var(--ink); font-weight: 600; }
         .stack-row .stack-meta { color: var(--muted); font-size: 0.72rem; }
         .stack-row .stack-status { font-size: 0.7rem; color: var(--ink-2); }
+        .stack-row .stack-status.closed { color: var(--danger); font-weight: 700; }
         .stack-row .stack-pill { font-size: 0.65rem; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600; }
         .stack-row .stack-pill.mortgage { background: var(--brand-gold-tint); color: var(--brand-gold-dark); }
         .stack-row .stack-pill.lien { background: var(--danger-tint); color: var(--danger); }
@@ -2221,7 +2222,8 @@
                             ${stackMembers.map(m => {
                                 const mKind = m.caseTypeKind || 'other';
                                 const mLabel = mKind === 'mortgage' ? 'Mortgage' : mKind === 'lien' ? 'Lien' : 'Other';
-                                const mStatus = (m.status || '').replace(/^[\d]+ - /, '');
+                                // Live court status (read at scrape time) beats the uploaded CSV's status.
+                                const mStatus = (m.liveClosed ? (m.liveStatus || 'CLOSED') : (m.liveStatus || m.status || '')).replace(/^[\d]+ - /, '');
                                 const filed = m.commencedDate ? formatDate(m.commencedDate) : '';
                                 const detailLink = m.detailUrl
                                     ? `<a href="${m.detailUrl}" target="_blank">${m.caseNumber}</a>`
@@ -2231,7 +2233,7 @@
                                     <span class="stack-pill ${mKind}">${mLabel}</span>
                                     <span class="stack-case-num">${detailLink}${mAmount ? ` <span class="stack-amount">${mAmount}</span>` : ''}</span>
                                     <span class="stack-meta">${filed}</span>
-                                    <span class="stack-status">${mStatus}</span>
+                                    <span class="stack-status${m.liveClosed ? ' closed' : ''}" title="${m.liveStatus ? 'Court page at last scrape: ' + escapeAttr(m.liveStatus) : 'From the uploaded court file'}">${mStatus}</span>
                                 </div>`;
                             }).join('')}
                         </div>
