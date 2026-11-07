@@ -44,7 +44,7 @@ const ASSUMPTIONS = {
   // Servicer advances, HIGH side (NJ payoff_math.py, calibrated on closed cases): with an
   // escrow/FHA tell, 8% of UPB per year in default; without one, 8% of UPB once.
   advancesHighPct: 0.08,
-  junior: { rate: 0.08, unpaidFromYears: 1 }
+  junior: { rate: 0.08, unpaidFromYears: 1, maxUnpaidYears: 3, oldYears: 15 }
 };
 
 // ---------- small helpers ----------
@@ -247,20 +247,44 @@ function lenderWords(text, ownerWords) {
     .filter(w => w.length > 2 && !NAME_NOISE.has(w) && !ownerWords.has(w)));
 }
 
+// Party groups of an index row: "1 HARKINS KEVIN J / PNC BANK" -> ['HARKINS KEVIN J', 'PNC BANK'].
+// Mortgage: [borrower, lender]. Satisfaction: [lender, borrower].
+function partyGroups(r) {
+  return String(r.parties || '').split(' / ').map(s => s.replace(/^\d+\s+/, '').trim()).filter(Boolean);
+}
+function personWords(text) {
+  return new Set(String(text || '').toUpperCase().split(/[^A-Z]+/).filter(w => w.length > 2));
+}
+const sharesWord = (a, b) => [...a].some(w => b.has(w));
+
 // Which recorded mortgages are still open. Each satisfaction cancels an earlier
-// unsatisfied mortgage, preferring one whose lender name it shares, else the
-// most recent. Mortgages over 30 years old are treated as expired. The user can
-// override any row.
-function resolveOpenMortgages(rows, overrides = {}, asOf = new Date()) {
+// unsatisfied mortgage of the SAME borrower, preferring one whose lender name it
+// shares, else the most recent. A mortgage assigned after a satisfaction was not
+// paid by it, and keys in opts.protect (the loan being foreclosed) are never
+// closed by a satisfaction recorded before opts.protectUntil. Mortgages over 30
+// years old are treated as expired. The user can override any row.
+function resolveOpenMortgages(rows, overrides = {}, asOf = new Date(), opts = {}) {
   const mortgages = rows.filter(isMortgage).map(r => ({ ...r, open: true, satisfiedBy: null }));
   // Owner names = grantees of deeds; their words never identify a lender.
   const ownerWords = new Set();
   rows.filter(r => /^deed$/i.test(r.type)).forEach(r =>
     String(r.parties || '').toUpperCase().split(/[^A-Z]+/).forEach(w => w.length > 2 && ownerWords.add(w)));
+  const assignments = rows.filter(r => /assign/i.test(r.type) && r.amount && r.recorded);
+  const protect = new Set(opts.protect || []);
   const sats = rows.filter(isSatisfaction).sort((a, b) => (a.recorded || '').localeCompare(b.recorded || ''));
   for (const s of sats) {
+    const satBorrower = personWords(partyGroups(s)[1]);
     let candidates = mortgages
       .filter(mt => mt.open && (mt.recorded || '') <= (s.recorded || ''))
+      // same borrower (a satisfaction of the previous owner's loan does not count)
+      .filter(mt => {
+        const mb = personWords(partyGroups(mt)[0]);
+        return !satBorrower.size || !mb.size || sharesWord(satBorrower, mb);
+      })
+      // assigned later with the same face amount -> still alive after this satisfaction
+      .filter(mt => !assignments.some(a => a.amount === mt.amount && a.recorded > s.recorded))
+      // the foreclosed loan was not paid off before the foreclosure was filed
+      .filter(mt => !(protect.has(mt.key) && (!opts.protectUntil || (s.recorded || '') < opts.protectUntil)))
       .sort((a, b) => (b.recorded || '').localeCompare(a.recorded || ''));
     // A refinance records the new loan days before the old one's satisfaction:
     // the satisfaction belongs to an older loan when there is one.
@@ -321,11 +345,33 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
   const advancesHigh = (flatHigh, upb, years) => Math.max(flatHigh,
     upb * ASSUMPTIONS.advancesHighPct * (escrowTell ? years : 1));
   let perDiemHigh = 0, advancesPerYearHigh = 0;
-  const mortgages = resolveOpenMortgages(rows, inputs.overrides || {}, asOf);
-
-  // The foreclosed mortgage: match the docket Remarks book/page against the index.
+  // The foreclosed mortgage, found on the raw rows before resolving satisfactions:
+  // the docket Remarks book/page, else a mortgage assigned to the plaintiff (an
+  // assignment row naming the plaintiff, with the loan's face amount).
   const book = parseInt(c.mortgageBook, 10), page = parseInt(c.mortgagePage, 10);
+  const protect = [];
+  let protectedBy = '';
+  if (c.caseTypeKind !== 'lien') {
+    const byBook = rows.find(r => isMortgage(r) && r.book === book && r.page === page);
+    if (byBook) protect.push(byBook.key);
+    else {
+      const pw = lenderWords(c.plaintiff, new Set());
+      const toPlaintiff = rows.filter(r => /assign/i.test(r.type) && r.amount && sharesWord(lenderWords(r.parties, new Set()), pw));
+      for (const a of toPlaintiff) {
+        const m = rows.find(r => isMortgage(r) && r.amount === a.amount && r.recorded <= a.recorded);
+        if (m && !protect.includes(m.key)) { protect.push(m.key); protectedBy = `assigned to the plaintiff ${a.recorded}`; }
+      }
+    }
+  }
+  const mortgages = resolveOpenMortgages(rows, inputs.overrides || {}, asOf, {
+    protect, protectUntil: c.commencedDate ? isoDate(toDate(c.commencedDate)) : null
+  });
+
   let senior = mortgages.find(mt => mt.book === book && mt.page === page) || null;
+  if (!senior && protect.length && c.caseTypeKind !== 'lien') {
+    senior = mortgages.find(mt => mt.key === protect[0]) || null;
+    if (senior) flags.push(`Foreclosed loan identified as ${senior.key} ($${round(senior.amount || 0).toLocaleString()}, ${senior.recorded}): ${protectedBy}.`);
+  }
   if (!senior && rows.length) {
     // No book/page match: look for open mortgages made to the plaintiff.
     const pw = lenderWords(c.plaintiff, new Set());
@@ -546,14 +592,18 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
       juniors.push({ key: mt.key, label: `HUD partial claim ${mt.recorded} (0% interest, face = payoff)`, low: mt.amount, high: mt.amount, exact: true });
     } else {
       const yrs = mt.recorded ? daysBetween(toDate(mt.recorded), closing) / 365 : 0;
-      const unpaidYrs = Math.max(0, yrs - ASSUMPTIONS.junior.unpaidFromYears);
+      // Unpaid interest on a junior is capped: we never know when it stopped paying,
+      // and an old loan has been paying down, not compounding, for most of its life.
+      const unpaidYrs = Math.min(ASSUMPTIONS.junior.maxUnpaidYears, Math.max(0, yrs - ASSUMPTIONS.junior.unpaidFromYears));
+      const old = yrs > ASSUMPTIONS.junior.oldYears;
       juniors.push({
         key: mt.key,
-        label: `Mortgage ${mt.recorded}, $${round(mt.amount).toLocaleString()} face`,
+        label: `Mortgage ${mt.recorded}, $${round(mt.amount).toLocaleString()} face${old ? ' (old: may be paid off without a recorded satisfaction)' : ''}`,
         low: mt.amount * 0.95,
         high: mt.amount * (1 + ASSUMPTIONS.junior.rate * unpaidYrs),
         negotiable: true
       });
+      if (old) flags.push(`Mortgage ${mt.key} (${mt.recorded}) is ${Math.floor(yrs)} years old with no satisfaction on file. It is counted at face plus interest; untick it if it was paid off.`);
     }
   }
   for (const l of inputs.otherLiens || []) {
