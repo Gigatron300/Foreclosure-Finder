@@ -59,9 +59,9 @@ const CONFIG = {
   // Browser restarts every batchSize cases to release memory.
   batchSize: positiveInt(process.env.MONTCO_BATCH_SIZE, 60),
   batchPause: 4000,
-  // Pages scraped in parallel. The court site gates parallel scraping on one session,
-  // so the default is 1; raise MONTCO_CONCURRENCY only with a court-approved rate.
-  concurrency: positiveInt(process.env.MONTCO_CONCURRENCY, 1),
+  // County-approved maximum: three isolated browser sessions in parallel.
+  // Clamp the environment override so a typo cannot exceed that limit.
+  concurrency: Math.min(3, positiveInt(process.env.MONTCO_CONCURRENCY, 3)),
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
@@ -92,8 +92,8 @@ async function launchBrowser() {
 // The court site (courtsapp.montcopa.org) now gates /psi/v/search/case and every
 // case-detail page behind a Cloudflare Turnstile "verify you are human" check.
 // Headless Puppeteer can't clear it silently. Instead we solve it ONCE in a
-// visible browser, capture the resulting session cookies, and replay them on
-// every headless page for the rest of the run (and future runs, until they expire).
+// visible browser, capture the resulting session cookies, and seed each isolated
+// headless worker context for the rest of the run (and future runs, until they expire).
 
 // Trim a raw cookie object (from page.cookies()/CDP) down to the fields
 // page.setCookie() accepts, so replaying it doesn't throw on extra keys.
@@ -108,7 +108,7 @@ function sanitizeCookies(cookies) {
   }).filter(c => c.name && c.value != null);
 }
 
-// Set the shared UA and (if we have one) replay the saved session cookies.
+// Set the consistent UA and (if we have one) replay the saved session cookies.
 // MUST be called after newPage() and before the first goto().
 async function applySession(page, session) {
   await page.setUserAgent((session && session.userAgent) || USER_AGENT);
@@ -996,8 +996,8 @@ async function scrapeMontgomeryCourts(options = {}) {
   console.log(`\n🌐 Scraping ${targets.length} cases (concurrency: ${concurrency})...`);
   console.log(`   Court requests start at least ${CONFIG.requestDelay}ms apart.`);
 
-  let authGateHits = 0; // court pages redirected to the Cloudflare gate (session missing/expired)
-  let authGateDetected = false;
+  let authGateHits = 0; // isolated workers redirected to the court gate (session missing/expired)
+  let anyAuthGateDetected = false;
   const waitForCourtRequest = createRequestGate(CONFIG.requestDelay);
 
   // Save what we have so the next run resumes, then bail out without returning a partial list.
@@ -1022,8 +1022,12 @@ async function scrapeMontgomeryCourts(options = {}) {
     const workers = [];
     for (let w = 0; w < concurrency; w++) {
       workers.push((async () => {
-        const page = await browser.newPage();
+        // Each worker gets its own cookie jar. A Set-Cookie or gate response in one
+        // context cannot mutate the approved session snapshot used by another.
+        const context = await browser.createBrowserContext();
+        const page = await context.newPage();
         await applySession(page, session);
+        let workerGated = false;
 
         // Block non-essential resources — case pages are plain HTML tables
         await page.setRequestInterception(true);
@@ -1037,7 +1041,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         });
 
         while (true) {
-          if (authGateDetected || shouldStop()) break;
+          if (workerGated || shouldStop()) break;
           const i = nextIndex++;
           if (i >= chunkEnd) break;
           const c = targets[i];
@@ -1056,7 +1060,6 @@ async function scrapeMontgomeryCourts(options = {}) {
       if (cachedUrl && cachedUrl.includes('/detail/Case/')) {
         try {
           await waitForCourtRequest();
-          if (authGateDetected) continue;
           await page.goto(cachedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           const url = page.url();
           if (url.includes('/detail/Case/')) detailLoaded = true;
@@ -1067,7 +1070,6 @@ async function scrapeMontgomeryCourts(options = {}) {
 
       if (!detailLoaded) {
         await waitForCourtRequest();
-        if (authGateDetected) continue;
         await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
         await page.evaluate((caseNum) => {
@@ -1085,7 +1087,6 @@ async function scrapeMontgomeryCourts(options = {}) {
         }, c.caseNumber);
 
         await waitForCourtRequest();
-        if (authGateDetected) continue;
         // Arm the navigation listener before clicking so a fast response cannot
         // finish between the click and waitForNavigation().
         await Promise.all([
@@ -1110,11 +1111,12 @@ async function scrapeMontgomeryCourts(options = {}) {
       if (!currentUrl.includes('/detail/Case/')) {
         if (/\/psi\/auth/i.test(currentUrl)) {
           authGateHits++;
-          authGateDetected = true;
+          workerGated = true;
+          anyAuthGateDetected = true;
           if (authGateHits === 1) {
-            console.log('   🔒 Court gate detected — stopping now so this case and the remaining cases can resume with a fresh session.');
+            console.log('   🔒 Court gate detected in one isolated session — retiring that worker while the others finish this batch.');
           }
-          console.log(`   ${i + 1}/${targets.length} 🔒 ${c.caseNumber} (gated)`);
+          console.log(`   ${i + 1}/${targets.length} 🔒 ${c.caseNumber} (worker ${w + 1} gated)`);
         } else {
           console.log(`   ${i + 1}/${targets.length} ~ ${c.caseNumber} (no detail)`);
         }
@@ -1473,7 +1475,7 @@ async function scrapeMontgomeryCourts(options = {}) {
     }
         }
 
-        await page.close().catch(() => {});
+        await context.close().catch(() => {});
       })());
     }
 
@@ -1489,15 +1491,16 @@ async function scrapeMontgomeryCourts(options = {}) {
         urlCache
       });
     }
-    if (authGateDetected) break;
+    if (anyAuthGateDetected) break;
     if (shouldStop()) await stopRun();
     await delay(500);
   }
 
-  if (authGateDetected) {
+  if (anyAuthGateDetected) {
     const err = new Error(
-      `Court session was gated after ${results.length} completed case(s). ` +
-      'Paste a fresh ASP.NET_SessionId or full Cookie header, then start the scrape again; saved progress will resume.'
+      `${authGateHits} isolated court session(s) were gated after ${results.length} completed case(s). ` +
+      'The other workers finished their current batch. Paste a fresh ASP.NET_SessionId or full Cookie header, ' +
+      'then start the scrape again; saved progress will resume every unfinished case.'
     );
     err.code = 'MONTCO_SESSION_GATED';
     err.scrapedSoFar = results.length;

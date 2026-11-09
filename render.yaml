@@ -13,9 +13,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # One court page at a time; raise only if the court approves a higher rate.
+      # County-approved maximum: three isolated court sessions in parallel.
       - key: MONTCO_CONCURRENCY
-        value: 1
+        value: 3
       # Minimum spacing between court page requests (polite pacing).
       - key: MONTCO_REQUEST_DELAY_MS
         value: 500
