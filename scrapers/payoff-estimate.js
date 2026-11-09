@@ -530,7 +530,9 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     lines.push({ label: `Interest since judgment (${days} days)`, low: intLow, high: intHigh });
     lines.push({ label: `Taxes + insurance advanced since ${isoDate(escrowFrom)}`, low: escrow.low, high: escrow.high });
     lines.push({ label: `Attorney fees + sheriff costs (${stage} stage)`, low: fees.low, high: fees.high });
-    basis = 'Judgment on the court docket, rolled forward';
+    basis = c.caseTypeKind === 'lien'
+      ? 'Court judgments/liens, rolled forward'
+      : 'Judgment on the court docket, rolled forward';
   } else if (seniorAmount && seniorDate) {
     // ---- Tier C: rebuild the loan from the recorded mortgage ----
     tier = 'C';

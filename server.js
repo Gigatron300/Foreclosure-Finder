@@ -841,6 +841,7 @@ function attachPayoffs(cases, payoffInputs, recorderCache = {}) {
         courtCases: members.filter(m => m !== senior)
       });
       payoff.seniorCase = senior.caseNumber;
+      payoff.primaryCaseKind = senior.caseTypeKind || 'other';
       payoff.recorderAuto = useAuto ? { fetchedAt: auto.fetchedAt, total: auto.total, truncated: !!auto.truncated } : null;
     } catch (e) {
       payoff = { error: e.message };

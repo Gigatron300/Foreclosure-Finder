@@ -3007,17 +3007,52 @@
         function renderPayoffSection(c) {
             const p = c.payoff || {};
             const inputs = c.payoffInputs || {};
+            const lienPrimary = p.primaryCaseKind === 'lien';
             const tierClass = p.tier === 'A' ? 'tier-a' : p.tier === 'C' ? 'tier-c' : 'tier-none';
             const tierLabel = p.sold ? 'Sold' : p.seniorSatisfied ? 'Mortgage paid off'
-                : p.tier === 'A' ? 'From judgment' : p.tier === 'C' ? 'From recorded mortgage' : 'No estimate yet';
+                : p.tier === 'A' ? (lienPrimary ? 'From judgments' : 'From judgment')
+                : p.tier === 'C' ? 'From recorded mortgage' : 'No estimate yet';
             const band = payoffTotalBand(p);
 
             const seniorRows = (p.seniorLines || []).map(l =>
                 `<tr><td>${escapeAttr(l.label)}</td><td class="num">${fmtRange(l)}</td></tr>`).join('');
-            const juniorRows = (p.juniors || []).map(j =>
+            const renderJuniorRows = rows => rows.map(j =>
                 `<tr><td>${escapeAttr(j.label)}${j.exact ? '<span class="payoff-tag">exact</span>' : ''}${j.negotiable ? '<span class="payoff-tag warn">negotiable</span>' : ''}${j.court ? '<span class="payoff-tag">court record</span>' : ''}${j.prior ? '<span class="payoff-tag warn">prior lien</span>' : ''}</td><td class="num">${fmtRange(j)}</td></tr>`).join('');
+            const juniors = p.juniors || [];
+            const courtJuniors = juniors.filter(j => j.court);
+            const recordedJuniors = juniors.filter(j => !j.court);
+            const juniorRows = renderJuniorRows(juniors);
+            const courtRows = renderJuniorRows(courtJuniors);
+            const recordedRows = renderJuniorRows(recordedJuniors);
+            const sumBands = rows => rows.reduce((sum, row) => ({
+                low: sum.low + (Number(row.low) || 0),
+                high: sum.high + (Number(row.high) || 0)
+            }), { low: 0, high: 0 });
+            const courtJuniorTotal = sumBands(courtJuniors);
+            const recordedTotal = sumBands(recordedJuniors);
+            const courtTotalFromRows = {
+                low: (Number(p.senior && p.senior.low) || 0) + courtJuniorTotal.low,
+                high: (Number(p.senior && p.senior.high) || 0) + courtJuniorTotal.high
+            };
+            // The estimator rounds each displayed band to whole dollars. Reconcile the
+            // grouped court subtotal to the rounded grand total so the columns always add.
+            const courtTotal = p.total ? {
+                low: (Number(p.total.low) || 0) - recordedTotal.low,
+                high: (Number(p.total.high) || 0) - recordedTotal.high
+            } : courtTotalFromRows;
 
-            const table = p.senior ? `
+            const table = p.senior && lienPrimary ? `
+                <table class="payoff-table">
+                    <tr><th>Court judgments/liens</th><th class="num">High</th></tr>
+                    <tr><td colspan="2"><strong>Case ${escapeAttr(p.seniorCase || c.caseNumber || '')}</strong> · foreclosing lien</td></tr>
+                    ${seniorRows}
+                    <tr class="subtotal"><td>Case ${escapeAttr(p.seniorCase || c.caseNumber || '')} estimated total</td><td class="num">${fmtRange(p.senior)}</td></tr>
+                    ${courtRows}
+                    <tr class="subtotal"><td>Court judgments/liens subtotal</td><td class="num">${fmtRange(courtTotal)}</td></tr>
+                    ${recordedRows ? `<tr><th colspan="2" style="padding-top:8px">Recorded mortgages and other encumbrances</th></tr>${recordedRows}
+                    <tr class="subtotal"><td>Recorded encumbrances subtotal</td><td class="num">${fmtRange(recordedTotal)}</td></tr>` : ''}
+                    <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
+                </table>` : p.senior ? `
                 <table class="payoff-table">
                     <tr><th>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'}</th><th class="num">High</th></tr>
                     ${seniorRows}
