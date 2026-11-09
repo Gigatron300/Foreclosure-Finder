@@ -80,8 +80,9 @@ async function runPipelineScraper(options = {}) {
     // Can add more court sources here in the future
     
   } catch (error) {
-    // A user stop must not fall through and overwrite pipeline.json with a partial list.
-    if (error && error.code === 'SCRAPE_STOPPED') throw error;
+    // A user stop or court-session gate must not fall through and overwrite
+    // pipeline.json with a partial list. Both paths keep a resume checkpoint.
+    if (error && (error.code === 'SCRAPE_STOPPED' || error.code === 'MONTCO_SESSION_GATED')) throw error;
     console.error('Scraper error:', error);
   }
   

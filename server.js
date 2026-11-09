@@ -39,6 +39,9 @@ const CSV_FILE = path.join(CONFIG.outputDir, 'montco-cases.csv');
 // User-entered payoff inputs per MontCo case (pasted Recorder index, other liens,
 // tax bill, rate). Kept apart from the scraped data so a re-scrape or clear keeps them.
 const MONTCO_PAYOFF_FILE = path.join(CONFIG.outputDir, 'montco-payoff.json');
+// User tags and notes per MontCo case (keyed by case number). Kept apart from the
+// scraped data so a re-scrape or Clear Pipeline keeps them.
+const MONTCO_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'montco-annotations.json');
 // Court session cookies (solved locally past the Cloudflare/Turnstile gate),
 // uploaded here so the headless scrape can reuse them. Path matches
 // montco-courts.js CONFIG.sessionPath so the scraper reads the same file.
@@ -499,6 +502,11 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// MontCo Track: the MontCo page in a stripped-down mode showing only cards tagged TRACK.
+app.get('/montco-track', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'pipeline.html'));
+});
+
 // Camden Track: the Camden page in a stripped-down mode showing only cards tagged TRACK.
 // Same page, so cards stay identical; its data comes from /api/camden (site password only).
 app.get('/camden-track', (req, res) => {
@@ -734,6 +742,44 @@ app.get('/api/export/csv', checkAuth, async (req, res) => {
 
 // ============== PIPELINE API (Montgomery County) ==============
 
+async function readMontcoAnnotations() {
+  try {
+    return JSON.parse(await fs.readFile(MONTCO_ANNOTATIONS_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+// Writes are serialized so two quick saves (a tag and a note) can't overwrite each other.
+let montcoAnnotationsWrite = Promise.resolve();
+function updateMontcoAnnotations(mutate) {
+  const run = montcoAnnotationsWrite.then(async () => {
+    const all = await readMontcoAnnotations();
+    mutate(all);
+    const tmp = MONTCO_ANNOTATIONS_FILE + '.tmp';
+    await fs.writeFile(tmp, JSON.stringify(all, null, 2));
+    await fs.rename(tmp, MONTCO_ANNOTATIONS_FILE);
+    return all;
+  });
+  montcoAnnotationsWrite = run.catch(() => {});
+  return run;
+}
+
+function attachMontcoAnnotations(cases, annotations) {
+  for (const c of cases) {
+    const a = annotations[c.caseNumber] || {};
+    c.userTags = Array.isArray(a.userTags) ? a.userTags : [];
+    c.userNotes = typeof a.userNotes === 'string' ? a.userNotes : '';
+  }
+  return cases;
+}
+
+// Case numbers posted by a card: the card's own case plus every case stacked on its parcel.
+function postedCaseNumbers(body) {
+  const list = Array.isArray(body.caseNumbers) ? body.caseNumbers : [body.caseNumber];
+  return [...new Set(list.map(x => String(x || '').trim()).filter(x => /^[\w-]{1,40}$/.test(x)))].slice(0, 100);
+}
+
 async function readPayoffInputs() {
   try {
     return JSON.parse(await fs.readFile(MONTCO_PAYOFF_FILE, 'utf8'));
@@ -812,6 +858,7 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
     const jsonData = JSON.parse(data);
     let cases = jsonData.cases;
     attachPayoffs(cases, await readPayoffInputs(), await readRecorderCache());
+    attachMontcoAnnotations(cases, await readMontcoAnnotations());
 
     if (req.query.grade) {
       const grades = req.query.grade.toUpperCase().split(',');
@@ -885,6 +932,43 @@ app.get('/api/pipeline/case/:caseNumber', checkAuth, async (req, res) => {
     else res.status(404).json({ error: 'Case not found' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Tags on a MontCo card. Body: { caseNumbers: [...], tag, action: 'add' | 'remove' }.
+// A card covers every case on its parcel, so the tag is applied to all of them.
+app.post('/api/pipeline/tag', checkAuth, async (req, res) => {
+  try {
+    const caseNumbers = postedCaseNumbers(req.body || {});
+    const tag = String((req.body || {}).tag || '').trim().toUpperCase().slice(0, 40);
+    const action = (req.body || {}).action === 'remove' ? 'remove' : 'add';
+    if (!caseNumbers.length || !tag) return res.status(400).json({ error: 'Missing fields' });
+    await updateMontcoAnnotations(all => {
+      for (const n of caseNumbers) {
+        const a = all[n] || (all[n] = {});
+        let tags = Array.isArray(a.userTags) ? a.userTags.filter(t => t !== tag) : [];
+        if (action === 'add') tags.push(tag);
+        a.userTags = tags;
+      }
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Notes on a MontCo card. Body: { caseNumbers: [...], notes }.
+app.post('/api/pipeline/notes', checkAuth, async (req, res) => {
+  try {
+    const caseNumbers = postedCaseNumbers(req.body || {});
+    if (!caseNumbers.length) return res.status(400).json({ error: 'Missing caseNumbers' });
+    const notes = String((req.body || {}).notes || '').slice(0, 20000);
+    await updateMontcoAnnotations(all => {
+      for (const n of caseNumbers) (all[n] || (all[n] = {})).userNotes = notes;
+    });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -1109,7 +1193,10 @@ app.post('/api/montco/session', checkAuth, async (req, res) => {
     cookies = [mkCookie('ASP.NET_SessionId', b.sessionId.trim())];
   }
   if (!cookies && typeof b.cookieString === 'string' && b.cookieString.trim()) {
-    cookies = b.cookieString.split(';').map(part => {
+    // Accept either the raw value copied from Request Headers or a full
+    // "Cookie: ..." line copied from DevTools.
+    const cookieString = b.cookieString.trim().replace(/^cookie\s*:\s*/i, '');
+    cookies = cookieString.split(';').map(part => {
       const i = part.indexOf('=');
       if (i < 0) return null;
       const name = part.slice(0, i).trim();

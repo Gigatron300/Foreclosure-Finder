@@ -447,6 +447,37 @@
             background: var(--danger); color: var(--on-solid);
             font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
         }
+        /* Tags + notes (same look as Camden) */
+        .tag-pill {
+            display: inline-flex; align-items: center; gap: 3px;
+            background: var(--brand-gold-tint); border: 1px solid color-mix(in srgb, var(--brand-gold) 40%, transparent);
+            color: var(--brand-gold-dark); border-radius: 4px; padding: 3px 6px;
+            font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+        }
+        .tag-pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 0.7rem; line-height: 1; opacity: 0.6; }
+        .tag-pill button:hover { opacity: 1; }
+        .tag-input {
+            background: var(--surface); border: 1px solid var(--border-strong);
+            border-radius: 4px; color: var(--ink); font-size: 0.75rem; padding: 4px 8px;
+            width: 100px; font-family: inherit;
+        }
+        .tag-input:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
+        .notes-area {
+            width: 100%; box-sizing: border-box; background: var(--surface);
+            border: 1px solid var(--border-strong); border-radius: 6px;
+            color: var(--ink); font-size: 0.8rem; padding: 7px 9px; resize: vertical;
+            font-family: inherit; min-height: 38px; line-height: 1.4;
+        }
+        .notes-area:focus { outline: none; border-color: var(--brand-gold); box-shadow: var(--focus-ring); }
+        .card-annotations { margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+        .tag-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+
+        /* MontCo Track (/montco-track): just the cards and the filter row. */
+        body.track-view .status-bar,
+        body.track-view .upload-section,
+        body.track-view .stats-summary,
+        body.track-view .actions-bar > .btn { display: none !important; }
+
         .closed-flag.partial { background: var(--warning-tint); color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
 
         /* Filter dropdown */
@@ -1134,6 +1165,7 @@
                 <nav class="nav-links">
                     <a href="/" data-tab="sheriff">Sheriff Sales</a>
                     <a href="/pipeline.html" data-tab="montco" class="active">MontCo Pipeline</a>
+                    <a href="/montco-track" data-tab="montco">MontCo Track</a>
                     <a href="/camden.html" data-tab="camden">Camden Pipeline</a>
                     <a href="/camden-track" data-tab="camden">Camden Track</a>
                 </nav>
@@ -1188,11 +1220,11 @@
             <ol class="upload-steps">
                 <li>Open the <a href="https://courtsapp.montcopa.org/psi/v/search/case?fromAdv=1" target="_blank">court search page</a> and complete the "Verify you are human" check so the real search page loads.</li>
                 <li>Press <b>F12</b> → click the <b>Application</b> tab → in the left sidebar under <b>Cookies</b> click <b>https://courtsapp.montcopa.org</b>.</li>
-                <li>Find the row named <b>ASP.NET_SessionId</b>, double-click its <b>Value</b> cell, and copy it (Ctrl+C).</li>
+                <li>Find the row named <b>ASP.NET_SessionId</b>, double-click its <b>Value</b> cell, and copy it (Ctrl+C). You can also paste the full <b>Cookie</b> request header if the court created more than one cookie.</li>
                 <li>Paste it below and click <b>Save Session</b>, then start a scrape right away (sessions go stale after ~20 min idle).</li>
             </ol>
             <div class="session-row">
-                <input type="text" id="sessionInput" placeholder="Paste ASP.NET_SessionId value" autocomplete="off" spellcheck="false"
+                <input type="text" id="sessionInput" placeholder="Paste session ID or full Cookie header" autocomplete="off" spellcheck="false"
                     class="session-input">
                 <button class="btn btn-primary" onclick="saveCourtSession()" id="saveSessionBtn">Save Session</button>
             </div>
@@ -1272,6 +1304,19 @@
                 </div>
             </div>
 
+            <div class="filter-dropdown-group" style="min-width: 150px;">
+                <button type="button" id="tagFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('tagFilterDropdown', event)">All Tags</button>
+                <div id="tagFilterDropdown" class="filter-dropdown-panel">
+                    <div class="filter-dropdown-actions">
+                        <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('tagFilterOptions', true, 'tagFilterButton', 'All Tags')">Select All</button>
+                        <button type="button" class="filter-dropdown-action" onclick="setAllMultiFilterOptions('tagFilterOptions', false, 'tagFilterButton', 'All Tags')">Clear</button>
+                    </div>
+                    <div id="tagFilterOptions" class="filter-dropdown-options">
+                        <div class="filter-dropdown-empty">No tags yet</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="case-search-group">
                 <input type="search" id="caseSearch" class="case-search" placeholder="Search address, city, name, case #, parcel..."
                     oninput="onCaseSearchInput()" autocomplete="off">
@@ -1282,6 +1327,17 @@
             <h2>Properties <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
         
+        <datalist id="tagSuggestions">
+            <option value="TRACK">
+            <option value="VISITED">
+            <option value="PASS">
+            <option value="PURSUE">
+            <option value="MAYBE">
+            <option value="GREEN ZONE">
+            <option value="GREY ZONE">
+            <option value="RED ZONE">
+        </datalist>
+
         <div class="cases-grid" id="casesGrid">
             <div class="loading">
                 <div class="spinner"></div>
@@ -1292,6 +1348,173 @@
 
     <script>
         let authToken = siteAuth.get();
+
+        // MontCo Track (/montco-track): same page, only cards tagged TRACK, and just the
+        // cards and filters on screen. CSS under body.track-view hides the rest.
+        const TRACK_VIEW = /^\/montco-track\/?$/.test(location.pathname);
+        if (TRACK_VIEW) {
+            document.body.classList.add('track-view');
+            document.title = 'MontCo Track | Blake Management';
+            const title = document.querySelector('.page-title');
+            if (title) title.innerHTML = 'Montgomery County &mdash; Tracked';
+            document.querySelectorAll('.nav-links a').forEach(a => {
+                a.classList.toggle('active', a.getAttribute('href') === '/montco-track');
+            });
+            const heading = document.querySelector('.results-header h2');
+            if (heading && heading.firstChild) heading.firstChild.textContent = 'Tracked ';
+        }
+
+        // ---- Tags + notes (saved on the server per case; a card covers its whole parcel) ----
+        function cardCaseNumbers(c) {
+            return (c._stackMembers || [c]).map(m => m.caseNumber).filter(Boolean);
+        }
+
+        function populateTagFilter(groups) {
+            const container = document.getElementById('tagFilterOptions');
+            if (!container) return;
+            const selected = new Set(getSelectedCheckboxValues('tagFilterOptions'));
+            const counts = new Map();
+            for (const g of groups) for (const t of (g._tags || [])) counts.set(t, (counts.get(t) || 0) + 1);
+            const untagged = groups.filter(g => !(g._tags || []).length).length;
+            const tags = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+            const onChange = `onchange="updateMultiFilterButtonText('tagFilterButton', getSelectedCheckboxValues('tagFilterOptions'), 'All Tags'); loadData()"`;
+            container.innerHTML = (!tags.length && !untagged) ? '<div class="filter-dropdown-empty">No tags yet</div>' : `
+                <label class="filter-dropdown-option"><input type="checkbox" value="__untagged__" ${selected.has('__untagged__') ? 'checked' : ''} ${onChange}> <span>Untagged (${untagged})</span></label>
+                ${tags.map(([t, n]) => `<label class="filter-dropdown-option"><input type="checkbox" value="${escapeAttr(t)}" ${selected.has(t) ? 'checked' : ''} ${onChange}> <span>${escapeAttr(t)} (${n})</span></label>`).join('')}`;
+            updateMultiFilterButtonText('tagFilterButton', getSelectedCheckboxValues('tagFilterOptions'), 'All Tags');
+        }
+
+        // VISITED and TRACK are ordinary tags from the suggestions; a card tagged TRACK shows on MontCo Track.
+        function buildTagAreaHtml(tags) {
+            const pills = tags.map(tag =>
+                `<span class="tag-pill">${escapeAttr(tag)}<button type="button" data-tag="${escapeAttr(tag)}" onclick="removeTag(this)">✕</button></span>`
+            ).join('');
+            return pills + `<input type="text" list="tagSuggestions" placeholder="Add tag..." class="tag-input" onblur="addTag(this)" onkeydown="if(event.key==='Enter'){addTag(this);event.preventDefault()}" />`;
+        }
+
+        function tagRowsFor(caseNumbers) {
+            const set = new Set(caseNumbers);
+            return [...document.querySelectorAll('.tag-row[data-cases]')].filter(el => {
+                try { return JSON.parse(el.dataset.cases).some(n => set.has(n)); } catch (e) { return false; }
+            });
+        }
+
+        function renderTagRow(row, tags) {
+            row.setAttribute('data-current-tags', JSON.stringify(tags));
+            row.innerHTML = buildTagAreaHtml(tags);
+        }
+
+        // Keep the in-memory cards in step so a repaint (e.g. after a payoff save) shows the edit.
+        function patchMemberCases(caseNumbers, patch) {
+            const set = new Set(caseNumbers);
+            for (const g of ((montcoRenderState && montcoRenderState.cases) || [])) {
+                const members = g._stackMembers || [g];
+                if (!members.some(m => set.has(m.caseNumber))) continue;
+                members.forEach(m => { if (set.has(m.caseNumber)) Object.assign(m, patch); });
+                if (patch.userTags) g._tags = [...new Set(members.flatMap(m => m.userTags || []))];
+                if (typeof patch.userNotes === 'string') g._notes = patch.userNotes;
+            }
+        }
+
+        // MontCo and MontCo Track tabs open in this browser tell each other about saved edits.
+        const montcoEditChannel = (typeof BroadcastChannel === 'function') ? new BroadcastChannel('montco-case-edits') : null;
+        function announceEdit(caseNumbers, patch) {
+            patchMemberCases(caseNumbers, patch);
+            if (montcoEditChannel) { try { montcoEditChannel.postMessage({ caseNumbers, patch }); } catch (e) {} }
+        }
+        if (montcoEditChannel) {
+            montcoEditChannel.onmessage = (event) => {
+                const { caseNumbers, patch } = event.data || {};
+                if (!Array.isArray(caseNumbers) || !patch) return;
+                const rows = tagRowsFor(caseNumbers);
+                const wasTracked = rows.some(r => JSON.parse(r.getAttribute('data-current-tags') || '[]').includes('TRACK'));
+                patchMemberCases(caseNumbers, patch);
+                if (Array.isArray(patch.userTags)) {
+                    const nowTracked = patch.userTags.includes('TRACK');
+                    if ((TRACK_VIEW && wasTracked !== nowTracked) || getSelectedCheckboxValues('tagFilterOptions').length || (TRACK_VIEW && !rows.length && nowTracked)) {
+                        loadData();
+                    } else {
+                        rows.forEach(r => renderTagRow(r, patch.userTags));
+                    }
+                }
+                if (typeof patch.userNotes === 'string') {
+                    const set = new Set(caseNumbers);
+                    document.querySelectorAll('textarea[data-notes-for]').forEach(box => {
+                        let cs = [];
+                        try { cs = JSON.parse(box.dataset.cases || '[]'); } catch (e) {}
+                        // Don't overwrite a note someone is typing in this tab.
+                        if (cs.some(n => set.has(n)) && document.activeElement !== box) box.value = patch.userNotes;
+                    });
+                }
+            };
+        }
+
+        async function postTag(caseNumbers, tag, action) {
+            const r = await fetch('/api/pipeline/tag', {
+                method: 'POST',
+                headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caseNumbers, tag, action })
+            });
+            const result = await r.json().catch(() => ({}));
+            if (!r.ok || !result.success) throw new Error(result.error || r.statusText);
+        }
+
+        async function addTag(inputEl) {
+            const row = inputEl.closest('.tag-row');
+            const tag = (inputEl.value || '').trim().toUpperCase();
+            if (!row || !tag) return;
+            inputEl.value = '';
+            const caseNumbers = JSON.parse(row.dataset.cases || '[]');
+            const current = JSON.parse(row.getAttribute('data-current-tags') || '[]');
+            if (current.includes(tag)) return;
+            const next = [...current, tag];
+            renderTagRow(row, next);
+            try {
+                await postTag(caseNumbers, tag, 'add');
+                announceEdit(caseNumbers, { userTags: next });
+                if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData();
+            } catch (e) {
+                renderTagRow(row, current);
+                alert('Error saving tag: ' + e.message);
+            }
+        }
+
+        async function removeTag(btn) {
+            const row = btn.closest('.tag-row');
+            const tag = btn.dataset.tag;
+            if (!row || !tag) return;
+            const caseNumbers = JSON.parse(row.dataset.cases || '[]');
+            const current = JSON.parse(row.getAttribute('data-current-tags') || '[]');
+            const next = current.filter(t => t !== tag);
+            renderTagRow(row, next);
+            try {
+                await postTag(caseNumbers, tag, 'remove');
+                announceEdit(caseNumbers, { userTags: next });
+                if (TRACK_VIEW || getSelectedCheckboxValues('tagFilterOptions').length) loadData();
+            } catch (e) {
+                renderTagRow(row, current);
+                alert('Error removing tag: ' + e.message);
+            }
+        }
+
+        async function saveNotes(box) {
+            const caseNumbers = JSON.parse(box.dataset.cases || '[]');
+            const notes = box.value;
+            if (box.dataset.saved === notes) return;
+            try {
+                const r = await fetch('/api/pipeline/notes', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ caseNumbers, notes })
+                });
+                const result = await r.json().catch(() => ({}));
+                if (!r.ok || !result.success) throw new Error(result.error || r.statusText);
+                box.dataset.saved = notes;
+                announceEdit(caseNumbers, { userNotes: notes });
+            } catch (e) {
+                alert('Error saving notes: ' + e.message);
+            }
+        }
         const PIPELINE_DEFAULT_STREETVIEW_MODE = 'open-only';
         const PIPELINE_LOADED_PHOTOS_KEY = 'pipelineLoadedPhotos';
         let streetViewMode = PIPELINE_DEFAULT_STREETVIEW_MODE;
@@ -1839,7 +2062,7 @@
                 if (d.exists) {
                     const age = (d.ageHours != null) ? `${d.ageHours}h ago` : 'recently';
                     el.className = 'csv-status has-file';
-                    el.textContent = `✓ Session saved ${age} (${d.cookieCount} cookie${d.cookieCount === 1 ? '' : 's'}). If a scrape shows "gated" lines, paste a fresh one.`;
+                    el.textContent = `✓ Session saved ${age} (${d.cookieCount} cookie${d.cookieCount === 1 ? '' : 's'}). If a scrape shows "gated" lines, paste a fresh session value or full Cookie header.`;
                 } else {
                     el.className = 'csv-status no-file';
                     el.textContent = '⚠ No session saved — court dockets will be blocked until you paste one.';
@@ -1857,7 +2080,7 @@
             const val = (input.value || '').trim();
             if (!val) {
                 el.className = 'csv-status no-file';
-                el.textContent = 'Paste the ASP.NET_SessionId value first.';
+                el.textContent = 'Paste the ASP.NET_SessionId value or full Cookie header first.';
                 return;
             }
             btn.disabled = true;
@@ -1867,7 +2090,10 @@
                 const res = await fetch('/api/montco/session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-                    body: JSON.stringify({ sessionId: val })
+                    // A plain value is the ASP.NET session ID. A copied Cookie
+                    // header contains name=value pairs and may include an extra
+                    // clearance cookie required by the court gate.
+                    body: JSON.stringify(val.includes('=') ? { cookieString: val } : { sessionId: val })
                 });
                 const d = await res.json();
                 if (res.ok && d.success) {
@@ -2109,7 +2335,25 @@
 
                 // Free-text search across the full grouped dataset (matches the primary
                 // card or any case stacked on its parcel).
-                let visibleCases = groupedCases;
+                // A card covers every case on its parcel: its tags are the union of the
+                // cases' tags, and its note is the first non-empty one.
+                for (const g of groupedCases) {
+                    const members = g._stackMembers || [g];
+                    g._tags = [...new Set(members.flatMap(m => m.userTags || []))];
+                    g._notes = (members.find(m => m.caseNumber === g.caseNumber) || {}).userNotes
+                        || (members.find(m => m.userNotes) || {}).userNotes || '';
+                }
+
+                // MontCo Track shows only cards tagged TRACK; the tag filter and its
+                // counts then describe the tracked cards only.
+                let visibleCases = TRACK_VIEW ? groupedCases.filter(g => g._tags.includes('TRACK')) : groupedCases;
+                populateTagFilter(visibleCases);
+                const selectedTags = getSelectedCheckboxValues('tagFilterOptions');
+                if (selectedTags.length) {
+                    visibleCases = selectedTags.includes('__untagged__')
+                        ? visibleCases.filter(g => !g._tags.length)
+                        : visibleCases.filter(g => selectedTags.every(t => g._tags.includes(t)));
+                }
                 if (hideClosed) {
                     visibleCases = visibleCases.filter(c => (c._stackMembers || [c]).some(m => !m.liveClosed));
                 }
@@ -2359,7 +2603,19 @@
                                 </div>` : ''}
                             </div>
                         </details>
-                        
+
+                        <div class="card-annotations">
+                            <textarea class="notes-area" placeholder="Add notes..." data-notes-for="${escapeAttr(c.caseNumber)}"
+                                data-cases="${escapeAttr(JSON.stringify(cardCaseNumbers(c)))}"
+                                data-saved="${escapeAttr(c._notes || '')}"
+                                onblur="saveNotes(this)">${escapeAttr(c._notes || '').replace(/>/g, '&gt;')}</textarea>
+                            <div class="tag-row" data-tags-for="${escapeAttr(c.caseNumber)}"
+                                data-cases="${escapeAttr(JSON.stringify(cardCaseNumbers(c)))}"
+                                data-current-tags="${escapeAttr(JSON.stringify(c._tags || []))}">
+                                ${buildTagAreaHtml(c._tags || [])}
+                            </div>
+                        </div>
+
                         <div class="property-footer">
                             <a href="${c.detailUrl}" target="_blank">Court Record -></a>
                             ${c.propertyAddress ? `<span style="display:flex;gap:8px;">

@@ -8,6 +8,28 @@ const { matchParcelByAddress, applyParcelMatch, parseMortgageBookPage } = requir
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+function positiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Polite pacing: court page requests start at least spacingMs apart, shared across
+// workers, so the scraper never sends more than one request per interval.
+function createRequestGate(spacingMs) {
+  let queue = Promise.resolve();
+  let nextStartAt = 0;
+
+  return () => {
+    const slot = queue.then(async () => {
+      const waitMs = Math.max(0, nextStartAt - Date.now());
+      if (waitMs > 0) await delay(waitMs);
+      nextStartAt = Date.now() + spacingMs;
+    });
+    queue = slot.catch(() => {});
+    return slot;
+  };
+}
+
 // One UA used everywhere: the session-solve browser and every scraper page.
 // Cloudflare/Turnstile can bind the pass token to the UA, so it must match
 // between the manual solve and the headless reuse.
@@ -32,15 +54,14 @@ const MONTCO_TOWNS = [
 ];
 
 const CONFIG = {
-  requestDelay: 500,
+  requestDelay: positiveInt(process.env.MONTCO_REQUEST_DELAY_MS, 500),
   pageLoadWait: 500,
   // Browser restarts every batchSize cases to release memory.
-  batchSize: parseInt(process.env.MONTCO_BATCH_SIZE || '60', 10),
+  batchSize: positiveInt(process.env.MONTCO_BATCH_SIZE, 60),
   batchPause: 4000,
-  // Pages scraped in parallel. 1 was required on the 512MB instance (2 caused OOM
-  // restarts); the 2GB instance runs 3 comfortably. Override with MONTCO_CONCURRENCY
-  // (drop back to 1-2 if the court site starts rate-limiting or memory runs short).
-  concurrency: Math.max(1, parseInt(process.env.MONTCO_CONCURRENCY || '3', 10)),
+  // Pages scraped in parallel. The court site gates parallel scraping on one session,
+  // so the default is 1; raise MONTCO_CONCURRENCY only with a court-approved rate.
+  concurrency: positiveInt(process.env.MONTCO_CONCURRENCY, 1),
   maxCasesToProcess: 0,
   testModeLimit: 10,
 
@@ -973,8 +994,11 @@ async function scrapeMontgomeryCourts(options = {}) {
   const restartEvery = CONFIG.batchSize;
 
   console.log(`\n🌐 Scraping ${targets.length} cases (concurrency: ${concurrency})...`);
+  console.log(`   Court requests start at least ${CONFIG.requestDelay}ms apart.`);
 
   let authGateHits = 0; // court pages redirected to the Cloudflare gate (session missing/expired)
+  let authGateDetected = false;
+  const waitForCourtRequest = createRequestGate(CONFIG.requestDelay);
 
   // Save what we have so the next run resumes, then bail out without returning a partial list.
   const stopRun = async () => {
@@ -1013,14 +1037,12 @@ async function scrapeMontgomeryCourts(options = {}) {
         });
 
         while (true) {
-          if (shouldStop()) break;
+          if (authGateDetected || shouldStop()) break;
           const i = nextIndex++;
           if (i >= chunkEnd) break;
           const c = targets[i];
 
     try {
-      await delay(CONFIG.requestDelay);
-
       // Kick off the parcel API lookup in parallel with the Puppeteer page load.
       // The parcel number is already known from the CSV, so this lets the
       // ArcGIS round-trip overlap the (much slower) court page navigation.
@@ -1033,6 +1055,8 @@ async function scrapeMontgomeryCourts(options = {}) {
       const cachedUrl = urlCache[c.caseNumber];
       if (cachedUrl && cachedUrl.includes('/detail/Case/')) {
         try {
+          await waitForCourtRequest();
+          if (authGateDetected) continue;
           await page.goto(cachedUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
           const url = page.url();
           if (url.includes('/detail/Case/')) detailLoaded = true;
@@ -1042,6 +1066,8 @@ async function scrapeMontgomeryCourts(options = {}) {
       }
 
       if (!detailLoaded) {
+        await waitForCourtRequest();
+        if (authGateDetected) continue;
         await page.goto(CONFIG.searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
         await page.evaluate((caseNum) => {
@@ -1058,18 +1084,24 @@ async function scrapeMontgomeryCourts(options = {}) {
           }
         }, c.caseNumber);
 
-        await page.evaluate(() => {
-          const btns = document.querySelectorAll('button, input[type="submit"]');
-          for (const btn of btns) {
-            if (btn.textContent?.toLowerCase().includes('search') ||
-                btn.value?.toLowerCase().includes('search')) {
-              btn.click();
-              return;
+        await waitForCourtRequest();
+        if (authGateDetected) continue;
+        // Arm the navigation listener before clicking so a fast response cannot
+        // finish between the click and waitForNavigation().
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null),
+          page.evaluate(() => {
+            const btns = document.querySelectorAll('button, input[type="submit"]');
+            for (const btn of btns) {
+              if (btn.textContent?.toLowerCase().includes('search') ||
+                  btn.value?.toLowerCase().includes('search')) {
+                btn.click();
+                return true;
+              }
             }
-          }
-        });
-
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+            return false;
+          })
+        ]);
       }
 
       if (CONFIG.pageLoadWait > 0) await delay(CONFIG.pageLoadWait);
@@ -1078,8 +1110,9 @@ async function scrapeMontgomeryCourts(options = {}) {
       if (!currentUrl.includes('/detail/Case/')) {
         if (/\/psi\/auth/i.test(currentUrl)) {
           authGateHits++;
+          authGateDetected = true;
           if (authGateHits === 1) {
-            console.log('   🔒 Blocked by Cloudflare gate — session missing or expired. Re-run: node scrapers/montco-courts.js --login');
+            console.log('   🔒 Court gate detected — stopping now so this case and the remaining cases can resume with a fresh session.');
           }
           console.log(`   ${i + 1}/${targets.length} 🔒 ${c.caseNumber} (gated)`);
         } else {
@@ -1456,8 +1489,19 @@ async function scrapeMontgomeryCourts(options = {}) {
         urlCache
       });
     }
+    if (authGateDetected) break;
     if (shouldStop()) await stopRun();
     await delay(500);
+  }
+
+  if (authGateDetected) {
+    const err = new Error(
+      `Court session was gated after ${results.length} completed case(s). ` +
+      'Paste a fresh ASP.NET_SessionId or full Cookie header, then start the scrape again; saved progress will resume.'
+    );
+    err.code = 'MONTCO_SESSION_GATED';
+    err.scrapedSoFar = results.length;
+    throw err;
   }
 
   // Run finished cleanly — drop the checkpoint so the next trigger is a fresh run.

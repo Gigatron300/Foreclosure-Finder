@@ -2,7 +2,9 @@ services:
   - type: web
     name: foreclosure-finder
     runtime: docker
-    plan: starter
+    # 1 CPU / 2 GB RAM. Keep this in sync with the Render dashboard so a
+    # Blueprint sync does not put the service back on the 512 MB plan.
+    plan: 1c-2g
     dockerfilePath: ./Dockerfile
     disk:
       name: data
@@ -11,6 +13,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # One court page at a time; raise only if the court approves a higher rate.
+      - key: MONTCO_CONCURRENCY
+        value: 1
+      # Minimum spacing between court page requests (polite pacing).
+      - key: MONTCO_REQUEST_DELAY_MS
+        value: 500
       # Recorder of Deeds free account, used by the automatic parcel lookup.
       # Set the values in the Render dashboard (never committed).
       - key: RECORDER_USER
