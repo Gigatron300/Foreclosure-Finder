@@ -2617,7 +2617,7 @@
                                 <div class="detail-label">Mortgage</div>
                                 <div class="detail-value">Bk ${c.mortgageBook} / Pg ${c.mortgagePage}</div>
                             </div>` : ''}
-                            <div class="detail-item" title="Estimated total payoff (first mortgage + known junior liens) from free public data. A range, not a payoff letter.">
+                            <div class="detail-item" title="Estimated payoff from available public data. '+ costs' means attorney, collection, or enforcement costs still require a documented source.">
                                 <div class="detail-label">Est. Payoff</div>
                                 ${payoffHeadline(c.payoff)}
                             </div>
@@ -3087,7 +3087,10 @@
             const partial = noRecorder && p.juniorPlaintiff
                 ? ' <span title="Plaintiff is a home-equity lender: a first mortgage likely sits ahead of this loan and is not counted until Recorder data is added">+ 1st mtg?</span>'
                 : noRecorder ? ' <span title="Other mortgages unknown until Recorder data is added">*</span>' : '';
-            return `<div class="detail-value amount">${fmtK(band.high)}${partial}</div>`;
+            const missingCosts = p.costsIncomplete
+                ? ' <span title="Attorney, collection, or enforcement costs still require a payoff, order, or applicable ordinance">+ costs</span>'
+                : '';
+            return `<div class="detail-value amount">${fmtK(band.high)}${missingCosts}${partial}</div>`;
         }
 
         function renderPayoffSection(c) {
@@ -3143,7 +3146,7 @@
                     <tr class="subtotal"><td>Court judgments/liens subtotal</td><td class="num">${fmtRange(courtTotal)}</td></tr>
                     ${recordedRows ? `<tr><th colspan="2" style="padding-top:8px">Recorded mortgages / HUD claims</th></tr>${recordedRows}
                     <tr class="subtotal"><td>Recorded encumbrances subtotal</td><td class="num">${fmtRange(recordedTotal)}</td></tr>` : ''}
-                    <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
+                    <tr class="grand"><td>${p.costsIncomplete ? 'Estimated subtotal' : 'Estimated total payoff'}</td><td class="num">${fmtRange(band)}</td></tr>
                 </table>` : p.senior ? `
                 <table class="payoff-table">
                     <tr><th>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'}</th><th class="num">High</th></tr>
@@ -3151,7 +3154,7 @@
                     <tr class="subtotal"><td>${p.juniorPlaintiff ? 'Foreclosing loan' : 'First mortgage'} total</td><td class="num">${fmtRange(p.senior)}</td></tr>
                     ${juniorRows ? `<tr><th colspan="2" style="padding-top:8px">Other liens</th></tr>${juniorRows}
                     <tr class="subtotal"><td>Other liens total</td><td class="num">${fmtRange(p.juniorTotal)}</td></tr>` : ''}
-                    <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
+                    <tr class="grand"><td>${p.costsIncomplete ? 'Estimated subtotal' : 'Estimated total payoff'}</td><td class="num">${fmtRange(band)}</td></tr>
                 </table>` : juniorRows ? `
                 <table class="payoff-table">
                     <tr><th>${p.seniorSatisfied ? 'Remaining liens (mortgage satisfied)' : 'Known liens (mortgage not estimated yet)'}</th><th class="num">High</th></tr>
@@ -3192,6 +3195,8 @@
                             ${mortgageList}
                             <label>Other liens <span class="hint">(one per line: name, amount — e.g. from the owner-name judgment search)</span></label>
                             <textarea class="po-liens" placeholder="Example: Township name, 1250.00">${escapeAttr(otherLiensText)}</textarea>
+                            <label>Documented additional costs <span class="hint">(optional whole-parcel total from a payoff, order, or ordinance)</span></label>
+                            <input type="text" class="po-costs" inputmode="decimal" value="${escapeAttr(inputs.additionalCosts || '')}" placeholder="e.g. 1250.00">
                             <div class="payoff-row-inputs">
                                 <div>
                                     <label>Annual tax bill <span class="hint">(optional)</span></label>
@@ -3229,7 +3234,8 @@
                 overrides,
                 otherLiens,
                 annualTaxes: form.querySelector('.po-taxes').value.replace(/[$,\s]/g, ''),
-                rate: form.querySelector('.po-rate').value.replace(/[%\s]/g, '')
+                rate: form.querySelector('.po-rate').value.replace(/[%\s]/g, ''),
+                additionalCosts: form.querySelector('.po-costs').value.replace(/[$,\s]/g, '')
             };
             btn.disabled = true;
             status.textContent = 'Saving…';

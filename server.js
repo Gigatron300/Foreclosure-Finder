@@ -976,7 +976,7 @@ app.post('/api/pipeline/notes', checkAuth, async (req, res) => {
 
 // Save the payoff inputs for one case and return the fresh estimate.
 // Body: { recorderText, overrides: {"MTG 15325/2923": false}, otherLiens: [{name, amount}],
-//         annualTaxes, rate, originalAmount, originationDate }
+//         annualTaxes, rate, originalAmount, originationDate, additionalCosts }
 app.post('/api/pipeline/payoff/:caseNumber', checkAuth, async (req, res) => {
   try {
     const caseNumber = req.params.caseNumber;
@@ -994,6 +994,7 @@ app.post('/api/pipeline/payoff/:caseNumber', checkAuth, async (req, res) => {
       rate: str(b.rate, 10),
       originalAmount: str(b.originalAmount, 20),
       originationDate: str(b.originationDate, 20),
+      additionalCosts: str(b.additionalCosts, 20),
       updatedAt: new Date().toISOString()
     };
     if (b.overrides && typeof b.overrides === 'object') {

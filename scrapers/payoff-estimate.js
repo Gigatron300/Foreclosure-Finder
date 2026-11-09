@@ -31,12 +31,6 @@ const ASSUMPTIONS = {
   // Taxes + insurance the servicer advances per year (Montco school taxes are high).
   escrowPerYear: { low: 3500, high: 7000 },
   insurancePerYear: { low: 1000, high: 2500 }, // used when the user gives the tax bill
-  // Attorney fees + costs still to be added, by stage.
-  fees: {
-    complaint: { low: 1500, high: 3500 },
-    judgment: { low: 2500, high: 4500 },
-    writ: { low: 3500, high: 6500 }
-  },
   legalRate: 0.06,            // PA legal rate on judgments
   courtLienRate: 0.10,        // municipal claims accrue up to 10%/yr plus costs
   monthsComplaintAfterDefault: 7, // first missed payment -> complaint filed
@@ -342,7 +336,7 @@ function escrowBand(years, inputs) {
 /**
  * @param c       pipeline case (as stored by montco-courts.js)
  * @param inputs  user data: { recorderText, overrides, otherLiens:[{name,amount}],
- *                annualTaxes, rate, originalAmount, originationDate }
+ *                annualTaxes, rate, originalAmount, originationDate, additionalCosts }
  * @param asOf    Date to roll forward to (default today)
  */
 function estimatePayoff(c, inputs = {}, asOf = new Date()) {
@@ -448,7 +442,10 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
   let seniorBand = null;
   let tier = null;
   let basis = '';
-  const fees = ASSUMPTIONS.fees[stage];
+  const additionalCostsValue = money(inputs.additionalCosts);
+  const documentedAdditionalCosts = additionalCostsValue != null && additionalCostsValue >= 0
+    ? additionalCostsValue : null;
+  let costsIncomplete = false;
 
   // A CLOSED foreclosure does not mean the mortgage is gone: the loan was
   // reinstated, modified, paid off, or the house sold. Its judgment (if any) is
@@ -532,7 +529,6 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     lines.push({ label: `Judgment (${isoDate(jDate)}${j.kind === 'default' ? ', default' : j.kind === 'summary' ? ', summary' : ''})`, low: j.amount, high: j.amount });
     lines.push({ label: `Interest since judgment (${days} days)`, low: intLow, high: intHigh });
     lines.push({ label: `Taxes + insurance advanced since ${isoDate(escrowFrom)}`, low: escrow.low, high: escrow.high });
-    lines.push({ label: `Estimated attorney fees + sheriff costs (${stage} stage)`, low: fees.low, high: fees.high });
     basis = c.caseTypeKind === 'lien'
       ? 'Court judgments/liens, rolled forward'
       : 'Judgment on the court docket, rolled forward';
@@ -559,7 +555,6 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     lines.push({ label: `Principal at default (~${isoDate(defaultDate)}), from $${round(seniorAmount).toLocaleString()} recorded ${isoDate(seniorDate)}`, low: balLow, high: balHigh });
     lines.push({ label: `Interest since default at ${(rLow * 100).toFixed(2)}–${(rHigh * 100).toFixed(2)}%`, low: balLow * rLow / 365 * days, high: balHigh * rHigh / 365 * days });
     lines.push({ label: 'Taxes + insurance advanced since default', low: escrow.low, high: escrow.high });
-    lines.push({ label: `Attorney fees + costs (${stage} stage)`, low: fees.low, high: fees.high });
     basis = rateGiven != null
       ? 'Recorded mortgage, amortized at the rate you entered'
       : `Recorded mortgage, amortized at the ${seniorDate.getFullYear()} market rate (assumed)`;
@@ -569,6 +564,20 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     basis = c.mortgageBook
       ? `No judgment yet. Recorder data is needed to estimate from mortgage Bk ${c.mortgageBook} / Pg ${c.mortgagePage}.`
       : 'No judgment yet and no mortgage book/page on the docket. Recorder data is needed.';
+  }
+
+  if (tier && documentedAdditionalCosts != null) {
+    lines.push({
+      label: 'Documented additional attorney / enforcement costs',
+      low: documentedAdditionalCosts,
+      high: documentedAdditionalCosts
+    });
+  }
+  const openCourtMatters = [c, ...(inputs.courtCases || [])].filter(s =>
+    !isClosedCase(s) && (s.caseTypeKind === 'mortgage' || s.caseTypeKind === 'lien'));
+  costsIncomplete = !!(tier && openCourtMatters.length && documentedAdditionalCosts == null);
+  if (costsIncomplete) {
+    flags.push('Additional attorney, collection, and enforcement costs are not included. Add the documented parcel total from the lender or collector payoff, court order, or applicable municipal ordinance.');
   }
 
   if (tier) {
@@ -693,6 +702,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
       : seniorSatisfied ? r(juniorBand) : null,
     sold: !!sheriffDeed,
     seniorSatisfied,
+    costsIncomplete,
     contractRate: contractRate != null ? +(contractRate * 100).toFixed(3) : null,
     juniorPlaintiff,
     recorder: {
