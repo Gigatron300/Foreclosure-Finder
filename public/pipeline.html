@@ -2536,6 +2536,8 @@
 
             const stackSize = c._stackSize || 1;
             const stackMembers = c._stackMembers || [];
+            const filedDisplay = stackSize > 1 ? formatCaseFiledRange(stackMembers) : formatDate(c.commencedDate);
+            const caseNumberDisplay = stackSize > 1 ? 'Multiple' : (c.caseNumber || 'N/A');
             const stackBadgeHtml = stackSize > 1
                 ? `<span class="stack-badge" title="Parcel ${c._stackParcel}">${stackSize} cases</span>`
                 : '';
@@ -2596,11 +2598,11 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Filed</div>
-                                <div class="detail-value">${formatDate(c.commencedDate)}</div>
+                                <div class="detail-value">${filedDisplay}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Case #</div>
-                                <div class="detail-value">${c.caseNumber || 'N/A'}</div>
+                                <div class="detail-value"${stackSize > 1 ? ` title="${escapeAttr(stackMembers.map(m => m.caseNumber).filter(Boolean).join(', '))}"` : ''}>${caseNumberDisplay}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">${stackSize > 1 ? `Total (${stackSize})` : 'Amount'}</div>
@@ -3429,6 +3431,23 @@
         function formatDate(dateStr) {
             if (!dateStr) return 'N/A';
             return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        function formatCaseFiledRange(members) {
+            const dates = (members || []).map(m => {
+                const value = m && m.commencedDate;
+                if (!value) return null;
+                const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                const date = match
+                    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+                    : new Date(value);
+                return isNaN(date) ? null : date;
+            }).filter(Boolean).sort((a, b) => a - b);
+            if (!dates.length) return 'N/A';
+            const monthYear = d => d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+            const oldest = monthYear(dates[0]);
+            const newest = monthYear(dates[dates.length - 1]);
+            return oldest === newest ? oldest : `${oldest}–${newest}`;
         }
         
         function truncate(str, len) {
