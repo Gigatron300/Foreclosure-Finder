@@ -1261,7 +1261,7 @@
             <button class="btn btn-outline owner-only" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="For cases with no parcel number (mortgage foreclosures), look up the defendant's address on the county parcel map. If the parcel's owner is the defendant, the card switches to that parcel. Uses cases already scraped -- no court scrape.">Find Mortgage Parcels</button>
             <button class="btn btn-outline owner-only" onclick="refreshRecorder()" id="recorderBtn" title="Look up every pipeline parcel with an open case at the Recorder of Deeds (mortgages, satisfactions, deeds) for the payoff estimate. Runs automatically after each Process All; parcels checked in the last 2 weeks are skipped. Click again while running to stop.">Pull Recorder Data</button>
             <button class="btn btn-outline owner-only" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
-            <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
+            <button class="btn btn-outline" onclick="exportExcel()" title="Download the uploaded court data as Excel with resolved parcels and newly closed statuses applied">Export Updated Excel</button>
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
             <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
             <button class="btn btn-outline filter-danger" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)">Hide Closed</button>
@@ -1333,9 +1333,6 @@
             <option value="PASS">
             <option value="PURSUE">
             <option value="MAYBE">
-            <option value="GREEN ZONE">
-            <option value="GREY ZONE">
-            <option value="RED ZONE">
         </datalist>
 
         <div class="cases-grid" id="casesGrid">
@@ -2883,7 +2880,7 @@
             }
         }
 
-        function exportCSV() { window.open('/api/pipeline/export/csv?token=' + encodeURIComponent(authToken), '_blank'); }
+        function exportExcel() { window.open('/api/pipeline/export/xlsx?token=' + encodeURIComponent(authToken), '_blank'); }
 
         // Find Mortgage Parcels result for a case: 'owner' | 'address' | 'none' | 'error',
         // or '' when it was never checked (it had a CSV parcel number, or hasn't been run yet).

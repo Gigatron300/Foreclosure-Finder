@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { fetchParcelAddress } = require('./scrapers/montco-courts');
+const { buildUpdatedMontcoWorkbook } = require('./scrapers/montco-excel-export');
 const { matchParcelByAddress, applyParcelMatch } = require('./scrapers/montco-parcel-match');
 const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
@@ -1414,26 +1415,18 @@ app.get('/api/pipeline/match-parcels/status', checkAuth, (req, res) => {
   res.json({ inProgress: isParcelMatchInProgress, status: lastParcelMatchStatus });
 });
 
-app.get('/api/pipeline/export/csv', async (req, res) => {
+app.get('/api/pipeline/export/xlsx', async (req, res) => {
   if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
-    const jsonData = JSON.parse(data);
-    const headers = ['Lead Grade', 'Lead Score', 'Case Number', 'Commenced Date', 'Days Open', 'Last Filing', 'Plaintiff', 'Defendant', 'Address', 'City', 'State', 'Zip', 'Has Judgement', 'Has Attorney', 'Has Response', 'Status', 'Remarks', 'URL'];
-    const rows = jsonData.cases.map(c => {
-      const ds = c.docketSummary || {};
-      return [
-        c.leadGrade, c.leadScore, c.caseNumber, c.commencedDate, c.daysOpen, c.lastFilingDate || '',
-        `"${(c.plaintiff || '').replace(/"/g, '""')}"`, `"${(c.defendant || '').replace(/"/g, '""')}"`,
-        `"${(c.propertyAddress || '').replace(/"/g, '""')}"`, c.propertyCity, c.propertyState, c.propertyZip,
-        c.hasJudgement ? 'Yes' : 'No', ds.hasDefendantAttorney ? 'Yes' : 'No', ds.hasDefendantResponse ? 'Yes' : 'No',
-        c.status, `"${(c.remarks || '').replace(/"/g, '""')}"`, c.detailUrl
-      ];
-    });
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=pre-foreclosure-pipeline.csv');
-    res.send(csv);
+    const [sourceCsv, pipelineData] = await Promise.all([
+      fs.readFile(CSV_FILE, 'utf8'),
+      fs.readFile(PIPELINE_DATA_FILE, 'utf8')
+    ]);
+    const pipeline = JSON.parse(pipelineData);
+    const { buffer } = await buildUpdatedMontcoWorkbook(sourceCsv, pipeline.cases);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=montco-cases-updated.xlsx');
+    res.send(buffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
