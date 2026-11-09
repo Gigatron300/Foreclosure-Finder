@@ -912,11 +912,15 @@
         }
         .payoff-table tr.subtotal td { font-weight: 700; color: var(--ink); border-bottom: none; }
         .payoff-table tr.grand td { font-weight: 700; color: var(--brand-gold-dark); border-top: 2px solid var(--border-strong); border-bottom: none; }
+        .payoff-table tr.case-detail td:first-child { padding-left: 12px; color: var(--muted); }
         .payoff-tag { font-size: 0.7rem; color: var(--success); margin-left: 4px; }
         .payoff-tag.warn { color: var(--warning); }
         .payoff-flags { margin: 0 0 10px; padding-left: 18px; color: var(--warning); }
         .payoff-flags li { margin: 2px 0; }
-        .payoff-edit { border-top: 1px solid var(--border); padding-top: 10px; }
+        .payoff-adjustments { border-top: 1px solid var(--border); padding-top: 8px; }
+        .payoff-adjustments > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+        .payoff-adjustments[open] > summary { color: var(--ink-2); }
+        .payoff-edit { padding-top: 2px; }
         .payoff-edit label { display: block; font-weight: 600; margin: 8px 0 3px; font-size: 0.75rem; color: var(--ink-2); }
         .payoff-edit .hint { font-weight: 400; color: var(--muted); }
         .payoff-edit textarea, .payoff-edit input[type="text"] {
@@ -3094,8 +3098,16 @@
                 : p.tier === 'C' ? 'From recorded mortgage' : 'No estimate yet';
             const band = payoffTotalBand(p);
 
-            const seniorRows = (p.seniorLines || []).map(l =>
-                `<tr><td>${escapeAttr(l.label)}</td><td class="num">${fmtRange(l)}</td></tr>`).join('');
+            const seniorRows = (p.seniorLines || [])
+                .filter(l => !lienPrimary || Number(l.low) || Number(l.high))
+                .map(l => {
+                    const primaryJudgment = lienPrimary && /^Judgment\b/i.test(l.label || '');
+                    const label = primaryJudgment
+                        ? `Lien case ${p.seniorCase || c.caseNumber || ''}, judgment${String(l.label).slice('Judgment'.length)}`
+                        : l.label;
+                    const rowClass = lienPrimary && !primaryJudgment ? ' class="case-detail"' : '';
+                    return `<tr${rowClass}><td>${escapeAttr(label)}${primaryJudgment ? '<span class="payoff-tag">court record</span>' : ''}</td><td class="num">${fmtRange(l)}</td></tr>`;
+                }).join('');
             const renderJuniorRows = rows => rows.map(j =>
                 `<tr><td>${escapeAttr(j.label)}${j.exact ? '<span class="payoff-tag">exact</span>' : ''}${j.negotiable ? '<span class="payoff-tag warn">negotiable</span>' : ''}${j.court ? '<span class="payoff-tag">court record</span>' : ''}${j.prior ? '<span class="payoff-tag warn">prior lien</span>' : ''}</td><td class="num">${fmtRange(j)}</td></tr>`).join('');
             const juniors = p.juniors || [];
@@ -3124,12 +3136,10 @@
             const table = p.senior && lienPrimary ? `
                 <table class="payoff-table">
                     <tr><th>Court judgments/liens</th><th class="num">High</th></tr>
-                    <tr><td colspan="2"><strong>Case ${escapeAttr(p.seniorCase || c.caseNumber || '')}</strong> · foreclosing lien</td></tr>
                     ${seniorRows}
-                    <tr class="subtotal"><td>Case ${escapeAttr(p.seniorCase || c.caseNumber || '')} estimated total</td><td class="num">${fmtRange(p.senior)}</td></tr>
                     ${courtRows}
                     <tr class="subtotal"><td>Court judgments/liens subtotal</td><td class="num">${fmtRange(courtTotal)}</td></tr>
-                    ${recordedRows ? `<tr><th colspan="2" style="padding-top:8px">Recorded mortgages and other encumbrances</th></tr>${recordedRows}
+                    ${recordedRows ? `<tr><th colspan="2" style="padding-top:8px">Recorded mortgages / HUD claims</th></tr>${recordedRows}
                     <tr class="subtotal"><td>Recorded encumbrances subtotal</td><td class="num">${fmtRange(recordedTotal)}</td></tr>` : ''}
                     <tr class="grand"><td>Estimated total payoff</td><td class="num">${fmtRange(band)}</td></tr>
                 </table>` : p.senior ? `
@@ -3169,11 +3179,11 @@
                         <span class="expand-icon">v</span>
                     </summary>
                     <div class="payoff-body">
-                        <div class="payoff-basis">${escapeAttr(p.basis || '')}${p.closingDate ? ` · as of ${escapeAttr(p.closingDate)}` : ''}</div>
-                        ${p.carryPerMonth ? `<div class="payoff-basis">Carry ≈ ${fmtDollars(p.carryPerMonth)}/month: a 60-day slip adds ≈ ${fmtDollars(p.carryPerMonth * 2)}.</div>` : ''}
-                        ${p.recorderAuto ? `<div class="payoff-basis">Recorder index pulled automatically ${escapeAttr(String(p.recorderAuto.fetchedAt).slice(0, 10))} (${p.recorderAuto.total ?? '?'} documents${p.recorderAuto.truncated ? ', first 100 only' : ''}).</div>` : ''}
+                        ${(!band || p.sold) && p.basis ? `<div class="payoff-basis">${escapeAttr(p.basis)}</div>` : ''}
                         ${table}
                         ${flags}
+                        <details class="payoff-adjustments">
+                        <summary>Adjust recorded mortgages or assumptions</summary>
                         <div class="payoff-edit" data-case="${escapeAttr(c.caseNumber)}">
                             <label>Recorder parcel search <span class="hint">(${p.recorderAuto ? 'pulled automatically; paste here only to override' : 'pulled automatically after each Process All; or paste the parcel search here'})</span></label>
                             <textarea class="po-recorder" placeholder="(empty: using the automatic pull)">${escapeAttr(inputs.recorderText || '')}</textarea>
@@ -3195,6 +3205,7 @@
                                 <span class="payoff-save-status"></span>
                             </div>
                         </div>
+                        </details>
                     </div>
                 </details>`;
         }
@@ -3254,6 +3265,8 @@
                     const fresh = document.querySelector(`.property-card[data-case="${CSS.escape(caseNumber)}"] .payoff-details`);
                     if (fresh) {
                         fresh.open = true;
+                        const adjustments = fresh.querySelector('.payoff-adjustments');
+                        if (adjustments) adjustments.open = true;
                         const s = fresh.querySelector('.payoff-save-status');
                         if (s) s.textContent = 'Saved.';
                     }

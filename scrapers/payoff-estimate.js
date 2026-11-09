@@ -399,7 +399,10 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     senior = mortgages.find(mt => mt.key === protect[0]) || null;
     if (senior) flags.push(`Foreclosed loan identified as ${senior.key} ($${round(senior.amount || 0).toLocaleString()}, ${senior.recorded}): ${protectedBy}.`);
   }
-  if (!senior && rows.length) {
+  // A municipal/tax lien case forecloses the filed lien, not a mortgage. Its
+  // recorded mortgages are separate encumbrances and must never be selected as
+  // (or warned about as) the instrument being foreclosed.
+  if (!senior && rows.length && c.caseTypeKind !== 'lien') {
     // No book/page match: look for open mortgages made to the plaintiff.
     const pw = lenderWords(c.plaintiff, new Set());
     const named = mortgages.filter(mt => mt.open && mt.amount && !isHud(mt) &&
@@ -416,7 +419,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
       flags.push('Could not tell which recorded mortgage is the one being foreclosed. If one of the listed mortgages is it, untick it to avoid counting it twice.');
     }
   }
-  if (!senior && (!facts.judgment || (c.caseTypeKind === 'mortgage' && isClosedCase(c)))) {
+  if (!senior && c.caseTypeKind !== 'lien' && (!facts.judgment || (c.caseTypeKind === 'mortgage' && isClosedCase(c)))) {
     // No book/page match (Remarks missing or points at the deed): assume the
     // largest open non-HUD mortgage is the one being foreclosed.
     senior = mortgages.filter(mt => mt.open && mt.amount && !isHud(mt))
@@ -600,7 +603,7 @@ function estimatePayoff(c, inputs = {}, asOf = new Date()) {
     const since = (sf.judgment && sf.judgment.date) || toDate(s.commencedDate) || asOf;
     const yrs = daysBetween(since, closing) / 365;
     juniors.push({
-      label: `${kind} ${s.caseNumber} (${who}), judgment`,
+      label: `${kind} ${s.caseNumber} (${who}), judgment + est. interest`,
       low: amt,
       high: amt * (1 + ASSUMPTIONS.courtLienRate * yrs),
       court: true
