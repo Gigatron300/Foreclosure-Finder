@@ -1318,7 +1318,7 @@
             </div>
 
             <div class="case-search-group">
-                <input type="search" id="caseSearch" class="case-search" placeholder="Search address, city, name, case #, parcel..."
+                <input type="search" id="caseSearch" class="case-search" placeholder="Search address, name, case, parcel, note, tag..."
                     oninput="onCaseSearchInput()" autocomplete="off">
             </div>
         </div>
@@ -1345,6 +1345,10 @@
 
     <script>
         let authToken = siteAuth.get();
+        let montcoDataCache = null;
+        let montcoDataCachePromise = null;
+        let montcoDataCacheVersion = 0;
+        let montcoLoadSequence = 0;
 
         // MontCo Track (/montco-track): same page, only cards tagged TRACK, and just the
         // cards and filters on screen. CSS under body.track-view hides the rest.
@@ -1404,10 +1408,19 @@
         // Keep the in-memory cards in step so a repaint (e.g. after a payoff save) shows the edit.
         function patchMemberCases(caseNumbers, patch) {
             const set = new Set(caseNumbers);
+            for (const c of ((montcoDataCache && montcoDataCache.cases) || [])) {
+                if (!set.has(c.caseNumber)) continue;
+                Object.assign(c, patch);
+                refreshMontcoCaseSearchIndex(c);
+            }
             for (const g of ((montcoRenderState && montcoRenderState.cases) || [])) {
                 const members = g._stackMembers || [g];
                 if (!members.some(m => set.has(m.caseNumber))) continue;
-                members.forEach(m => { if (set.has(m.caseNumber)) Object.assign(m, patch); });
+                members.forEach(m => {
+                    if (!set.has(m.caseNumber)) return;
+                    Object.assign(m, patch);
+                    refreshMontcoCaseSearchIndex(m);
+                });
                 if (patch.userTags) g._tags = [...new Set(members.flatMap(m => m.userTags || []))];
                 if (typeof patch.userNotes === 'string') g._notes = patch.userNotes;
             }
@@ -2208,41 +2221,106 @@
         // Free-text search across the FULL dataset (not just rendered cards),
         // so a property that lives further down the paginated list still surfaces.
         let caseSearchDebounce = null;
+        function normalizeMontcoSearchText(value) {
+            return String(value == null ? '' : value)
+                .normalize('NFKD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/&/g, ' and ')
+                .replace(/[^a-z0-9]+/g, ' ')
+                .replace(/\b(street|str)\b/g, 'st')
+                .replace(/\bavenue\b/g, 'ave')
+                .replace(/\broad\b/g, 'rd')
+                .replace(/\bdrive\b/g, 'dr')
+                .replace(/\blane\b/g, 'ln')
+                .replace(/\bcourt\b/g, 'ct')
+                .replace(/\bplace\b/g, 'pl')
+                .replace(/\bterrace\b/g, 'ter')
+                .replace(/\bboulevard\b/g, 'blvd')
+                .replace(/\bcircle\b/g, 'cir')
+                .replace(/\bhighway\b/g, 'hwy')
+                .replace(/\bparkway\b/g, 'pkwy')
+                .replace(/\bnorth\b/g, 'n')
+                .replace(/\bsouth\b/g, 's')
+                .replace(/\beast\b/g, 'e')
+                .replace(/\bwest\b/g, 'w')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+        function refreshMontcoCaseSearchIndex(c) {
+            if (!c) return;
+            const values = [
+                c.propertyAddress, c.propertyCity, c.propertyZip,
+                c.defendant, c.captionDefendant, c.plaintiff, c.captionPlaintiff,
+                c.caseNumber, c.parcelNumber, c.caseType, c.caseTypeKind,
+                c.status, c.liveStatus, c.owner, c.ownerName, c.propertyOwner,
+                c.mortgageBook, c.mortgagePage, c.userNotes,
+                ...(Array.isArray(c.userTags) ? c.userTags : [])
+            ].filter(v => v != null && v !== '');
+            c._searchText = normalizeMontcoSearchText(values.join(' '));
+            c._searchCompact = c._searchText.replace(/\s+/g, '');
+        }
         function getCaseSearchTerms() {
             const input = document.getElementById('caseSearch');
-            const raw = input ? input.value.trim().toLowerCase() : '';
-            return raw ? raw.split(/\s+/) : [];
+            const normalized = normalizeMontcoSearchText(input ? input.value : '');
+            return normalized ? normalized.split(/\s+/) : [];
         }
         function caseMatchesSearch(c, terms) {
             const members = c._stackMembers && c._stackMembers.length ? c._stackMembers : [c];
-            const haystack = members.flatMap(m => [
-                m.propertyAddress, m.propertyCity, m.defendant, m.plaintiff,
-                m.caseNumber, m.parcelNumber
-            ]).filter(Boolean).join(' ').toLowerCase();
-            return terms.every(t => haystack.includes(t));
+            for (const m of members) if (!m._searchText) refreshMontcoCaseSearchIndex(m);
+            const haystack = members.map(m => m._searchText).join(' ');
+            const compact = members.map(m => m._searchCompact).join(' ');
+            return terms.every(term => haystack.includes(term) || (term.length >= 4 && compact.includes(term)));
         }
         function onCaseSearchInput() {
             if (caseSearchDebounce) clearTimeout(caseSearchDebounce);
             caseSearchDebounce = setTimeout(() => loadData(), 200);
         }
 
-        async function loadData() {
-            pollRecorder();
+        async function fetchMontcoData(forceRefresh = false) {
+            if (!forceRefresh && montcoDataCache) return montcoDataCache;
+            if (!forceRefresh && montcoDataCachePromise) return montcoDataCachePromise;
+            if (forceRefresh) {
+                montcoDataCache = null;
+                montcoDataCacheVersion++;
+            }
+            const requestVersion = montcoDataCacheVersion;
+
+            const request = (async () => {
+                const response = await fetch('/api/pipeline', {
+                    headers: { 'X-Auth-Token': authToken }
+                });
+                if (!response.ok) throw new Error(`Pipeline request failed (${response.status})`);
+                const data = await response.json();
+                if (requestVersion === montcoDataCacheVersion) montcoDataCache = data;
+                return data;
+            })();
+            montcoDataCachePromise = request;
+
+            try {
+                return await request;
+            } finally {
+                if (montcoDataCachePromise === request) montcoDataCachePromise = null;
+            }
+        }
+
+        async function loadData(forceRefresh = false) {
+            const loadSequence = ++montcoLoadSequence;
             const grid = document.getElementById('casesGrid');
             const sortBy = document.getElementById('sortBy').value;
             const selectedCities = getSelectedCheckboxValues('cityFilterOptions');
             const typeFilter = document.getElementById('typeFilter').value;
             const searchTerms = getCaseSearchTerms();
+            const refreshAuxiliaryData = forceRefresh || !montcoDataCache;
+            if (refreshAuxiliaryData) pollRecorder();
 
             try {
-                const [response, sheriffKeys] = await Promise.all([
-                    fetch(`/api/pipeline?sortBy=${sortBy}&sortOrder=desc`, {
-                        headers: { 'X-Auth-Token': authToken }
-                    }),
+                const [data, sheriffKeys] = await Promise.all([
+                    fetchMontcoData(forceRefresh),
                     getMontcoSheriffAddressKeys(),
-                    syncLoadedPhotos()
+                    refreshAuxiliaryData ? syncLoadedPhotos() : Promise.resolve()
                 ]);
-                const data = await response.json();
+                if (loadSequence !== montcoLoadSequence) return;
 
                 // Update status
                 if (data.lastUpdated) {
@@ -2254,6 +2332,7 @@
                 // Recover clean city values from any rows scraped with the old buggy parser
                 for (const c of cases) {
                     c.propertyCity = cleanCityValue(c.propertyCity);
+                    if (!c._searchText) refreshMontcoCaseSearchIndex(c);
                 }
 
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
@@ -2384,6 +2463,7 @@
                 grid.innerHTML = '';
                 renderNextCasePage();
             } catch (error) {
+                if (loadSequence !== montcoLoadSequence) return;
                 grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;
             }
         }
@@ -2774,7 +2854,7 @@
                 stopBtn.style.display = 'none';
                 stopBtn.disabled = false;
                 stopBtn.innerHTML = 'Stop';
-                loadData();
+                loadData(true);
                 checkCsvStatus();
 
                 if (!notify) return;
@@ -2870,7 +2950,7 @@
                 });
                 const result = await response.json();
                 if (!response.ok || !result.success) throw new Error(result.error || 'Clear failed');
-                await loadData();
+                await loadData(true);
                 alert('Pipeline data cleared.');
             } catch (error) {
                 alert('Clear failed: ' + error.message);
@@ -3148,10 +3228,23 @@
                 });
                 const updated = await res.json();
                 if (!res.ok) throw new Error(updated.error || res.statusText);
+                const cachedCases = (montcoDataCache && montcoDataCache.cases) || [];
+                const cachedCase = cachedCases.find(x => x.caseNumber === caseNumber);
+                const cachedParcel = cachedCase && primaryParcelKey(cachedCase.parcelNumber);
+                for (const item of cachedCases) {
+                    if (item.caseNumber === caseNumber || (cachedParcel && primaryParcelKey(item.parcelNumber) === cachedParcel)) {
+                        item.payoff = updated.payoff;
+                        item.payoffInputs = updated.payoffInputs;
+                    }
+                }
                 // Update the in-memory case and repaint just this card, payoff section open.
                 const list = (montcoRenderState && montcoRenderState.cases) || [];
                 const target = list.find(x => x.caseNumber === caseNumber);
                 if (target) {
+                    for (const item of (target._stackMembers || [target])) {
+                        item.payoff = updated.payoff;
+                        item.payoffInputs = updated.payoffInputs;
+                    }
                     target.payoff = updated.payoff;
                     target.payoffInputs = updated.payoffInputs;
                 }
@@ -3214,7 +3307,7 @@
                                 `  Address is a parcel, different owner: ${s.addressOnly}\n` +
                                 `  No parcel at that address: ${s.unmatched}` +
                                 (s.errors ? `\n  Couldn't check (parcel map error): ${s.errors}` : ''));
-                            await loadData();
+                            await loadData(true);
                         } else {
                             alert('Matching failed: ' + ((s && s.error) || 'unknown error'));
                         }
@@ -3267,7 +3360,7 @@
                         btn.title = `Last run ${new Date(st.last.at).toLocaleString()}: ${st.last.status}` +
                             (st.last.checked != null ? `, ${st.last.checked} checked, ${st.last.failed || 0} failed` : '') +
                             (st.last.error ? ` (${st.last.error})` : '') + (st.last.reason && st.last.status === 'skipped' ? ` (${st.last.reason})` : '');
-                        if (!firstSeen) loadData();
+                        if (!firstSeen) loadData(true);
                     }
                 }
             } catch (e) { /* status is best-effort */ }
@@ -3305,7 +3398,7 @@
                     if (!statusResult.inProgress) {
                         if (s && s.status === 'completed') {
                             alert(`Re-scanned ${total} lien case(s):\n  Recovered: ${s.recovered}\n  Still unresolved: ${s.stillFailed}`);
-                            await loadData();
+                            await loadData(true);
                         } else {
                             alert('Re-scan failed: ' + ((s && s.error) || 'unknown error'));
                         }
