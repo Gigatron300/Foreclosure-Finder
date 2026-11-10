@@ -38,7 +38,7 @@ const CONFIG = {
 // Version zero-result cache entries separately. The first zero-result implementation
 // could capture a transient empty search fired by the records-per-page widget.
 const SEARCH_CACHE_VERSION = 2;
-const PARCEL_RESOLUTION_VERSION = 3;
+const PARCEL_RESOLUTION_VERSION = 4;
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const NO_RESULTS_RE = /no (records|results|documents) (were )?found|0 items/i;
@@ -333,7 +333,8 @@ function recorderNameForCase(c) {
     .slice(0, 50);
 }
 
-async function confirmedParcelCandidates(c, parcelIds, gisCache, { requireAddress = true } = {}) {
+async function confirmedParcelCandidates(c, parcelIds, gisCache,
+  { requireAddress = true, requireOwner = true } = {}) {
   const confirmed = [];
   for (const parcel of parcelIds) {
     const key = parcelKey(parcel);
@@ -347,10 +348,9 @@ async function confirmedParcelCandidates(c, parcelIds, gisCache, { requireAddres
       zip: c.propertyZip,
       defendant: c.defendant
     });
-    // Name-only candidates need both independent GIS checks. An exact, unique
-    // mortgage book/page already identifies the property instrument, so its GIS
-    // owner must match but the court defendant's mailing address need not.
-    if (match && evidence.ownerMatch && (!requireAddress || evidence.addressMatch)) {
+    // Exact book/page supplies instrument evidence, while a name search supplies
+    // party evidence. Require the independent GIS fact appropriate to each source.
+    if (match && (!requireOwner || evidence.ownerMatch) && (!requireAddress || evidence.addressMatch)) {
       confirmed.push({ match, evidence });
     }
   }
@@ -363,8 +363,8 @@ function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   if (originalParcel && !c.courtParcelNumber) c.courtParcelNumber = originalParcel;
   applyParcelMatch(c, resolved.match);
   // A court mailing ZIP and the parcel layer's location ZIP can disagree even when
-  // the exact house/street and owner agree. Preserve the case ZIP for display and
-  // retain both values in the correction audit.
+  // the parcel is otherwise confirmed. Preserve the case ZIP for display and retain
+  // both values in the correction audit.
   if (!resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
   c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
   const sourceLabel = source === 'recorder-book-page'
@@ -372,7 +372,7 @@ function applyRecorderParcelResolution(c, resolved, source, details = {}) {
     : `Recorder defendant-name search for ${details.name}`;
   const confirmationLabel = source === 'recorder-book-page'
     ? 'the unique Recorder instrument and county GIS owner'
-    : 'the county GIS street address and owner';
+    : 'the Recorder defendant-name results and unique matching GIS street address';
   c.parcelCorrection = {
     originalParcel,
     correctedParcel: resolved.match.parcel,
@@ -428,7 +428,10 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
       };
       return false;
     }
-    const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache);
+    const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache, {
+      requireAddress: true,
+      requireOwner: false
+    });
     if (confirmed.length === 1) {
       applyRecorderParcelResolution(c, confirmed[0], 'recorder-name', { name });
       return true;
@@ -438,7 +441,7 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
   c.recorderParcelResolution = {
     version: PARCEL_RESOLUTION_VERSION,
     status: 'unresolved', checkedAt: new Date().toISOString(),
-    reason: 'No single Recorder parcel matched both the case address and defendant owner'
+    reason: 'No single Recorder parcel satisfied the source-specific GIS confirmation checks'
   };
   return false;
 }
@@ -605,7 +608,7 @@ async function describeFrames(page) {
 
 module.exports = {
   login, launch, searchParcel, searchBookPage, searchName, extractParcelIds,
-  refreshRecorderIndex, readCache, parcelKey, formatParcel,
+  resolveCaseParcel, refreshRecorderIndex, readCache, parcelKey, formatParcel,
   hasCredentials, parcelsToRefresh, describeFrames, CONFIG, CACHE_PATH, SEARCH_CACHE_VERSION
 };
 
