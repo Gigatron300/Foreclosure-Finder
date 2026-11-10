@@ -390,9 +390,9 @@ function buildPropertyLocationAddress(f) {
   return street;
 }
 
-async function fetchParcelAddress(parcelRaw, options = {}) {
+async function lookupParcelAddress(parcelRaw, options = {}) {
   const parcel = String(parcelRaw || '').replace(/\D/g, '');
-  if (!parcel) return null;
+  if (!parcel) return { info: null, status: 'invalid', parcel, error: '' };
   if (!options.bypassCache && parcelAddressCache.has(parcel)) return parcelAddressCache.get(parcel);
 
   const params = new URLSearchParams({
@@ -404,57 +404,74 @@ async function fetchParcelAddress(parcelRaw, options = {}) {
   const url = `${PARCEL_API_BASE}?${params.toString()}`;
 
   let info = null;
+  let status = 'not-found';
+  let error = '';
   let debugStatus = '';
   let debugFeatures = -1;
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
     debugStatus = `HTTP ${resp.status}`;
-    if (resp.ok) {
+    if (!resp.ok) {
+      status = 'error';
+      error = `HTTP ${resp.status}`;
+    } else {
       const data = await resp.json();
-      debugFeatures = data?.features?.length ?? 0;
-      const f = data?.features?.[0]?.attributes;
-      if (f) {
-        const muni = (f.Muni_Name || '').trim();
-        // Strip municipal suffix for the city display ("Pottstown Borough" -> "Pottstown")
-        let city = muni.replace(/\s+(borough|township|city|town)\s*$/i, '').trim();
-        let zip = (f.LOC_ZIP1_Z || '').trim();
-        let street = buildPropertyLocationAddress(f);
+      if (data?.error) {
+        status = 'error';
+        error = data.error.message || 'Parcel API error';
+      } else {
+        debugFeatures = data?.features?.length ?? 0;
+        const f = data?.features?.[0]?.attributes;
+        status = f ? 'found' : 'not-found';
+        if (f) {
+          const muni = (f.Muni_Name || '').trim();
+          // Strip municipal suffix for the city display ("Pottstown Borough" -> "Pottstown")
+          let city = muni.replace(/\s+(borough|township|city|town)\s*$/i, '').trim();
+          let zip = (f.LOC_ZIP1_Z || '').trim();
+          let street = buildPropertyLocationAddress(f);
 
-        // Fallback: if LOC_* fields are empty (rare), use owner mailing as last resort
-        if (!street && f.ADDR1) {
-          street = (f.ADDR1 || '').trim();
-          const m = (f.ADDR3 || '').match(/^(.+?)\s+PA\s+(\d{5})/i);
-          if (m) { if (!city) city = m[1].trim(); if (!zip) zip = m[2]; }
-        }
+          // Fallback: if LOC_* fields are empty (rare), use owner mailing as last resort
+          if (!street && f.ADDR1) {
+            street = (f.ADDR1 || '').trim();
+            const m = (f.ADDR3 || '').match(/^(.+?)\s+PA\s+(\d{5})/i);
+            if (m) { if (!city) city = m[1].trim(); if (!zip) zip = m[2]; }
+          }
 
-        if (street) {
-          info = {
-            street,
-            city,
-            state: 'PA',
-            zip,
-            owner: (f.OWN1 || '').trim(),
-            municipality: muni,
-            parcel: f.PARCEL
-          };
+          if (street) {
+            info = {
+              street,
+              city,
+              state: 'PA',
+              zip,
+              owner: (f.OWN1 || '').trim(),
+              municipality: muni,
+              parcel: f.PARCEL
+            };
+          }
         }
       }
     }
   } catch (e) {
     debugStatus = `ERROR: ${(e.message || '').slice(0, 80)}`;
-    // Network/timeout — fall back to defendant address
+    status = 'error';
+    error = e.message || 'Parcel API request failed';
   }
 
-  parcelAddressCache.set(parcel, info);
+  const lookup = { info, status, parcel, error };
+  parcelAddressCache.set(parcel, lookup);
 
   if (_parcelDebugRemaining > 0) {
     _parcelDebugRemaining--;
     const rawDisplay = JSON.stringify(String(parcelRaw)); // shows quotes / hidden chars
-    const matched = info ? `MATCH "${info.street}, ${info.city}"` : 'NO MATCH';
+    const matched = info ? `MATCH "${info.street}, ${info.city}"` : status.toUpperCase();
     console.log(`   [parcel-debug] raw=${rawDisplay} norm="${parcel}" (${parcel.length}d) ${debugStatus} features=${debugFeatures} -> ${matched}`);
   }
 
-  return info;
+  return lookup;
+}
+
+async function fetchParcelAddress(parcelRaw, options = {}) {
+  return (await lookupParcelAddress(parcelRaw, options)).info;
 }
 
 /* ===========================================================
@@ -1050,9 +1067,10 @@ async function scrapeMontgomeryCourts(options = {}) {
       // Kick off the parcel API lookup in parallel with the Puppeteer page load.
       // The parcel number is already known from the CSV, so this lets the
       // ArcGIS round-trip overlap the (much slower) court page navigation.
-      const parcelPromise = c.parcelNumber
-        ? fetchParcelAddress(c.parcelNumber)
-        : Promise.resolve(null);
+      const courtParcelNumber = c.parcelNumber || '';
+      const parcelPromise = courtParcelNumber
+        ? lookupParcelAddress(courtParcelNumber)
+        : Promise.resolve({ info: null, status: 'missing', parcel: '', error: '' });
 
       // Try cached URL first (skips search hop entirely on subsequent runs)
       let detailLoaded = false;
@@ -1353,7 +1371,8 @@ async function scrapeMontgomeryCourts(options = {}) {
       // Prefer parcel-derived address (the property with the lien) over the
       // defendant's mailing address (which can be a different home entirely).
       // The lookup was kicked off in parallel with the page load above.
-      const parcelAddr = await parcelPromise;
+      const parcelLookup = await parcelPromise;
+      const parcelAddr = parcelLookup.info;
 
       if (parcelAddr && parcelAddr.street) {
         c.propertyAddress = parcelAddr.street;
@@ -1376,11 +1395,32 @@ async function scrapeMontgomeryCourts(options = {}) {
         c.propertyMunicipality = '';
         c.addressSource = c.parcelNumber ? 'defendant-fallback' : 'defendant';
 
-        // No parcel number from the CSV (mortgage foreclosures): look the defendant
-        // address up on the parcel layer and confirm the owner is the defendant.
-        if (!c.parcelNumber && c.propertyAddress) {
+        // Blank court parcels are matched from the defendant address. A court parcel
+        // that does not exist in the county layer gets the same retry, but it is only
+        // replaced when the address match is also owner-confirmed.
+        const courtParcelDigits = String(courtParcelNumber).replace(/\D/g, '');
+        const courtParcelIsSingle = courtParcelDigits.length === 12;
+        const courtParcelNotFound = courtParcelIsSingle && parcelLookup.status === 'not-found';
+        if (courtParcelNotFound) c.parcelValidationStatus = 'not-found';
+        if ((!courtParcelNumber || courtParcelNotFound) && c.propertyAddress) {
           try {
-            applyParcelMatch(c, await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant }));
+            const match = await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant });
+            if (!courtParcelNumber) {
+              applyParcelMatch(c, match);
+            } else if (match && match.confidence === 'owner' && String(match.parcel).replace(/\D/g, '') !== courtParcelDigits) {
+              c.courtParcelNumber = courtParcelNumber;
+              c.parcelCorrection = {
+                originalParcel: courtParcelNumber,
+                correctedParcel: match.parcel,
+                reason: 'Court parcel not found in Montgomery County parcel GIS; case address and defendant owner matched',
+                matchedAddress: [c.propertyAddress, c.propertyCity, c.propertyZip].filter(Boolean).join(', '),
+                matchedOwner: match.owner,
+                correctedAt: new Date().toISOString()
+              };
+              applyParcelMatch(c, match);
+              c.parcelValidationStatus = 'corrected';
+              console.log(`   [parcel-correction] ${c.caseNumber}: ${courtParcelNumber} -> ${match.parcel} (${match.street})`);
+            }
           } catch (e) { c.parcelMatchStatus = 'error'; /* parcel layer unreachable: keep the defendant address */ }
         }
       }
@@ -1410,6 +1450,9 @@ async function scrapeMontgomeryCourts(options = {}) {
         caseType: c.caseType || '',
         caseTypeKind: classifyCaseType(c.caseType),
         parcelNumber: c.parcelNumber || '',
+        courtParcelNumber: c.courtParcelNumber || '',
+        parcelCorrection: c.parcelCorrection || null,
+        parcelValidationStatus: c.parcelValidationStatus || '',
         judgmentAmount: c.judgmentAmount != null ? c.judgmentAmount : null,
         judgments: c.judgments || [],
         daysOpen: c.daysOpen,
@@ -1573,7 +1616,7 @@ async function pushSession({ url, token, sessionPath = CONFIG.sessionPath } = {}
 }
 
 module.exports = {
-  scrapeMontgomeryCourts, parseCSV, fetchParcelAddress, CONFIG, MONTCO_TOWNS,
+  scrapeMontgomeryCourts, parseCSV, fetchParcelAddress, lookupParcelAddress, CONFIG, MONTCO_TOWNS,
   establishMontcoSession, loadMontcoSession, pushSession
 };
 

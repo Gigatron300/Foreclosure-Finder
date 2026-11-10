@@ -2255,7 +2255,7 @@
             const values = [
                 c.propertyAddress, c.propertyCity, c.propertyZip,
                 c.defendant, c.captionDefendant, c.plaintiff, c.captionPlaintiff,
-                c.caseNumber, c.parcelNumber, c.caseType, c.caseTypeKind,
+                c.caseNumber, c.parcelNumber, c.courtParcelNumber, c.caseType, c.caseTypeKind,
                 c.status, c.liveStatus, c.owner, c.ownerName, c.propertyOwner,
                 c.mortgageBook, c.mortgagePage, c.userNotes,
                 ...(Array.isArray(c.userTags) ? c.userTags : [])
@@ -2585,8 +2585,10 @@
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
-                            ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>Defendant Addr</span>` : ''}
-                            ${c.addressSource === 'parcel-match' ? `<span class="address-warning-flag parcel-matched" title="${escapeAttr(`Defendant address matched parcel ${c.parcelNumber} owned by ${(c.parcelMatch && c.parcelMatch.owner) || 'the defendant'}${c.propertyMunicipality ? ' (' + c.propertyMunicipality + ')' : ''}`)}"><span class="address-warning-dot"></span>Parcel Matched</span>` : ''}
+                            ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>${c.parcelValidationStatus === 'not-found' ? 'Court Parcel Missing' : 'Defendant Addr'}</span>` : ''}
+                            ${c.addressSource === 'parcel-match' ? `<span class="address-warning-flag parcel-matched" title="${escapeAttr(c.parcelCorrection
+                                ? `Court parcel ${c.parcelCorrection.originalParcel} was not found in the county GIS. The case address and defendant owner matched ${c.parcelCorrection.correctedParcel} (${c.parcelCorrection.matchedOwner || 'owner unavailable'}).`
+                                : `Defendant address matched parcel ${c.parcelNumber} owned by ${(c.parcelMatch && c.parcelMatch.owner) || 'the defendant'}${c.propertyMunicipality ? ' (' + c.propertyMunicipality + ')' : ''}`)}"><span class="address-warning-dot"></span>${c.parcelCorrection ? 'Parcel Corrected' : 'Parcel Matched'}</span>` : ''}
                         </div>
                         <div class="property-location">${location}</div>
                         
@@ -3288,6 +3290,9 @@
         }
 
         function defendantAddrTooltip(c) {
+            if (c.parcelValidationStatus === 'not-found') {
+                return `Court parcel ${c.parcelNumber || c.courtParcelNumber || '(blank)'} was not found in the Montgomery County parcel GIS, and the case address did not produce an owner-confirmed replacement. The defendant address is shown for review.`;
+            }
             let t = `Address came from the defendant's mailing address (parcel lookup ${c.addressSource === 'defendant-fallback' ? 'failed' : 'unavailable'}) — may not be the actual property`;
             if (c.parcelMatch && c.parcelMatch.confidence === 'address') {
                 t += `. This address is parcel ${c.parcelMatch.parcel}, but it's owned by ${c.parcelMatch.owner || 'someone else'}, not the defendant (sold, or held in another name).`;
