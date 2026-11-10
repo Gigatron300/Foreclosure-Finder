@@ -38,6 +38,7 @@ const CONFIG = {
 // Version zero-result cache entries separately. The first zero-result implementation
 // could capture a transient empty search fired by the records-per-page widget.
 const SEARCH_CACHE_VERSION = 2;
+const PARCEL_RESOLUTION_VERSION = 2;
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const NO_RESULTS_RE = /no (records|results|documents) (were )?found|0 items/i;
@@ -314,7 +315,8 @@ function caseIsOpen(c) {
 
 function needsParcelResolution(c) {
   if (!caseIsOpen(c)) return false;
-  if (['unresolved', 'skipped'].includes(c.recorderParcelResolution?.status) && c.recorderParcelResolution.checkedAt) {
+  if (c.recorderParcelResolution?.version === PARCEL_RESOLUTION_VERSION &&
+      ['unresolved', 'skipped'].includes(c.recorderParcelResolution?.status) && c.recorderParcelResolution.checkedAt) {
     const age = Date.now() - new Date(c.recorderParcelResolution.checkedAt).getTime();
     if (Number.isFinite(age) && age < CONFIG.maxAgeDays * 86400000) return false;
   }
@@ -354,8 +356,13 @@ async function confirmedParcelCandidates(c, parcelIds, gisCache) {
 
 function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   const originalParcel = c.courtParcelNumber || c.parcelNumber || '';
+  const caseZip = String(c.propertyZip || '').trim().slice(0, 5);
   if (originalParcel && !c.courtParcelNumber) c.courtParcelNumber = originalParcel;
   applyParcelMatch(c, resolved.match);
+  // A court mailing ZIP and the parcel layer's location ZIP can disagree even when
+  // the exact house/street and owner agree. Preserve the case ZIP for display and
+  // retain both values in the correction audit.
+  if (!resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
   c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
   const sourceLabel = source === 'recorder-book-page'
     ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`
@@ -363,18 +370,24 @@ function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   c.parcelCorrection = {
     originalParcel,
     correctedParcel: resolved.match.parcel,
-    reason: `${originalParcel ? `Court parcel ${originalParcel} was not found` : 'The court parcel was blank'}; ${sourceLabel} returned one parcel confirmed by the county GIS address and owner`,
+    reason: `${originalParcel ? `Court parcel ${originalParcel} was not found` : 'The court parcel was blank'}; ${sourceLabel} returned one parcel confirmed by the county GIS street address and owner` +
+      (!resolved.evidence.zipMatch ? ` (court ZIP ${caseZip || 'blank'}; GIS ZIP ${resolved.match.zip || 'blank'})` : ''),
     source,
     sourceBook: details.book || '',
     sourcePage: details.page || '',
     sourceName: details.name || '',
     matchedAddress: [resolved.match.street, resolved.match.city, resolved.match.zip].filter(Boolean).join(', '),
     matchedOwner: resolved.match.owner,
+    caseZip,
+    gisZip: resolved.match.zip || '',
+    zipMatch: resolved.evidence.zipMatch,
     correctedAt: new Date().toISOString()
   };
   c.recorderParcelResolution = {
+    version: PARCEL_RESOLUTION_VERSION,
     status: 'confirmed', source, parcel: resolved.match.parcel,
-    addressMatch: true, ownerMatch: true, resolvedAt: c.parcelCorrection.correctedAt
+    addressMatch: true, ownerMatch: true, zipMatch: resolved.evidence.zipMatch,
+    resolvedAt: c.parcelCorrection.correctedAt
   };
 }
 
@@ -398,6 +411,7 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
     const result = await runSearch(`name:${name.toUpperCase()}`, (page) => searchName(page, name));
     if (result.tooBroad) {
       c.recorderParcelResolution = {
+        version: PARCEL_RESOLUTION_VERSION,
         status: 'skipped', checkedAt: new Date().toISOString(),
         reason: `Recorder name search returned ${result.total} results, above the safe limit of ${CONFIG.maxNameResults}`
       };
@@ -411,6 +425,7 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
   }
 
   c.recorderParcelResolution = {
+    version: PARCEL_RESOLUTION_VERSION,
     status: 'unresolved', checkedAt: new Date().toISOString(),
     reason: 'No single Recorder parcel matched both the case address and defendant owner'
   };
@@ -499,7 +514,10 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
           }
         } catch (e) {
           result.resolutionFailed++;
-          c.recorderParcelResolution = { status: 'error', error: e.message, checkedAt: new Date().toISOString() };
+          c.recorderParcelResolution = {
+            version: PARCEL_RESOLUTION_VERSION,
+            status: 'error', error: e.message, checkedAt: new Date().toISOString()
+          };
           console.log(`   [${i + 1}/${unresolvedCases.length}] ${caseLabel}: error — ${e.message}`);
           try { await open(); } catch (e2) { throw e2; }
         }

@@ -114,15 +114,16 @@ function parcelMatchesCase(match, { street, zip, defendant } = {}) {
   const parcelZip = String(match.zip || '').trim().slice(0, 5);
   const hasAddress = !!wantedStreet;
   const addressMatch = !!(wantedStreet && parcelStreet &&
-    wantedStreet.number === parcelStreet.number && wantedStreet.name === parcelStreet.name &&
-    (!wantedZip || !parcelZip || wantedZip === parcelZip));
+    wantedStreet.number === parcelStreet.number && wantedStreet.name === parcelStreet.name);
+  const zipMatch = !wantedZip || !parcelZip || wantedZip === parcelZip;
   const surnames = surnamesFrom(defendant);
   const hasOwner = surnames.length > 0;
   const ownerMatch = hasOwner && ownerMatches({ OWN1: match.owner, OWN2: '' }, surnames);
   return {
     confirmed: (hasAddress || hasOwner) && (!hasAddress || addressMatch) && (!hasOwner || ownerMatch),
     addressMatch,
-    ownerMatch
+    ownerMatch,
+    zipMatch
   };
 }
 
