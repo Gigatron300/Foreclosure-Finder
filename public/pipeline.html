@@ -3378,7 +3378,13 @@
                 const st = await (await fetch('/api/pipeline/recorder-refresh/status', { headers: { 'X-Auth-Token': authToken } })).json();
                 if (st.running) {
                     const p = st.progress || {};
-                    btn.innerHTML = p.total != null ? `Recorder ${p.checked || 0}/${p.total} (stop)` : 'Recorder starting… (stop)';
+                    if (p.phase === 'parcel-resolution') {
+                        btn.innerHTML = `Resolving parcels ${p.resolved || 0}/${p.resolutionTotal || '?'} (stop)`;
+                        btn.title = p.currentCase ? `Checking ${p.currentCase}` : 'Resolving blank or invalid parcels';
+                    } else {
+                        btn.innerHTML = p.total != null ? `Recorder ${p.checked || 0}/${p.total} (stop)` : 'Recorder starting… (stop)';
+                        btn.title = 'Pulling Recorder documents; click to stop safely';
+                    }
                     recorderPollTimer = setTimeout(pollRecorder, 4000);
                 } else {
                     btn.innerHTML = 'Pull Recorder Data';
@@ -3387,6 +3393,7 @@
                         btn.dataset.lastAt = st.last.at;
                         btn.title = `Last run ${new Date(st.last.at).toLocaleString()}: ${st.last.status}` +
                             (st.last.checked != null ? `, ${st.last.checked} checked, ${st.last.failed || 0} failed` : '') +
+                            (st.last.resolutionChecked != null ? `, ${st.last.resolutionChecked} parcel resolutions, ${st.last.corrected || 0} corrected` : '') +
                             (st.last.error ? ` (${st.last.error})` : '') + (st.last.reason && st.last.status === 'skipped' ? ` (${st.last.reason})` : '');
                         if (!firstSeen) loadData(true);
                     }

@@ -31,6 +31,7 @@ const CONFIG = {
   pauseMs: 2500,           // between parcel searches (kept polite: one search at a time)
   searchTimeoutMs: 45000,
   emptyStableMs: 2000,     // ignore CountyWeb's transient no-results frame while a real result page loads
+  maxNameResults: 100,     // broader name searches are ambiguous and expensive to paginate
   relogEvery: 60           // fresh session every N searches
 };
 
@@ -135,7 +136,7 @@ function resultNav(url) {
     : { label: nav, start: 0, end: 0, total: null };
 }
 
-async function collectResultPages(page) {
+async function collectResultPages(page, { maxTotal = Infinity } = {}) {
   const htmlPages = [];
   let resultFrame = frameNamed(page, 'resultFrame');
   let list = frameNamed(page, 'resultListFrame');
@@ -145,6 +146,9 @@ async function collectResultPages(page) {
   let html = await list.content();
   htmlPages.push(html);
   let nav = resultNav(resultFrame.url());
+  if (nav.total > maxTotal) {
+    return { text: '', total: nav.total, truncated: true, tooBroad: true };
+  }
   if (!nav.total || nav.end >= nav.total) {
     return { text: resultsHtmlToText(htmlPages.join('\n')), total: nav.total, truncated: false };
   }
@@ -198,7 +202,7 @@ async function openSearch(page) {
   return { criteria, dyn };
 }
 
-async function waitForSearchResults(page) {
+async function waitForSearchResults(page, options = {}) {
   const start = Date.now();
   let noResultsSince = 0;
   while (Date.now() - start < CONFIG.searchTimeoutMs) {
@@ -206,7 +210,7 @@ async function waitForSearchResults(page) {
     const rf = resultFrame ? resultFrame.url() : '';
     const list = frameNamed(page, 'resultListFrame');
     if (list && /SearchResultList/i.test(list.url()) && /SearchResultsView/i.test(rf)) {
-      return collectResultPages(page);
+      return collectResultPages(page, options);
     }
 
     // CountyWeb renders its no-match notice in different nested frames depending
@@ -275,7 +279,7 @@ async function searchName(page, rawName) {
   const { criteria } = await openSearch(page);
   await criteria.waitForFunction(() => window.$ && $('#allNames').length && typeof executeSearch === 'function', { timeout: 20000 });
   await criteria.evaluate((value) => { $('#allNames').textbox('setValue', value); executeSearch(); }, name);
-  return { name, ...(await waitForSearchResults(page)) };
+  return { name, ...(await waitForSearchResults(page, { maxTotal: CONFIG.maxNameResults })) };
 }
 
 function extractParcelIds(text) {
@@ -310,7 +314,7 @@ function caseIsOpen(c) {
 
 function needsParcelResolution(c) {
   if (!caseIsOpen(c)) return false;
-  if (c.recorderParcelResolution?.status === 'unresolved' && c.recorderParcelResolution.checkedAt) {
+  if (['unresolved', 'skipped'].includes(c.recorderParcelResolution?.status) && c.recorderParcelResolution.checkedAt) {
     const age = Date.now() - new Date(c.recorderParcelResolution.checkedAt).getTime();
     if (Number.isFinite(age) && age < CONFIG.maxAgeDays * 86400000) return false;
   }
@@ -392,6 +396,13 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
   const name = recorderNameForCase(c);
   if (name) {
     const result = await runSearch(`name:${name.toUpperCase()}`, (page) => searchName(page, name));
+    if (result.tooBroad) {
+      c.recorderParcelResolution = {
+        status: 'skipped', checkedAt: new Date().toISOString(),
+        reason: `Recorder name search returned ${result.total} results, above the safe limit of ${CONFIG.maxNameResults}`
+      };
+      return false;
+    }
     const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache);
     if (confirmed.length === 1) {
       applyRecorderParcelResolution(c, confirmed[0], 'recorder-name', { name });
@@ -469,19 +480,34 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
       for (let i = 0; i < unresolvedCases.length; i++) {
         if (shouldStop()) break;
         const c = unresolvedCases[i];
+        const caseLabel = c.caseNumber || c.defendant || '(case)';
+        const sourcePlan = c.mortgageBook && c.mortgagePage
+          ? `book ${c.mortgageBook}/${c.mortgagePage}, then name if needed`
+          : 'defendant name';
+        console.log(`   [${i + 1}/${unresolvedCases.length}] ${caseLabel}: resolving parcel via ${sourcePlan}`);
+        onProgress({
+          ...result, phase: 'parcel-resolution', resolved: i,
+          resolutionTotal: unresolvedCases.length, currentCase: caseLabel, parcel: c.parcelNumber || ''
+        });
         try {
           if (await resolveCaseParcel(c, runSearch, gisCache)) {
             result.corrected++;
-            console.log(`   ${c.caseNumber || '(case)'}: parcel corrected to ${formatParcel(c.parcelNumber)} via ${c.parcelCorrection.source}`);
+            console.log(`   [${i + 1}/${unresolvedCases.length}] ${caseLabel}: corrected to ${formatParcel(c.parcelNumber)} via ${c.parcelCorrection.source}`);
+          } else {
+            const resolution = c.recorderParcelResolution || {};
+            console.log(`   [${i + 1}/${unresolvedCases.length}] ${caseLabel}: ${resolution.status || 'unresolved'} — ${resolution.reason || 'no confirmed parcel'}`);
           }
         } catch (e) {
           result.resolutionFailed++;
           c.recorderParcelResolution = { status: 'error', error: e.message, checkedAt: new Date().toISOString() };
-          console.log(`   ${c.caseNumber || c.defendant || '(case)'}: parcel resolution failed: ${e.message}`);
+          console.log(`   [${i + 1}/${unresolvedCases.length}] ${caseLabel}: error — ${e.message}`);
           try { await open(); } catch (e2) { throw e2; }
         }
         result.resolutionChecked++;
-        onProgress({ ...result, phase: 'parcel-resolution', resolved: i + 1, parcel: c.parcelNumber || '' });
+        onProgress({
+          ...result, phase: 'parcel-resolution', resolved: i + 1,
+          resolutionTotal: unresolvedCases.length, currentCase: caseLabel, parcel: c.parcelNumber || ''
+        });
       }
     }
 
