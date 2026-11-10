@@ -397,7 +397,7 @@ async function lookupParcelAddress(parcelRaw, options = {}) {
 
   const params = new URLSearchParams({
     where: `PARCEL='${parcel}'`,
-    outFields: 'PARCEL,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,ADDR1,ADDR3,OWN1,Muni_Name',
+    outFields: 'PARCEL,PARCELTYPE,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,ADDR1,ADDR3,OWN1,Muni_Name',
     returnGeometry: 'false',
     f: 'json'
   });
@@ -445,6 +445,7 @@ async function lookupParcelAddress(parcelRaw, options = {}) {
               zip,
               owner: (f.OWN1 || '').trim(),
               municipality: muni,
+              parcelType: (f.PARCELTYPE || '').trim(),
               parcel: f.PARCEL
             };
           }
@@ -1382,6 +1383,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         c.inMontgomeryCounty = true;
         c.propertyOwner = parcelAddr.owner || '';
         c.propertyMunicipality = parcelAddr.municipality || '';
+        c.parcelType = parcelAddr.parcelType || '';
         c.addressSource = 'parcel';
       } else {
         const addresses = data.addresses || [];
@@ -1469,6 +1471,7 @@ async function scrapeMontgomeryCourts(options = {}) {
         propertyZip: c.propertyZip,
         propertyOwner: c.propertyOwner || '',
         propertyMunicipality: c.propertyMunicipality || '',
+        parcelType: c.parcelType || '',
         addressSource: c.addressSource || '',
         parcelMatch: c.parcelMatch || null,
         parcelMatchStatus: c.parcelMatchStatus || '',

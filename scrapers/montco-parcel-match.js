@@ -6,7 +6,7 @@
 // parcel layer has the municipality ("Towamencin Township").
 
 const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/pasda/MontgomeryCounty/MapServer/14/query';
-const OUT_FIELDS = 'PARCEL,OWN1,OWN2,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,Muni_Name';
+const OUT_FIELDS = 'PARCEL,PARCELTYPE,OWN1,OWN2,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,Muni_Name';
 
 const DIRECTIONS = { NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W', N: 'N', S: 'S', E: 'E', W: 'W', NE: 'NE', NW: 'NW', SE: 'SE', SW: 'SW' };
 const SUFFIXES = new Set([
@@ -137,7 +137,8 @@ async function matchParcelByAddress({ street, zip, defendant }) {
     city: muni.replace(/\s+(borough|township|city|town)\s*$/i, '').replace(/^Municipality of\s+/i, '').trim(),
     zip: String(pick.LOC_ZIP1_Z || zip5 || '').trim().slice(0, 5),
     owner: [pick.OWN1, pick.OWN2].map(x => (x || '').trim()).filter(Boolean).join(' / '),
-    municipality: muni
+    municipality: muni,
+    parcelType: (pick.PARCELTYPE || '').trim()
   };
 }
 
@@ -171,6 +172,7 @@ function applyParcelMatch(c, match) {
   c.parcelNumber = match.parcel;
   c.propertyOwner = match.owner;
   c.propertyMunicipality = match.municipality;
+  c.parcelType = match.parcelType || '';
   if (match.confidence === 'owner') {
     c.propertyAddress = match.street;
     // Same house as the defendant address, so keep its postal town ("LANSDALE"):

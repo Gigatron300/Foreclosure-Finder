@@ -442,6 +442,8 @@
         .lien-list .address-warning-dot { background: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 18%, transparent); }
         .address-warning-flag.parcel-matched { border: 1px solid color-mix(in srgb, var(--success) 35%, transparent); background: var(--success-tint); color: var(--success); }
         .parcel-matched .address-warning-dot { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 18%, transparent); }
+        .address-warning-flag.mobile-home { border: 1px solid color-mix(in srgb, var(--info) 35%, transparent); background: var(--info-tint); color: var(--info); }
+        .mobile-home .address-warning-dot { background: var(--info); box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 18%, transparent); }
         .closed-flag {
             display: inline-flex; align-items: center; gap: 4px;
             background: var(--danger); color: var(--on-solid);
@@ -2256,7 +2258,7 @@
                 c.propertyAddress, c.propertyCity, c.propertyZip,
                 c.defendant, c.captionDefendant, c.plaintiff, c.captionPlaintiff,
                 c.caseNumber, c.parcelNumber, c.courtParcelNumber, c.caseType, c.caseTypeKind,
-                c.status, c.liveStatus, c.owner, c.ownerName, c.propertyOwner,
+                c.status, c.liveStatus, c.owner, c.ownerName, c.propertyOwner, c.parcelType,
                 c.mortgageBook, c.mortgagePage, c.userNotes,
                 ...(Array.isArray(c.userTags) ? c.userTags : [])
             ].filter(v => v != null && v !== '');
@@ -2584,6 +2586,7 @@
                             ${c.payoff && c.payoff.facts && c.payoff.facts.lienListFiled ? `<span class="address-warning-flag lien-list" title="${escapeAttr(`A Rule 3129 affidavit was filed${c.payoff.facts.lienListDate ? ' on ' + c.payoff.facts.lienListDate : ''}. It lists every lien holder of record, the easiest way to see everything that must be paid off.`)}"><span class="address-warning-dot"></span>3129 on file</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
                             ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
+                            ${String(c.parcelType || '').toUpperCase() === 'MOBILE HOME' ? `<span class="address-warning-flag mobile-home" title="Montgomery County classifies this tax parcel as a mobile home"><span class="address-warning-dot"></span>Mobile Home</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
                             ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>${c.parcelValidationStatus === 'not-found' ? 'Court Parcel Missing' : 'Defendant Addr'}</span>` : ''}
                             ${c.addressSource === 'parcel-match' ? `<span class="address-warning-flag parcel-matched" title="${escapeAttr(c.parcelCorrection
