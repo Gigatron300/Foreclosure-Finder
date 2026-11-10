@@ -1264,7 +1264,6 @@
             <button class="btn btn-outline filter-danger owner-only" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
             <button class="btn btn-outline owner-only" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="For cases with no parcel number (mortgage foreclosures), look up the defendant's address on the county parcel map. If the parcel's owner is the defendant, the card switches to that parcel. Uses cases already scraped -- no court scrape.">Find Mortgage Parcels</button>
             <button class="btn btn-outline owner-only" onclick="refreshRecorder()" id="recorderBtn" title="Look up every pipeline parcel with an open case at the Recorder of Deeds (mortgages, satisfactions, deeds) for the payoff estimate. Runs automatically after each Process All; parcels checked in the last 2 weeks are skipped. Click again while running to stop.">Pull Recorder Data</button>
-            <button class="btn btn-outline owner-only" onclick="rescanLienParcels()" id="rescanBtn" title="Re-fetch property addresses for all lien cases with a parcel number, using the corrected PASDA location fields (fixes owner-mailing-address bug)">Fix Lien Addresses</button>
             <button class="btn btn-outline" onclick="exportExcel()" title="Download the uploaded court data as Excel with resolved parcels and newly closed statuses applied">Export Updated Excel</button>
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
             <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
@@ -3387,53 +3386,6 @@
             } catch (e) { /* status is best-effort */ }
         }
 
-        async function rescanLienParcels() {
-            const btn = document.getElementById('rescanBtn');
-            const originalText = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = 'Starting...';
-            try {
-                const startResp = await fetch('/api/pipeline/rescan-parcels', {
-                    method: 'POST',
-                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' }
-                });
-                const startResult = await startResp.json();
-                if (!startResp.ok) throw new Error(startResult.error || 'Re-scan failed to start');
-
-                if (startResult.done) {
-                    alert(startResult.message || 'Nothing to re-scan.');
-                    return;
-                }
-
-                const total = startResult.status.total;
-                while (true) {
-                    await new Promise(r => setTimeout(r, 2000));
-                    const statusResp = await fetch('/api/pipeline/rescan-parcels/status', {
-                        headers: { 'X-Auth-Token': authToken }
-                    });
-                    const statusResult = await statusResp.json();
-                    const s = statusResult.status;
-                    if (s) {
-                        btn.innerHTML = `Re-scanning ${s.processed || 0}/${total}...`;
-                    }
-                    if (!statusResult.inProgress) {
-                        if (s && s.status === 'completed') {
-                            alert(`Re-scanned ${total} lien case(s):\n  Recovered: ${s.recovered}\n  Still unresolved: ${s.stillFailed}`);
-                            await loadData(true);
-                        } else {
-                            alert('Re-scan failed: ' + ((s && s.error) || 'unknown error'));
-                        }
-                        break;
-                    }
-                }
-            } catch (error) {
-                alert('Re-scan failed: ' + error.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalText;
-            }
-        }
-        
         function formatDate(dateStr) {
             if (!dateStr) return 'N/A';
             return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });

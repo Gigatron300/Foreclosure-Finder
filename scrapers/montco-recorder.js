@@ -33,6 +33,7 @@ const CONFIG = {
 };
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
+const NO_RESULTS_RE = /no (records|results|documents) (were )?found|0 items/i;
 
 function hasCredentials() {
   return !!(process.env.RECORDER_USER && process.env.RECORDER_PASS);
@@ -150,10 +151,14 @@ async function searchParcel(page, rawParcel) {
       const shown = (nav.match(/\d+-(\d+)/) || [])[1];
       return { parcel, text: resultsHtmlToText(html), total, truncated: !!(total && shown && +shown < total) };
     }
-    // No-match pages render in resultFrame without a list.
-    if (resultFrame && !/blank\.jsp/.test(rf)) {
-      const txt = await resultFrame.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
-      if (/no (records|results|documents) (were )?found|0 items/i.test(txt)) return { parcel, text: '', total: 0, truncated: false };
+    // CountyWeb renders its no-match notice in different nested frames depending
+    // on the search response. Treat the official notice anywhere in the frame
+    // tree as a successful zero-document lookup.
+    for (const frame of page.frames()) {
+      const text = await frame.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
+      if (NO_RESULTS_RE.test(text)) {
+        return { parcel, text: '', total: 0, truncated: false };
+      }
     }
     await delay(500);
   }

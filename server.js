@@ -6,7 +6,6 @@ const fs = require('fs').promises;
 const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
-const { fetchParcelAddress } = require('./scrapers/montco-courts');
 const { buildUpdatedMontcoWorkbook } = require('./scrapers/montco-excel-export');
 const { matchParcelByAddress, applyParcelMatch } = require('./scrapers/montco-parcel-match');
 const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
@@ -341,7 +340,7 @@ app.use('/api/camden', (req, res, next) => {
 // /scrape/status and /scrape/stop.)
 app.use([
   '/api/montco/session', '/api/pipeline/upload-csv', '/api/pipeline/csv-status',
-  '/api/pipeline/scrape', '/api/pipeline/clear', '/api/pipeline/match-parcels', '/api/pipeline/rescan-parcels',
+  '/api/pipeline/scrape', '/api/pipeline/clear', '/api/pipeline/match-parcels',
   '/api/pipeline/recorder-refresh'
 ], (req, res, next) => {
   const token = req.headers['x-auth-token'];
@@ -1235,97 +1234,6 @@ app.delete('/api/montco/session', checkAuth, async (req, res) => {
   }
 });
 
-let isRescanInProgress = false;
-let lastRescanStatus = null;
-
-app.post('/api/pipeline/rescan-parcels', checkAuth, async (req, res) => {
-  if (isRescanInProgress) {
-    return res.status(429).json({ error: 'A re-scan is already in progress.', status: lastRescanStatus });
-  }
-  if (isPipelineScrapingInProgress) {
-    return res.status(429).json({ error: 'A scrape is in progress; try again when it finishes.' });
-  }
-
-  let pipeline;
-  try {
-    const raw = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
-    pipeline = JSON.parse(raw);
-  } catch (e) {
-    return res.status(404).json({ error: 'No pipeline data found.' });
-  }
-
-  const cases = pipeline.cases || [];
-  const targets = cases.filter(c =>
-    c.caseTypeKind === 'lien' &&
-    c.parcelNumber
-  );
-
-  if (targets.length === 0) {
-    lastRescanStatus = { status: 'completed', total: 0, processed: 0, recovered: 0, stillFailed: 0, completed: new Date().toISOString() };
-    return res.json({ done: true, message: 'No lien cases with a parcel number found.', status: lastRescanStatus });
-  }
-
-  isRescanInProgress = true;
-  lastRescanStatus = {
-    status: 'running',
-    started: new Date().toISOString(),
-    total: targets.length,
-    processed: 0,
-    recovered: 0,
-    stillFailed: 0
-  };
-  res.json({ done: false, message: `Re-scan started for ${targets.length} cases`, status: lastRescanStatus });
-
-  // Background processing — response already sent.
-  (async () => {
-    try {
-      const CONCURRENCY = 5;
-      for (let i = 0; i < targets.length; i += CONCURRENCY) {
-        const chunk = targets.slice(i, i + CONCURRENCY);
-        await Promise.all(chunk.map(async (c) => {
-          try {
-            const info = await fetchParcelAddress(c.parcelNumber, { bypassCache: true });
-            if (info && info.street) {
-              c.propertyAddress = info.street;
-              c.propertyCity = info.city || '';
-              c.propertyState = 'PA';
-              c.propertyZip = info.zip || '';
-              c.propertyOwner = info.owner || '';
-              c.propertyMunicipality = info.municipality || '';
-              c.inMontgomeryCounty = true;
-              c.addressSource = 'parcel';
-              lastRescanStatus.recovered++;
-            } else {
-              lastRescanStatus.stillFailed++;
-            }
-          } catch (e) {
-            lastRescanStatus.stillFailed++;
-          }
-          lastRescanStatus.processed++;
-        }));
-      }
-
-      pipeline.lastUpdated = new Date().toISOString();
-      await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
-
-      lastRescanStatus.status = 'completed';
-      lastRescanStatus.completed = new Date().toISOString();
-      console.log(`[rescan] ✓ Done: attempted=${targets.length} recovered=${lastRescanStatus.recovered} stillFailed=${lastRescanStatus.stillFailed}`);
-    } catch (error) {
-      lastRescanStatus.status = 'error';
-      lastRescanStatus.error = error.message;
-      lastRescanStatus.completed = new Date().toISOString();
-      console.error('[rescan] error:', error);
-    } finally {
-      isRescanInProgress = false;
-    }
-  })();
-});
-
-app.get('/api/pipeline/rescan-parcels/status', checkAuth, (req, res) => {
-  res.json({ inProgress: isRescanInProgress, status: lastRescanStatus });
-});
-
 // Find parcels for cases with no parcel number (mortgage foreclosures) by matching the
 // defendant address on the county parcel layer. Runs over already-scraped cases; no court scrape.
 let isParcelMatchInProgress = false;
@@ -1335,8 +1243,8 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
   if (isParcelMatchInProgress) {
     return res.status(429).json({ error: 'Parcel matching is already running.', status: lastParcelMatchStatus });
   }
-  if (isPipelineScrapingInProgress || isRescanInProgress) {
-    return res.status(429).json({ error: 'A scrape or re-scan is running; try again when it finishes.' });
+  if (isPipelineScrapingInProgress) {
+    return res.status(429).json({ error: 'A scrape is running; try again when it finishes.' });
   }
 
   let pipeline;
