@@ -38,7 +38,7 @@ const CONFIG = {
 // Version zero-result cache entries separately. The first zero-result implementation
 // could capture a transient empty search fired by the records-per-page widget.
 const SEARCH_CACHE_VERSION = 2;
-const PARCEL_RESOLUTION_VERSION = 2;
+const PARCEL_RESOLUTION_VERSION = 3;
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const NO_RESULTS_RE = /no (records|results|documents) (were )?found|0 items/i;
@@ -333,7 +333,7 @@ function recorderNameForCase(c) {
     .slice(0, 50);
 }
 
-async function confirmedParcelCandidates(c, parcelIds, gisCache) {
+async function confirmedParcelCandidates(c, parcelIds, gisCache, { requireAddress = true } = {}) {
   const confirmed = [];
   for (const parcel of parcelIds) {
     const key = parcelKey(parcel);
@@ -347,9 +347,12 @@ async function confirmedParcelCandidates(c, parcelIds, gisCache) {
       zip: c.propertyZip,
       defendant: c.defendant
     });
-    // Automatic correction requires both independent checks. Book/page or name
-    // supplies the candidate; the county GIS must agree on its address and owner.
-    if (match && evidence.addressMatch && evidence.ownerMatch) confirmed.push({ match, evidence });
+    // Name-only candidates need both independent GIS checks. An exact, unique
+    // mortgage book/page already identifies the property instrument, so its GIS
+    // owner must match but the court defendant's mailing address need not.
+    if (match && evidence.ownerMatch && (!requireAddress || evidence.addressMatch)) {
+      confirmed.push({ match, evidence });
+    }
   }
   return confirmed;
 }
@@ -367,10 +370,13 @@ function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   const sourceLabel = source === 'recorder-book-page'
     ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`
     : `Recorder defendant-name search for ${details.name}`;
+  const confirmationLabel = source === 'recorder-book-page'
+    ? 'the unique Recorder instrument and county GIS owner'
+    : 'the county GIS street address and owner';
   c.parcelCorrection = {
     originalParcel,
     correctedParcel: resolved.match.parcel,
-    reason: `${originalParcel ? `Court parcel ${originalParcel} was not found` : 'The court parcel was blank'}; ${sourceLabel} returned one parcel confirmed by the county GIS street address and owner` +
+    reason: `${originalParcel ? `Court parcel ${originalParcel} was not found` : 'The court parcel was blank'}; ${sourceLabel} returned one parcel confirmed by ${confirmationLabel}` +
       (!resolved.evidence.zipMatch ? ` (court ZIP ${caseZip || 'blank'}; GIS ZIP ${resolved.match.zip || 'blank'})` : ''),
     source,
     sourceBook: details.book || '',
@@ -386,7 +392,9 @@ function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   c.recorderParcelResolution = {
     version: PARCEL_RESOLUTION_VERSION,
     status: 'confirmed', source, parcel: resolved.match.parcel,
-    addressMatch: true, ownerMatch: true, zipMatch: resolved.evidence.zipMatch,
+    addressMatch: resolved.evidence.addressMatch,
+    ownerMatch: resolved.evidence.ownerMatch,
+    zipMatch: resolved.evidence.zipMatch,
     resolvedAt: c.parcelCorrection.correctedAt
   };
 }
@@ -397,7 +405,10 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
       `book:${c.mortgageBook}/${c.mortgagePage}`,
       (page) => searchBookPage(page, c.mortgageBook, c.mortgagePage)
     );
-    const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache);
+    const parcelIds = extractParcelIds(result.text);
+    const confirmed = result.total === 1 && parcelIds.length === 1
+      ? await confirmedParcelCandidates(c, parcelIds, gisCache, { requireAddress: false })
+      : [];
     if (confirmed.length === 1) {
       applyRecorderParcelResolution(c, confirmed[0], 'recorder-book-page', {
         book: c.mortgageBook, page: c.mortgagePage
