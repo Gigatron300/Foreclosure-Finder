@@ -18,6 +18,7 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
+const { lookupParcelById, parcelMatchesCase, applyParcelMatch } = require('./montco-parcel-match');
 
 const BASE = 'https://rodviewer.montcopa.org/countyweb';
 const LOGIN_URL = `${BASE}/loginDisplay.action?countyname=Montgomery`;
@@ -29,8 +30,13 @@ const CONFIG = {
   maxAgeDays: 14,          // re-check a parcel at most every two weeks
   pauseMs: 2500,           // between parcel searches (kept polite: one search at a time)
   searchTimeoutMs: 45000,
+  emptyStableMs: 2000,     // ignore CountyWeb's transient no-results frame while a real result page loads
   relogEvery: 60           // fresh session every N searches
 };
+
+// Version zero-result cache entries separately. The first zero-result implementation
+// could capture a transient empty search fired by the records-per-page widget.
+const SEARCH_CACHE_VERSION = 2;
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 const NO_RESULTS_RE = /no (records|results|documents) (were )?found|0 items/i;
@@ -121,48 +127,160 @@ function resultsHtmlToText(html) {
     .trim();
 }
 
-// One parcel search in an already logged-in page. Returns { text, total, truncated }.
-async function searchParcel(page, rawParcel) {
-  const parcel = formatParcel(rawParcel);
-  if (!parcel) throw new Error(`Bad parcel number: ${rawParcel}`);
+function resultNav(url) {
+  const nav = decodeURIComponent((String(url || '').match(/navStateDisplay=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
+  const range = nav.match(/Displaying\s+(\d+)-(\d+)\s+of\s+(\d+)\s+Items/i);
+  return range
+    ? { label: nav, start: parseInt(range[1], 10), end: parseInt(range[2], 10), total: parseInt(range[3], 10) }
+    : { label: nav, start: 0, end: 0, total: null };
+}
 
+async function collectResultPages(page) {
+  const htmlPages = [];
+  let resultFrame = frameNamed(page, 'resultFrame');
+  let list = frameNamed(page, 'resultListFrame');
+  if (!resultFrame || !list) throw new Error('Recorder result frames did not load.');
+  try { await list.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }); } catch (e) {}
+
+  let html = await list.content();
+  htmlPages.push(html);
+  let nav = resultNav(resultFrame.url());
+  if (!nav.total || nav.end >= nav.total) {
+    return { text: resultsHtmlToText(htmlPages.join('\n')), total: nav.total, truncated: false };
+  }
+
+  const pageSize = Math.max(1, nav.end - nav.start + 1);
+  const pageCount = Math.ceil(nav.total / pageSize);
+  for (let pageNumber = 2; pageNumber <= pageCount; pageNumber++) {
+    const previousStart = nav.start;
+    const previousHtml = html;
+    await resultFrame.evaluate((number) => {
+      document.resultForm.pageNumber.value = String(number);
+      goToResultPage();
+    }, pageNumber);
+
+    const started = Date.now();
+    let loaded = false;
+    while (Date.now() - started < CONFIG.searchTimeoutMs) {
+      resultFrame = frameNamed(page, 'resultFrame');
+      list = frameNamed(page, 'resultListFrame');
+      nav = resultNav(resultFrame ? resultFrame.url() : '');
+      if (resultFrame && list && nav.start > previousStart) {
+        try { await list.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }); } catch (e) {}
+        html = await list.content().catch(() => '');
+        if (html && html !== previousHtml) {
+          htmlPages.push(html);
+          loaded = true;
+          break;
+        }
+      }
+      await delay(200);
+    }
+    if (!loaded) throw new Error(`Recorder result page ${pageNumber} did not load.`);
+  }
+
+  return { text: resultsHtmlToText(htmlPages.join('\n')), total: nav.total, truncated: nav.end < nav.total };
+}
+
+async function openSearch(page) {
   const body = frameNamed(page, 'bodyframe');
+  if (!body) throw new Error('Recorder search frame is unavailable.');
   await body.goto(SEARCH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  const criteria = await waitForFrame(page, 'criteriaframe', (u) => /dynCriteria/.test(u));
+  let criteria = await waitForFrame(page, 'criteriaframe', (u) => /dynCriteria/.test(u));
   const dyn = await waitForFrame(page, 'dynSearchFrame', (u) => /searchCriteria/.test(u));
-  await criteria.waitForFunction(() => window.$ && $('#PARCELNUM').length && typeof executeSearch === 'function', { timeout: 20000 });
+  // CountyWeb remembers the last search type in the session. Return explicitly to
+  // All Names, whose criteria form contains both the name and parcel fields.
+  if (!/searchType=allNames/i.test(criteria.url())) {
+    await dyn.waitForSelector('#searchTypes tr[datagrid-row-index="2"]', { timeout: 20000 });
+    await dyn.click('#searchTypes tr[datagrid-row-index="2"]');
+    criteria = await waitForFrame(page, 'criteriaframe', (u) => /searchType=allNames/i.test(u));
+  }
+  return { criteria, dyn };
+}
 
-  await dyn.evaluate(() => { try { $('#RECSPERPAGE').combobox('setValue', '100'); } catch (e) {} });
-  await criteria.evaluate((v) => { $('#PARCELNUM').textbox('setValue', v); executeSearch(); }, parcel);
-
-  // Results land in resultFrame (with nav state) and resultListFrame (the table),
-  // or a "no results" message.
+async function waitForSearchResults(page) {
   const start = Date.now();
+  let noResultsSince = 0;
   while (Date.now() - start < CONFIG.searchTimeoutMs) {
     const resultFrame = frameNamed(page, 'resultFrame');
     const rf = resultFrame ? resultFrame.url() : '';
     const list = frameNamed(page, 'resultListFrame');
     if (list && /SearchResultList/i.test(list.url()) && /SearchResultsView/i.test(rf)) {
-      try { await list.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }); } catch (e) {}
-      const html = await list.content();
-      const nav = decodeURIComponent((rf.match(/navStateDisplay=([^&]*)/) || [])[1] || '').replace(/\+/g, ' ');
-      const m = nav.match(/of\s+(\d+)\s+Items/i);
-      const total = m ? parseInt(m[1], 10) : null;
-      const shown = (nav.match(/\d+-(\d+)/) || [])[1];
-      return { parcel, text: resultsHtmlToText(html), total, truncated: !!(total && shown && +shown < total) };
+      return collectResultPages(page);
     }
+
     // CountyWeb renders its no-match notice in different nested frames depending
-    // on the search response. Treat the official notice anywhere in the frame
-    // tree as a successful zero-document lookup.
+    // on the search response. Require the official notice to remain stable so a
+    // transient frame cannot win a race with the real result table.
+    let noResultsVisible = false;
     for (const frame of page.frames()) {
       const text = await frame.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
       if (NO_RESULTS_RE.test(text)) {
-        return { parcel, text: '', total: 0, truncated: false };
+        noResultsVisible = true;
+        break;
       }
+    }
+    if (noResultsVisible) {
+      if (!noResultsSince) noResultsSince = Date.now();
+      if (Date.now() - noResultsSince >= CONFIG.emptyStableMs) {
+        return { text: '', total: 0, truncated: false, emptyVerified: true };
+      }
+    } else {
+      noResultsSince = 0;
     }
     await delay(500);
   }
-  throw new Error(`Recorder search timed out for ${parcel}`);
+  throw new Error('Recorder search timed out.');
+}
+
+// One parcel search in an already logged-in page. Returns { text, total, truncated }.
+async function searchParcel(page, rawParcel) {
+  const parcel = formatParcel(rawParcel);
+  if (!parcel) throw new Error(`Bad parcel number: ${rawParcel}`);
+
+  const { criteria } = await openSearch(page);
+  await criteria.waitForFunction(() => window.$ && $('#PARCELNUM').length && typeof executeSearch === 'function', { timeout: 20000 });
+
+  // Submit with the site's default page size, then follow its own pagination.
+  // Changing the records-per-page widget fires a second search and caused the
+  // false zero-result race this function is designed to avoid.
+  await criteria.evaluate((v) => { $('#PARCELNUM').textbox('setValue', v); executeSearch(); }, parcel);
+  try {
+    return { parcel, ...(await waitForSearchResults(page)) };
+  } catch (error) {
+    if (/timed out/i.test(error.message)) throw new Error(`Recorder search timed out for ${parcel}`);
+    throw error;
+  }
+}
+
+async function searchBookPage(page, book, pageNumber) {
+  const { dyn } = await openSearch(page);
+  await dyn.waitForSelector('#searchTypes tr[datagrid-row-index="4"]', { timeout: 20000 });
+  await dyn.click('#searchTypes tr[datagrid-row-index="4"]');
+  const criteria = await waitForFrame(page, 'criteriaframe', (u) => /searchType=bookPage/i.test(u));
+  await criteria.waitForFunction(() => window.$ && $('#VOLUME').length && $('#BOOK').length && $('#PAGE').length &&
+    typeof executeSearch === 'function', { timeout: 20000 });
+  await criteria.evaluate(({ bookValue, pageValue }) => {
+    $('#VOLUME').combobox('setValue', 'MTG');
+    $('#BOOK').textbox('setValue', String(bookValue));
+    $('#PAGE').textbox('setValue', String(pageValue));
+    executeSearch();
+  }, { bookValue: book, pageValue: pageNumber });
+  return { book: String(book), page: String(pageNumber), ...(await waitForSearchResults(page)) };
+}
+
+async function searchName(page, rawName) {
+  const name = String(rawName || '').trim();
+  if (!name) return { name, text: '', total: 0, truncated: false, emptyVerified: true };
+  const { criteria } = await openSearch(page);
+  await criteria.waitForFunction(() => window.$ && $('#allNames').length && typeof executeSearch === 'function', { timeout: 20000 });
+  await criteria.evaluate((value) => { $('#allNames').textbox('setValue', value); executeSearch(); }, name);
+  return { name, ...(await waitForSearchResults(page)) };
+}
+
+function extractParcelIds(text) {
+  const ids = String(text || '').match(/\b\d{2}-\d{2}-\d{5}-\d{2}-\d\b/g) || [];
+  return [...new Set(ids.map(formatParcel).filter(Boolean))];
 }
 
 async function readCache(cachePath = CACHE_PATH) {
@@ -178,6 +296,8 @@ async function writeCache(cache, cachePath = CACHE_PATH) {
 
 function isStale(entry, maxAgeDays) {
   if (!entry || !entry.fetchedAt) return true;
+  // Recheck only old zero-document entries; successful cached pulls remain valid.
+  if (entry.total === 0 && entry.searchVersion !== SEARCH_CACHE_VERSION) return true;
   return (Date.now() - new Date(entry.fetchedAt).getTime()) > maxAgeDays * 86400000;
 }
 
@@ -188,10 +308,111 @@ function caseIsOpen(c) {
   return !(CLOSED_RE.test(s) && !/OPEN|ACTIVE|PENDING/.test(s));
 }
 
+function needsParcelResolution(c) {
+  if (!caseIsOpen(c)) return false;
+  if (c.recorderParcelResolution?.status === 'unresolved' && c.recorderParcelResolution.checkedAt) {
+    const age = Date.now() - new Date(c.recorderParcelResolution.checkedAt).getTime();
+    if (Number.isFinite(age) && age < CONFIG.maxAgeDays * 86400000) return false;
+  }
+  const key = parcelKey(c.parcelNumber);
+  return !key || key.length !== 12 || c.parcelValidationStatus === 'not-found' ||
+    c.parcelMatchStatus === 'address';
+}
+
+function recorderNameForCase(c) {
+  return String(c.defendant || '')
+    .split(/[;\n]/)[0]
+    .replace(/\s+ET\s+AL\b.*$/i, '')
+    .trim()
+    .slice(0, 50);
+}
+
+async function confirmedParcelCandidates(c, parcelIds, gisCache) {
+  const confirmed = [];
+  for (const parcel of parcelIds) {
+    const key = parcelKey(parcel);
+    let match = gisCache.get(key);
+    if (match === undefined) {
+      match = await lookupParcelById(parcel);
+      gisCache.set(key, match || null);
+    }
+    const evidence = parcelMatchesCase(match, {
+      street: c.propertyAddress,
+      zip: c.propertyZip,
+      defendant: c.defendant
+    });
+    // Automatic correction requires both independent checks. Book/page or name
+    // supplies the candidate; the county GIS must agree on its address and owner.
+    if (match && evidence.addressMatch && evidence.ownerMatch) confirmed.push({ match, evidence });
+  }
+  return confirmed;
+}
+
+function applyRecorderParcelResolution(c, resolved, source, details = {}) {
+  const originalParcel = c.courtParcelNumber || c.parcelNumber || '';
+  if (originalParcel && !c.courtParcelNumber) c.courtParcelNumber = originalParcel;
+  applyParcelMatch(c, resolved.match);
+  c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
+  const sourceLabel = source === 'recorder-book-page'
+    ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`
+    : `Recorder defendant-name search for ${details.name}`;
+  c.parcelCorrection = {
+    originalParcel,
+    correctedParcel: resolved.match.parcel,
+    reason: `${originalParcel ? `Court parcel ${originalParcel} was not found` : 'The court parcel was blank'}; ${sourceLabel} returned one parcel confirmed by the county GIS address and owner`,
+    source,
+    sourceBook: details.book || '',
+    sourcePage: details.page || '',
+    sourceName: details.name || '',
+    matchedAddress: [resolved.match.street, resolved.match.city, resolved.match.zip].filter(Boolean).join(', '),
+    matchedOwner: resolved.match.owner,
+    correctedAt: new Date().toISOString()
+  };
+  c.recorderParcelResolution = {
+    status: 'confirmed', source, parcel: resolved.match.parcel,
+    addressMatch: true, ownerMatch: true, resolvedAt: c.parcelCorrection.correctedAt
+  };
+}
+
+async function resolveCaseParcel(c, runSearch, gisCache) {
+  if (c.mortgageBook && c.mortgagePage) {
+    const result = await runSearch(
+      `book:${c.mortgageBook}/${c.mortgagePage}`,
+      (page) => searchBookPage(page, c.mortgageBook, c.mortgagePage)
+    );
+    const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache);
+    if (confirmed.length === 1) {
+      applyRecorderParcelResolution(c, confirmed[0], 'recorder-book-page', {
+        book: c.mortgageBook, page: c.mortgagePage
+      });
+      return true;
+    }
+  }
+
+  const name = recorderNameForCase(c);
+  if (name) {
+    const result = await runSearch(`name:${name.toUpperCase()}`, (page) => searchName(page, name));
+    const confirmed = await confirmedParcelCandidates(c, extractParcelIds(result.text), gisCache);
+    if (confirmed.length === 1) {
+      applyRecorderParcelResolution(c, confirmed[0], 'recorder-name', { name });
+      return true;
+    }
+  }
+
+  c.recorderParcelResolution = {
+    status: 'unresolved', checkedAt: new Date().toISOString(),
+    reason: 'No single Recorder parcel matched both the case address and defendant owner'
+  };
+  return false;
+}
+
 // Parcels worth a lookup: any parcel with at least one open case.
 function parcelsToRefresh(cases, cache, maxAgeDays = CONFIG.maxAgeDays) {
   const keys = new Map();
   for (const c of cases || []) {
+    // Do not attach documents to a court parcel the county GIS rejected or to an
+    // address-only tentative match. The resolver must confirm it first.
+    if (c.parcelValidationStatus === 'not-found' || c.parcelMatchStatus === 'address') continue;
     const key = parcelKey(c.parcelNumber);
     if (!key || key.length !== 12) continue;
     if (!keys.has(key)) keys.set(key, { key, raw: c.parcelNumber, open: false });
@@ -208,10 +429,14 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
   shouldStop = () => false, onProgress = () => {} } = {}) {
   if (!hasCredentials()) return { checked: 0, failed: 0, skipped: 'no RECORDER_USER/RECORDER_PASS', remaining: 0 };
   const cache = await readCache(cachePath);
+  const unresolvedCases = (cases || []).filter(needsParcelResolution);
   let todo = parcelsToRefresh(cases, cache, maxAgeDays);
   if (limit > 0) todo = todo.slice(0, limit);
-  const result = { checked: 0, failed: 0, total: todo.length, remaining: todo.length };
-  if (!todo.length) return result;
+  const result = {
+    checked: 0, failed: 0, corrected: 0, resolutionChecked: 0, resolutionFailed: 0,
+    resolutionTotal: unresolvedCases.length, total: todo.length, remaining: todo.length
+  };
+  if (!unresolvedCases.length && !todo.length) return result;
 
   let browser = null, page = null, sinceLogin = 0;
   const open = async () => {
@@ -225,9 +450,48 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
     sinceLogin = 0;
   };
 
-  console.log(`   📚 Recorder: ${todo.length} parcel(s) to look up`);
   try {
     await open();
+    const searchCache = new Map();
+    const gisCache = new Map();
+    const runSearch = async (key, search) => {
+      if (searchCache.has(key)) return searchCache.get(key);
+      if (sinceLogin >= CONFIG.relogEvery) await open();
+      const value = await search(page);
+      sinceLogin++;
+      searchCache.set(key, value);
+      await delay(CONFIG.pauseMs);
+      return value;
+    };
+
+    if (unresolvedCases.length) {
+      console.log(`   Recorder: resolving ${unresolvedCases.length} blank or invalid parcel(s)`);
+      for (let i = 0; i < unresolvedCases.length; i++) {
+        if (shouldStop()) break;
+        const c = unresolvedCases[i];
+        try {
+          if (await resolveCaseParcel(c, runSearch, gisCache)) {
+            result.corrected++;
+            console.log(`   ${c.caseNumber || '(case)'}: parcel corrected to ${formatParcel(c.parcelNumber)} via ${c.parcelCorrection.source}`);
+          }
+        } catch (e) {
+          result.resolutionFailed++;
+          c.recorderParcelResolution = { status: 'error', error: e.message, checkedAt: new Date().toISOString() };
+          console.log(`   ${c.caseNumber || c.defendant || '(case)'}: parcel resolution failed: ${e.message}`);
+          try { await open(); } catch (e2) { throw e2; }
+        }
+        result.resolutionChecked++;
+        onProgress({ ...result, phase: 'parcel-resolution', resolved: i + 1, parcel: c.parcelNumber || '' });
+      }
+    }
+
+    // Corrections above feed directly into the normal parcel pull. Recompute the
+    // queue so a newly resolved parcel gets its Recorder documents in this run.
+    todo = parcelsToRefresh(cases, cache, maxAgeDays);
+    if (limit > 0) todo = todo.slice(0, limit);
+    result.total = todo.length;
+    result.remaining = todo.length;
+    console.log(`   Recorder: ${todo.length} parcel(s) to look up after parcel resolution`);
     for (const p of todo) {
       if (shouldStop()) break;
       if (sinceLogin >= CONFIG.relogEvery) await open();
@@ -235,7 +499,15 @@ async function refreshRecorderIndex({ cases, cachePath = CACHE_PATH, maxAgeDays 
       try {
         const r = await searchParcel(page, p.raw);
         console.log(`   📚 ${r.parcel}: ${r.total ?? 0} documents (${Math.round((Date.now() - t0) / 1000)}s) [${result.checked + result.failed + 1}/${todo.length}]`);
-        cache[p.key] = { parcel: r.parcel, fetchedAt: new Date().toISOString(), total: r.total, truncated: r.truncated, text: r.text };
+        cache[p.key] = {
+          parcel: r.parcel,
+          fetchedAt: new Date().toISOString(),
+          total: r.total,
+          truncated: r.truncated,
+          text: r.text,
+          searchVersion: SEARCH_CACHE_VERSION,
+          emptyVerified: r.total === 0 ? !!r.emptyVerified : undefined
+        };
         result.checked++;
       } catch (e) {
         result.failed++;
@@ -277,8 +549,9 @@ async function describeFrames(page) {
 }
 
 module.exports = {
-  login, launch, searchParcel, refreshRecorderIndex, readCache, parcelKey, formatParcel,
-  hasCredentials, parcelsToRefresh, describeFrames, CONFIG, CACHE_PATH
+  login, launch, searchParcel, searchBookPage, searchName, extractParcelIds,
+  refreshRecorderIndex, readCache, parcelKey, formatParcel,
+  hasCredentials, parcelsToRefresh, describeFrames, CONFIG, CACHE_PATH, SEARCH_CACHE_VERSION
 };
 
 if (require.main === module) {
@@ -304,6 +577,9 @@ if (require.main === module) {
         cases: data.cases, limit: parseInt(val('--limit') || '0', 10),
         onProgress: (p) => console.log(`  ${p.parcel}  checked ${p.checked}, failed ${p.failed}, remaining ${p.remaining}`)
       });
+      if (r.resolutionChecked > 0) {
+        await fs.writeFile(path.join(DATA_DIR, 'pipeline.json'), JSON.stringify(data, null, 2));
+      }
       console.log('Done:', r);
     } else if (argv.includes('--explore')) {
       const dir = path.join(DATA_DIR, 'recorder-explore');

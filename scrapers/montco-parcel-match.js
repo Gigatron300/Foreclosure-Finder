@@ -73,6 +73,21 @@ function locationAddress(a) {
     .map(x => (x == null ? '' : String(x)).trim()).filter(Boolean).join(' ');
 }
 
+function parcelMatchFromRow(row) {
+  if (!row) return null;
+  const muni = (row.Muni_Name || '').trim();
+  return {
+    parcel: row.PARCEL,
+    confidence: 'owner',
+    street: locationAddress(row),
+    city: muni.replace(/\s+(borough|township|city|town)\s*$/i, '').replace(/^Municipality of\s+/i, '').trim(),
+    zip: String(row.LOC_ZIP1_Z || '').trim().slice(0, 5),
+    owner: [row.OWN1, row.OWN2].map(x => (x || '').trim()).filter(Boolean).join(' / '),
+    municipality: muni,
+    parcelType: (row.PARCELTYPE || '').trim()
+  };
+}
+
 async function queryParcels(where) {
   const params = new URLSearchParams({ where, outFields: OUT_FIELDS, returnGeometry: 'false', f: 'json' });
   const resp = await fetch(`${PARCEL_API_BASE}?${params}`, { signal: AbortSignal.timeout(15000) });
@@ -83,6 +98,33 @@ async function queryParcels(where) {
 }
 
 const sqlEsc = (s) => String(s).replace(/'/g, "''");
+
+async function lookupParcelById(parcelRaw) {
+  const parcel = String(parcelRaw || '').replace(/\D/g, '');
+  if (parcel.length !== 12) return null;
+  const rows = await queryParcels(`PARCEL='${sqlEsc(parcel)}'`);
+  return rows.length === 1 ? parcelMatchFromRow(rows[0]) : null;
+}
+
+function parcelMatchesCase(match, { street, zip, defendant } = {}) {
+  if (!match) return { confirmed: false, addressMatch: false, ownerMatch: false };
+  const wantedStreet = parseStreet(street);
+  const parcelStreet = parseStreet(match.street);
+  const wantedZip = String(zip || '').trim().slice(0, 5);
+  const parcelZip = String(match.zip || '').trim().slice(0, 5);
+  const hasAddress = !!wantedStreet;
+  const addressMatch = !!(wantedStreet && parcelStreet &&
+    wantedStreet.number === parcelStreet.number && wantedStreet.name === parcelStreet.name &&
+    (!wantedZip || !parcelZip || wantedZip === parcelZip));
+  const surnames = surnamesFrom(defendant);
+  const hasOwner = surnames.length > 0;
+  const ownerMatch = hasOwner && ownerMatches({ OWN1: match.owner, OWN2: '' }, surnames);
+  return {
+    confirmed: (hasAddress || hasOwner) && (!hasAddress || addressMatch) && (!hasOwner || ownerMatch),
+    addressMatch,
+    ownerMatch
+  };
+}
 
 /**
  * @returns {Promise<null | {
@@ -129,17 +171,10 @@ async function matchParcelByAddress({ street, zip, defendant }) {
   }
   if (!pick) return null;
 
-  const muni = (pick.Muni_Name || '').trim();
-  return {
-    parcel: pick.PARCEL,
-    confidence,
-    street: locationAddress(pick),
-    city: muni.replace(/\s+(borough|township|city|town)\s*$/i, '').replace(/^Municipality of\s+/i, '').trim(),
-    zip: String(pick.LOC_ZIP1_Z || zip5 || '').trim().slice(0, 5),
-    owner: [pick.OWN1, pick.OWN2].map(x => (x || '').trim()).filter(Boolean).join(' / '),
-    municipality: muni,
-    parcelType: (pick.PARCELTYPE || '').trim()
-  };
+  const match = parcelMatchFromRow(pick);
+  match.confidence = confidence;
+  if (!match.zip) match.zip = zip5;
+  return match;
 }
 
 /**
@@ -192,4 +227,7 @@ function parseMortgageBookPage(remarks) {
   return m ? { book: m[1], page: m[2] } : null;
 }
 
-module.exports = { matchParcelByAddress, applyParcelMatch, parseStreet, surnamesFrom, parseMortgageBookPage };
+module.exports = {
+  matchParcelByAddress, lookupParcelById, parcelMatchesCase, applyParcelMatch,
+  parseStreet, surnamesFrom, parseMortgageBookPage
+};

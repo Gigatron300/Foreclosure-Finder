@@ -2590,7 +2590,7 @@
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
                             ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>${c.parcelValidationStatus === 'not-found' ? 'Court Parcel Missing' : 'Defendant Addr'}</span>` : ''}
                             ${c.addressSource === 'parcel-match' ? `<span class="address-warning-flag parcel-matched" title="${escapeAttr(c.parcelCorrection
-                                ? `Court parcel ${c.parcelCorrection.originalParcel} was not found in the county GIS. The case address and defendant owner matched ${c.parcelCorrection.correctedParcel} (${c.parcelCorrection.matchedOwner || 'owner unavailable'}).`
+                                ? `${c.parcelCorrection.reason || `Court parcel ${c.parcelCorrection.originalParcel || '(blank)'} was not found`}. Corrected to ${c.parcelCorrection.correctedParcel} (${c.parcelCorrection.matchedOwner || 'owner unavailable'}).`
                                 : `Defendant address matched parcel ${c.parcelNumber} owned by ${(c.parcelMatch && c.parcelMatch.owner) || 'the defendant'}${c.propertyMunicipality ? ' (' + c.propertyMunicipality + ')' : ''}`)}"><span class="address-warning-dot"></span>${c.parcelCorrection ? 'Parcel Corrected' : 'Parcel Matched'}</span>` : ''}
                         </div>
                         <div class="property-location">${location}</div>

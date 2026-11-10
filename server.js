@@ -1130,6 +1130,12 @@ async function runRecorderRefresh(reason = 'manual') {
       shouldStop: () => recorderRefresh.stopRequested,
       onProgress: (p) => { recorderRefresh.progress = { ...recorderRefresh.progress, ...p }; }
     });
+    if (result.resolutionChecked > 0) {
+      const tmp = PIPELINE_DATA_FILE + '.recorder.tmp';
+      await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+      await fs.rename(tmp, PIPELINE_DATA_FILE);
+      console.log(`📚 Saved ${result.corrected} parcel correction(s) from ${result.resolutionChecked} Recorder resolution check(s)`);
+    }
     recorderRefresh.last = { status: recorderRefresh.stopRequested ? 'stopped' : 'completed', ...result, reason, at: new Date().toISOString() };
     console.log(`📚 Recorder refresh done: ${result.checked} checked, ${result.failed} failed`);
   } catch (e) {
