@@ -12,6 +12,7 @@ const {
 } = require('./scrapers/montco-parcel-match');
 const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
+const { normalizePostalCities } = require('./scrapers/montco-postal-audit');
 const recorderParcelKey = montcoRecorder.parcelKey;
 const readRecorderCache = () => montcoRecorder.readCache();
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
@@ -1273,11 +1274,6 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
     (c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback' || c.addressSource === 'parcel-match')
   );
 
-  if (targets.length === 0) {
-    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, suspicious: 0, repaired: 0, reverted: 0, errors: 0, completed: new Date().toISOString() };
-    return res.json({ done: true, message: 'No mortgage parcel matches to find or audit.', status: lastParcelMatchStatus });
-  }
-
   isParcelMatchInProgress = true;
   lastParcelMatchStatus = {
     status: 'running', started: new Date().toISOString(),
@@ -1368,12 +1364,33 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
         }
       }
 
+      lastParcelMatchStatus.phase = 'postal-city';
+      const postalResult = await normalizePostalCities({
+        cases: pipeline.cases || [],
+        onlyPending: true,
+        onProgress: (p) => {
+          lastParcelMatchStatus.postalTotal = p.total;
+          lastParcelMatchStatus.postalProcessed = p.processed;
+          lastParcelMatchStatus.postalVerified = p.verified;
+          lastParcelMatchStatus.postalChanged = p.changed;
+          lastParcelMatchStatus.postalFailed = p.failed;
+          lastParcelMatchStatus.postalStep = p.step;
+        },
+        onCheckpoint: saveCheckpoint
+      });
+      lastParcelMatchStatus.postalTotal = postalResult.total;
+      lastParcelMatchStatus.postalProcessed = postalResult.processed;
+      lastParcelMatchStatus.postalVerified = postalResult.verified;
+      lastParcelMatchStatus.postalChanged = postalResult.changed;
+      lastParcelMatchStatus.postalFailed = postalResult.failed;
+      lastParcelMatchStatus.reverted += postalResult.hybridReverted;
+
       await saveCheckpoint();
 
       lastParcelMatchStatus.status = 'completed';
       lastParcelMatchStatus.completed = new Date().toISOString();
       const s = lastParcelMatchStatus;
-      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.repaired} addresses repaired, ${s.reverted} bad repairs rolled back, ${s.unmatched} no match, ${s.errors} errors`);
+      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.repaired} addresses repaired, ${s.reverted} bad repairs rolled back, ${s.postalChanged || 0} postal cities normalized, ${s.unmatched} no match, ${s.errors} errors`);
     } catch (error) {
       lastParcelMatchStatus.status = 'error';
       lastParcelMatchStatus.error = error.message;

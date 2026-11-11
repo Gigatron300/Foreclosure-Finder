@@ -19,7 +19,7 @@ const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 const {
-  lookupParcelById, parcelMatchesCase, applyParcelMatch, repairHybridLocation
+  lookupParcelById, parcelMatchesCase, applyParcelMatch, repairHybridLocation, verifyPostalLocation
 } = require('./montco-parcel-match');
 
 const BASE = 'https://rodviewer.montcopa.org/countyweb';
@@ -365,11 +365,13 @@ async function applyRecorderParcelResolution(c, resolved, source, details = {}) 
   if (originalParcel && !c.courtParcelNumber) c.courtParcelNumber = originalParcel;
   const locationAudit = await repairHybridLocation(c, resolved.match);
   resolved.match = locationAudit.match;
+  resolved.match = (await verifyPostalLocation(c, resolved.match)).match;
   applyParcelMatch(c, resolved.match);
   // A court mailing ZIP and the parcel layer's location ZIP can disagree even when
   // the parcel is otherwise confirmed. Preserve the case ZIP for display and retain
   // both values in the correction audit.
-  if (!resolved.match.locationCorrection && !resolved.match.locationRollback && !resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
+  if (!resolved.match.locationCorrection && !resolved.match.locationRollback && !resolved.match.postalLocationCorrection &&
+      !resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
   c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
   const sourceLabel = source === 'recorder-book-page'
     ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`

@@ -3327,7 +3327,11 @@
                     const statusResp = await fetch('/api/pipeline/match-parcels/status', { headers: { 'X-Auth-Token': authToken } });
                     const statusResult = await statusResp.json();
                     const s = statusResult.status;
-                    if (s) btn.innerHTML = `Matching / auditing ${s.processed || 0}/${total}...`;
+                    if (s) {
+                        btn.innerHTML = s.phase === 'postal-city'
+                            ? `Normalizing cities ${s.postalProcessed || 0}/${s.postalTotal || '?'}...`
+                            : `Matching / auditing ${s.processed || 0}/${total}...`;
+                    }
                     if (!statusResult.inProgress) {
                         if (s && s.status === 'completed') {
                             alert(`Checked ${total} mortgage parcel case(s):\n` +
@@ -3336,6 +3340,9 @@
                                 `  Suspicious owner-mailing localities: ${s.suspicious || 0}\n` +
                                 `  Property addresses repaired: ${s.repaired || 0}\n` +
                                 `  Earlier repairs rolled back: ${s.reverted || 0}\n` +
+                                `  Postal city labels normalized: ${s.postalChanged || 0}\n` +
+                                `  Postal addresses verified: ${s.postalVerified || 0}` +
+                                (s.postalFailed ? `\n  Postal addresses not verified: ${s.postalFailed}` : '') + `\n` +
                                 `  No parcel at that address: ${s.unmatched}` +
                                 (s.errors ? `\n  Couldn't check (parcel map error): ${s.errors}` : ''));
                             await loadData(true);

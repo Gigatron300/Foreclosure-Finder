@@ -6,6 +6,7 @@ const path = require('path');
 const APP_CONFIG = require('./config');
 const { scrapeMontgomeryCourts } = require('./scrapers/montco-courts');
 const { enrichCases, estimateEquity } = require('./scrapers/property-enrichment');
+const { POSTAL_CITY_VERSION, normalizePostalCities } = require('./scrapers/montco-postal-audit');
 
 const OUTPUT_DIR = APP_CONFIG.outputDir;
 const OUTPUT_FILE = 'pipeline.json';
@@ -36,12 +37,23 @@ async function runPipelineScraper(options = {}) {
 
   // Build URL cache from previous run so we can skip the search hop for known cases
   const urlCache = {};
+  const previousPostalByCase = new Map();
   try {
     const existing = await fs.readFile(path.join(OUTPUT_DIR, OUTPUT_FILE), 'utf8');
     const parsed = JSON.parse(existing);
     for (const prev of (parsed.cases || [])) {
       if (prev.caseNumber && prev.detailUrl) {
         urlCache[prev.caseNumber] = prev.detailUrl;
+      }
+      if (prev.caseNumber && prev.postalCityAudit?.version === POSTAL_CITY_VERSION) {
+        previousPostalByCase.set(prev.caseNumber, {
+          parcel: String(prev.parcelNumber || '').replace(/\D/g, ''),
+          address: String(prev.propertyAddress || '').toUpperCase().trim(),
+          city: prev.propertyCity,
+          zip: prev.propertyZip,
+          municipality: prev.propertyMunicipality,
+          audit: prev.postalCityAudit
+        });
       }
     }
     if (Object.keys(urlCache).length > 0) {
@@ -78,6 +90,37 @@ async function runPipelineScraper(options = {}) {
     }
     
     // Can add more court sources here in the future
+
+    // Restore verified postal towns for unchanged cases, then batch-normalize only
+    // new or changed parcels. This keeps Process All automatic without geocoding
+    // thousands of already-verified addresses again.
+    for (const c of allCases) {
+      const prior = previousPostalByCase.get(c.caseNumber);
+      const sameParcel = prior && prior.parcel === String(c.parcelNumber || '').replace(/\D/g, '');
+      const sameAddress = prior && prior.address === String(c.propertyAddress || '').toUpperCase().trim();
+      if (sameParcel && sameAddress) {
+        c.propertyCity = prior.city;
+        c.propertyZip = prior.zip;
+        c.propertyMunicipality = c.propertyMunicipality || prior.municipality;
+        c.postalCityAudit = prior.audit;
+      }
+    }
+
+    try {
+      const postal = await normalizePostalCities({
+        cases: allCases,
+        onlyPending: true,
+        shouldStop: config.shouldStop || (() => false),
+        onProgress: p => {
+          if (p.step === 'census') {
+            console.log(`   📮 Postal cities: ${p.processed}/${p.total} parcels processed`);
+          }
+        }
+      });
+      console.log(`   📮 Postal city audit: ${postal.verified} verified, ${postal.changed} label(s) normalized, ${postal.failed} unresolved`);
+    } catch (e) {
+      console.log(`   ⚠️ Postal city audit skipped: ${e.message}`);
+    }
     
   } catch (error) {
     // A user stop or court-session gate must not fall through and overwrite

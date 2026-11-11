@@ -195,6 +195,82 @@ async function censusPropertyLocation(street, municipality) {
   return location;
 }
 
+async function censusPostalLocation(street, zip, municipality) {
+  const parsedStreet = parseStreet(street);
+  const zip5 = String(zip || '').trim().slice(0, 5);
+  const city = normalizeMunicipalityCity(municipality);
+  if (!parsedStreet || (!zip5 && !city)) return null;
+  const locality = zip5 ? `PA ${zip5}` : `${city}, PA`;
+  const key = `POSTAL|${parsedStreet.number}|${parsedStreet.name}|${locality.toUpperCase()}`;
+  if (censusLocationCache.has(key)) return censusLocationCache.get(key);
+
+  let location = null;
+  try {
+    const params = new URLSearchParams({
+      address: `${street}, ${locality}`,
+      benchmark: 'Public_AR_Current',
+      format: 'json'
+    });
+    const response = await fetch(`${CENSUS_GEOCODER}?${params}`, { signal: AbortSignal.timeout(12000) });
+    if (response.ok) {
+      const data = await response.json();
+      const matches = (data?.result?.addressMatches || []).filter(item => {
+        const candidateStreet = String(item.matchedAddress || '').split(',')[0];
+        const candidateZip = String(item.addressComponents?.zip || '').trim().slice(0, 5);
+        return sameStreet(street, candidateStreet) && (!zip5 || !candidateZip || zip5 === candidateZip);
+      });
+      if (matches.length === 1) {
+        const item = matches[0];
+        location = {
+          city: String(item.addressComponents?.city || '').trim(),
+          zip: String(item.addressComponents?.zip || zip5).trim().slice(0, 5),
+          matchedAddress: String(item.matchedAddress || '').trim(),
+          source: 'US Census Geocoder',
+          coordinates: item.coordinates || null
+        };
+      }
+    }
+  } catch (e) {
+    location = null;
+  }
+  censusLocationCache.set(key, location);
+  return location;
+}
+
+async function verifyPostalLocation(c, match) {
+  if (!c || !match?.street) return { match, verified: false, changed: false };
+  const zip = match.zip || String(c.propertyZip || '').trim().slice(0, 5);
+  const verified = await censusPostalLocation(match.street, zip, match.municipality || match.city);
+  const distance = parcelDistanceMeters(verified?.coordinates, match.parcelGeometry);
+  if (!verified?.city || !verified?.zip || !Number.isFinite(distance) || distance > 250) {
+    return { match, verified: false, changed: false };
+  }
+
+  const currentCity = String(c.propertyCity || '').trim();
+  const currentZip = String(c.propertyZip || '').trim().slice(0, 5);
+  const changed = !sameText(currentCity, verified.city) || currentZip !== verified.zip;
+  return {
+    verified: true,
+    changed,
+    match: {
+      ...match,
+      city: verified.city,
+      zip: verified.zip,
+      postalLocationCorrection: {
+        version: 1,
+        originalCity: currentCity,
+        originalZip: currentZip,
+        correctedCity: verified.city,
+        correctedZip: verified.zip,
+        matchedAddress: verified.matchedAddress,
+        source: 'US Census Geocoder',
+        parcelDistanceMeters: Math.round(distance),
+        verifiedAt: new Date().toISOString()
+      }
+    }
+  };
+}
+
 async function repairHybridLocation(c, match) {
   const priorCorrection = c?.addressCorrection;
   if (priorCorrection?.source === 'US Census Geocoder' && priorCorrection.originalCity && priorCorrection.originalZip) {
@@ -283,11 +359,43 @@ async function queryParcels(where) {
     outSR: '4326',
     f: 'json'
   });
-  const resp = await fetch(`${PARCEL_API_BASE}?${params}`, { signal: AbortSignal.timeout(15000) });
+  const query = params.toString();
+  const request = query.length > 1800
+    ? {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: query,
+        signal: AbortSignal.timeout(30000)
+      }
+    : { signal: AbortSignal.timeout(15000) };
+  const url = query.length > 1800 ? PARCEL_API_BASE : `${PARCEL_API_BASE}?${query}`;
+  const resp = await fetch(url, request);
   if (!resp.ok) throw new Error(`parcel API HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.error) throw new Error(`parcel API: ${data.error.message || 'error'}`);
   return (data.features || []).map(f => ({ ...f.attributes, __geometry: f.geometry || null }));
+}
+
+async function lookupParcelsByIds(parcelIds, batchSize = 250) {
+  const ids = [...new Set((parcelIds || []).map(value => String(value || '').replace(/\D/g, '')).filter(value => value.length === 12))];
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += batchSize) chunks.push(ids.slice(i, i + batchSize));
+  const out = new Map();
+  let next = 0;
+  const worker = async () => {
+    while (next < chunks.length) {
+      const chunk = chunks[next++];
+      const quoted = chunk.map(id => `'${sqlEsc(id)}'`).join(',');
+      const rows = await queryParcels(`PARCEL IN (${quoted})`);
+      for (const row of rows) {
+        const match = parcelMatchFromRow(row);
+        const key = String(match?.parcel || '').replace(/\D/g, '');
+        if (key) out.set(key, match);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, chunks.length) }, () => worker()));
+  return out;
 }
 
 const sqlEsc = (s) => String(s).replace(/'/g, "''");
@@ -368,11 +476,16 @@ async function matchParcelByAddress({ street, city, zip, defendant }) {
   const match = parcelMatchFromRow(pick);
   match.confidence = confidence;
   if (!match.zip) match.zip = zip5;
-  return (await repairHybridLocation({
+  const hybrid = await repairHybridLocation({
     propertyAddress: street,
     propertyCity: city,
     propertyZip: zip
-  }, match)).match;
+  }, match);
+  return (await verifyPostalLocation({
+    propertyAddress: street,
+    propertyCity: city,
+    propertyZip: zip
+  }, hybrid.match)).match;
 }
 
 /**
@@ -410,13 +523,14 @@ function applyParcelMatch(c, match) {
     c.propertyAddress = match.street;
     // Same house as the defendant address, so keep its postal town ("LANSDALE"):
     // Zillow and Maps search better on it than on the township name.
-    const verifiedLocationChange = match.locationCorrection || match.locationRollback;
+    const verifiedLocationChange = match.locationCorrection || match.locationRollback || match.postalLocationCorrection;
     c.propertyCity = verifiedLocationChange ? match.city : (c.propertyCity || match.city);
     c.propertyState = 'PA';
     c.propertyZip = verifiedLocationChange ? match.zip : (match.zip || c.propertyZip);
     c.inMontgomeryCounty = true;
     c.addressSource = 'parcel-match';
     if (match.locationCorrection) c.addressCorrection = match.locationCorrection;
+    if (match.postalLocationCorrection) c.postalCityAudit = match.postalLocationCorrection;
     if (match.locationRollback) {
       c.addressCorrectionHistory = [
         ...(Array.isArray(c.addressCorrectionHistory) ? c.addressCorrectionHistory : []),
@@ -435,7 +549,8 @@ function parseMortgageBookPage(remarks) {
 }
 
 module.exports = {
-  matchParcelByAddress, lookupParcelById, parcelMatchesCase, applyParcelMatch,
+  matchParcelByAddress, lookupParcelById, lookupParcelsByIds, parcelMatchesCase, applyParcelMatch,
   repairHybridLocation, hybridLocationLooksContaminated, normalizeMunicipalityCity,
+  verifyPostalLocation, parcelDistanceMeters, sameStreet,
   parseStreet, surnamesFrom, parseMortgageBookPage
 };
