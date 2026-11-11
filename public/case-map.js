@@ -148,6 +148,8 @@
         let L = null;
         let dotLayer = null;
         let dotRenderer = null;
+        let shapeRenderer = null;   // drawn radius / area, underneath the dots
+        let ringRenderer = null;    // hover ring, above the dots
         let highlightMarker = null;
         // A drawn shape filters the cards and takes over from the map's view:
         //   { kind: 'radius', center: LatLng, meters }  or  { kind: 'polygon', points: [[lat, lng], ...] }
@@ -288,7 +290,7 @@
             shape = next;
             if (shapeLayer) { shapeLayer.remove(); shapeLayer = null; }
             if (shape) {
-                const style = { color: SHAPE_COLOR, weight: 3, fillColor: SHAPE_COLOR, fillOpacity: 0.12, interactive: false };
+                const style = { renderer: shapeRenderer, color: SHAPE_COLOR, weight: 3, fillColor: SHAPE_COLOR, fillOpacity: 0.12, interactive: false };
                 shapeLayer = (shape.kind === 'radius'
                     ? L.circle(shape.center, { radius: shape.meters, ...style })
                     : L.polygon(shape.points, style)).addTo(map);
@@ -364,8 +366,8 @@
             if (!draft) {
                 draft = {
                     points: [],
-                    line: L.polyline([], { color: SHAPE_COLOR, weight: 3, interactive: false }).addTo(map),
-                    band: L.polyline([], { color: SHAPE_COLOR, weight: 2, dashArray: '5 5', interactive: false }).addTo(map)
+                    line: L.polyline([], { renderer: shapeRenderer, color: SHAPE_COLOR, weight: 3, interactive: false }).addTo(map),
+                    band: L.polyline([], { renderer: shapeRenderer, color: SHAPE_COLOR, weight: 2, dashArray: '5 5', interactive: false }).addTo(map)
                 };
             }
             const points = draft.points;
@@ -403,6 +405,17 @@
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'
             }).addTo(map);
             dotRenderer = L.canvas({ padding: 0.3 });
+            // The drawn shape and the hover ring each get their own layer that ignores the
+            // mouse. Left on Leaflet's default layer they would sit over the dots and
+            // swallow every hover and click meant for them.
+            const passThroughRenderer = (name, zIndex) => {
+                const pane = map.createPane(name);
+                pane.style.zIndex = zIndex;
+                pane.style.pointerEvents = 'none';
+                return L.canvas({ pane: name, padding: 0.3 });
+            };
+            shapeRenderer = passThroughRenderer('caseMapShapes', 350);
+            ringRenderer = passThroughRenderer('caseMapRing', 450);
             dotLayer = L.layerGroup().addTo(map);
             map.setView(defaultView.center, defaultView.zoom, { animate: false });
             markBaseline();
@@ -509,7 +522,7 @@
                 }
                 if (!highlightMarker) {
                     highlightMarker = L.circleMarker([item.lat, item.lng], {
-                        radius: 11, color: cssColor('brand-gold'), weight: 3, fill: false, interactive: false
+                        renderer: ringRenderer, radius: 11, color: cssColor('brand-gold'), weight: 3, fill: false, interactive: false
                     }).addTo(map);
                 } else {
                     highlightMarker.setLatLng([item.lat, item.lng]);
