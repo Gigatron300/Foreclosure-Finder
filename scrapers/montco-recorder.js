@@ -369,7 +369,7 @@ async function applyRecorderParcelResolution(c, resolved, source, details = {}) 
   // A court mailing ZIP and the parcel layer's location ZIP can disagree even when
   // the parcel is otherwise confirmed. Preserve the case ZIP for display and retain
   // both values in the correction audit.
-  if (!resolved.match.locationCorrection && !resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
+  if (!resolved.match.locationCorrection && !resolved.match.locationRollback && !resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
   c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
   const sourceLabel = source === 'recorder-book-page'
     ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`

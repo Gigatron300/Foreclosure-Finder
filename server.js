@@ -1274,7 +1274,7 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
   );
 
   if (targets.length === 0) {
-    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, suspicious: 0, repaired: 0, errors: 0, completed: new Date().toISOString() };
+    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, suspicious: 0, repaired: 0, reverted: 0, errors: 0, completed: new Date().toISOString() };
     return res.json({ done: true, message: 'No mortgage parcel matches to find or audit.', status: lastParcelMatchStatus });
   }
 
@@ -1282,7 +1282,7 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
   lastParcelMatchStatus = {
     status: 'running', started: new Date().toISOString(),
     total: targets.length, processed: 0, matched: 0, addressOnly: 0, unmatched: 0,
-    suspicious: 0, repaired: 0, errors: 0
+    suspicious: 0, repaired: 0, reverted: 0, errors: 0
   };
   res.json({ done: false, message: `Matching and auditing ${targets.length} cases`, status: lastParcelMatchStatus });
 
@@ -1318,6 +1318,11 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
                 if (audit.repaired) {
                   applyParcelMatch(c, audit.match);
                   lastParcelMatchStatus.repaired++;
+                  chunkChanges++;
+                  chunkRepaired = true;
+                } else if (audit.reverted) {
+                  applyParcelMatch(c, audit.match);
+                  lastParcelMatchStatus.reverted++;
                   chunkChanges++;
                   chunkRepaired = true;
                 }
@@ -1368,7 +1373,7 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
       lastParcelMatchStatus.status = 'completed';
       lastParcelMatchStatus.completed = new Date().toISOString();
       const s = lastParcelMatchStatus;
-      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.repaired} addresses repaired, ${s.unmatched} no match, ${s.errors} errors`);
+      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.repaired} addresses repaired, ${s.reverted} bad repairs rolled back, ${s.unmatched} no match, ${s.errors} errors`);
     } catch (error) {
       lastParcelMatchStatus.status = 'error';
       lastParcelMatchStatus.error = error.message;

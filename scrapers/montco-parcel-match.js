@@ -98,6 +98,29 @@ function sameStreet(a, b) {
   return !!(left && right && left.number === right.number && left.name === right.name);
 }
 
+function parcelDistanceMeters(coordinates, geometry) {
+  const x = Number(coordinates?.x);
+  const y = Number(coordinates?.y);
+  const points = (geometry?.rings || []).flat().filter(p => Array.isArray(p) && p.length >= 2);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !points.length) return null;
+
+  const xs = points.map(p => Number(p[0])).filter(Number.isFinite);
+  const ys = points.map(p => Number(p[1])).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return null;
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const nearestX = Math.max(minX, Math.min(maxX, x));
+  const nearestY = Math.max(minY, Math.min(maxY, y));
+
+  const toRad = value => value * Math.PI / 180;
+  const dLat = toRad(y - nearestY);
+  const dLon = toRad(x - nearestX);
+  const lat1 = toRad(nearestY);
+  const lat2 = toRad(y);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function parcelMatchFromRow(row) {
   if (!row) return null;
   const muni = (row.Muni_Name || '').trim();
@@ -111,6 +134,7 @@ function parcelMatchFromRow(row) {
     owner: [row.OWN1, row.OWN2].map(x => (x || '').trim()).filter(Boolean).join(' / '),
     municipality: muni,
     parcelType: (row.PARCELTYPE || '').trim(),
+    parcelGeometry: row.__geometry || null,
     ownerMailingStreet: String(row.ADDR1 || '').trim(),
     ownerMailingCity: ownerMailing.city,
     ownerMailingZip: ownerMailing.zip
@@ -159,7 +183,8 @@ async function censusPropertyLocation(street, municipality) {
           city: String(item.addressComponents?.city || city).trim(),
           zip: String(item.addressComponents?.zip || '').trim().slice(0, 5),
           matchedAddress: String(item.matchedAddress || '').trim(),
-          source: 'US Census Geocoder'
+          source: 'US Census Geocoder',
+          coordinates: item.coordinates || null
         };
       }
     }
@@ -171,6 +196,29 @@ async function censusPropertyLocation(street, municipality) {
 }
 
 async function repairHybridLocation(c, match) {
+  const priorCorrection = c?.addressCorrection;
+  if (priorCorrection?.source === 'US Census Geocoder' && priorCorrection.originalCity && priorCorrection.originalZip) {
+    const priorVerified = await censusPropertyLocation(match?.street, match?.municipality || match?.city);
+    const priorDistance = parcelDistanceMeters(priorVerified?.coordinates, match?.parcelGeometry);
+    if (priorVerified && Number.isFinite(priorDistance) && priorDistance > 250) {
+      return {
+        suspicious: true,
+        repaired: false,
+        reverted: true,
+        match: {
+          ...match,
+          city: priorCorrection.originalCity,
+          zip: priorCorrection.originalZip,
+          locationRollback: {
+            reason: `Earlier Census match was ${Math.round(priorDistance)} meters from the county parcel`,
+            invalidMatchedAddress: priorVerified.matchedAddress,
+            revertedAt: new Date().toISOString()
+          }
+        }
+      };
+    }
+  }
+
   if (!hybridLocationLooksContaminated(c, match)) {
     return { match, suspicious: false, repaired: false };
   }
@@ -182,6 +230,18 @@ async function repairHybridLocation(c, match) {
       suspicious: true,
       repaired: false,
       reason: 'Property locality matched the owner mailing address, but Census could not verify a replacement ZIP'
+    };
+  }
+
+  const parcelDistance = parcelDistanceMeters(verified.coordinates, match.parcelGeometry);
+  if (!Number.isFinite(parcelDistance) || parcelDistance > 250) {
+    return {
+      match,
+      suspicious: true,
+      repaired: false,
+      reason: Number.isFinite(parcelDistance)
+        ? `Census match was ${Math.round(parcelDistance)} meters from the county parcel`
+        : 'County parcel geometry was unavailable for spatial verification'
     };
   }
 
@@ -208,6 +268,7 @@ async function repairHybridLocation(c, match) {
         matchedAddress: verified.matchedAddress,
         reason: 'Displayed locality matched the parcel owner mailing address instead of the property location',
         source: verified.source,
+        parcelDistanceMeters: Math.round(parcelDistance),
         correctedAt: new Date().toISOString()
       }
     }
@@ -215,12 +276,18 @@ async function repairHybridLocation(c, match) {
 }
 
 async function queryParcels(where) {
-  const params = new URLSearchParams({ where, outFields: OUT_FIELDS, returnGeometry: 'false', f: 'json' });
+  const params = new URLSearchParams({
+    where,
+    outFields: OUT_FIELDS,
+    returnGeometry: 'true',
+    outSR: '4326',
+    f: 'json'
+  });
   const resp = await fetch(`${PARCEL_API_BASE}?${params}`, { signal: AbortSignal.timeout(15000) });
   if (!resp.ok) throw new Error(`parcel API HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.error) throw new Error(`parcel API: ${data.error.message || 'error'}`);
-  return (data.features || []).map(f => f.attributes);
+  return (data.features || []).map(f => ({ ...f.attributes, __geometry: f.geometry || null }));
 }
 
 const sqlEsc = (s) => String(s).replace(/'/g, "''");
@@ -343,12 +410,20 @@ function applyParcelMatch(c, match) {
     c.propertyAddress = match.street;
     // Same house as the defendant address, so keep its postal town ("LANSDALE"):
     // Zillow and Maps search better on it than on the township name.
-    c.propertyCity = match.locationCorrection ? match.city : (c.propertyCity || match.city);
+    const verifiedLocationChange = match.locationCorrection || match.locationRollback;
+    c.propertyCity = verifiedLocationChange ? match.city : (c.propertyCity || match.city);
     c.propertyState = 'PA';
-    c.propertyZip = match.locationCorrection ? match.zip : (match.zip || c.propertyZip);
+    c.propertyZip = verifiedLocationChange ? match.zip : (match.zip || c.propertyZip);
     c.inMontgomeryCounty = true;
     c.addressSource = 'parcel-match';
     if (match.locationCorrection) c.addressCorrection = match.locationCorrection;
+    if (match.locationRollback) {
+      c.addressCorrectionHistory = [
+        ...(Array.isArray(c.addressCorrectionHistory) ? c.addressCorrectionHistory : []),
+        { ...(c.addressCorrection || {}), ...match.locationRollback, status: 'reverted' }
+      ].slice(-5);
+      delete c.addressCorrection;
+    }
   }
   return match.confidence;
 }

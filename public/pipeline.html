@@ -3335,6 +3335,7 @@
                                 `  Address is a parcel, different owner: ${s.addressOnly}\n` +
                                 `  Suspicious owner-mailing localities: ${s.suspicious || 0}\n` +
                                 `  Property addresses repaired: ${s.repaired || 0}\n` +
+                                `  Earlier repairs rolled back: ${s.reverted || 0}\n` +
                                 `  No parcel at that address: ${s.unmatched}` +
                                 (s.errors ? `\n  Couldn't check (parcel map error): ${s.errors}` : ''));
                             await loadData(true);
