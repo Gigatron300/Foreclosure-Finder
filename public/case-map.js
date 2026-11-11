@@ -61,7 +61,10 @@
             .case-map-legend { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; margin-left: auto; color: var(--muted); }
             .case-map-legend span { display: inline-flex; align-items: center; gap: 5px; }
             .case-map-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-            .case-map-canvas { height: 440px; background: var(--surface-3, var(--surface-2)); }
+            /* Leaflet stacks its layers at z-index 400-1000. Keep those inside the panel so
+               the page's filter dropdowns open in front of the map, not behind it. */
+            .case-map-panel { isolation: isolate; }
+            .case-map-canvas { position: relative; z-index: 0; height: 440px;background: var(--surface-3, var(--surface-2)); }
             .case-map-canvas.is-drawing, .case-map-canvas.is-drawing .leaflet-interactive { cursor: crosshair !important; }
             .case-map-message { padding: 24px 20px; color: var(--muted); font-size: 0.85rem; }
             .case-map-popup-title { font-weight: 600; font-size: 0.9rem; color: #232323; }
