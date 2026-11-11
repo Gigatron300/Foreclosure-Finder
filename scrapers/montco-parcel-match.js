@@ -237,13 +237,55 @@ async function censusPostalLocation(street, zip, municipality) {
   return location;
 }
 
+// For when the ZIP is missing or cannot be trusted: ask Census for the street in the
+// parcel's municipality and keep only the candidate that sits on the county parcel.
+// The county layer has no ZIP for many parcels (most of Norristown), and the ZIP on
+// the case then comes from the court's defendant address, which can name another
+// town entirely ("809 GREEN ST, CONSHOHOCKEN 19428" for a Norristown parcel).
+async function censusLocationOnParcel(street, municipality, geometry) {
+  const city = normalizeMunicipalityCity(municipality);
+  if (!parseStreet(street) || !city || !geometry) return null;
+  try {
+    const params = new URLSearchParams({
+      address: `${street}, ${city}, PA`,
+      benchmark: 'Public_AR_Current',
+      format: 'json'
+    });
+    const response = await fetch(`${CENSUS_GEOCODER}?${params}`, { signal: AbortSignal.timeout(12000) });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const onParcel = (data?.result?.addressMatches || [])
+      .filter(item => sameStreet(street, String(item.matchedAddress || '').split(',')[0]))
+      .map(item => ({ item, distance: parcelDistanceMeters(item.coordinates, geometry) }))
+      .filter(({ item, distance }) => Number.isFinite(distance) && distance <= 250 &&
+        item.addressComponents?.city && /^\d{5}/.test(String(item.addressComponents?.zip || '')));
+    const zips = new Set(onParcel.map(({ item }) => String(item.addressComponents.zip).slice(0, 5)));
+    if (zips.size !== 1) return null;
+    const { item, distance } = onParcel[0];
+    return {
+      city: String(item.addressComponents.city).trim(),
+      zip: String(item.addressComponents.zip).trim().slice(0, 5),
+      matchedAddress: String(item.matchedAddress || '').trim(),
+      source: 'US Census Geocoder',
+      coordinates: item.coordinates || null,
+      parcelDistanceMeters: Math.round(distance)
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function verifyPostalLocation(c, match) {
   if (!c || !match?.street) return { match, verified: false, changed: false };
   const zip = match.zip || String(c.propertyZip || '').trim().slice(0, 5);
-  const verified = await censusPostalLocation(match.street, zip, match.municipality || match.city);
-  const distance = parcelDistanceMeters(verified?.coordinates, match.parcelGeometry);
+  let verified = await censusPostalLocation(match.street, zip, match.municipality || match.city);
+  let distance = parcelDistanceMeters(verified?.coordinates, match.parcelGeometry);
   if (!verified?.city || !verified?.zip || !Number.isFinite(distance) || distance > 250) {
-    return { match, verified: false, changed: false };
+    // That ZIP found nothing on the parcel. It may be the wrong ZIP rather than an
+    // unknown address, so look the street up by municipality instead.
+    verified = await censusLocationOnParcel(match.street, match.municipality || match.city, match.parcelGeometry);
+    if (!verified) return { match, verified: false, changed: false };
+    distance = verified.parcelDistanceMeters;
   }
 
   const currentCity = String(c.propertyCity || '').trim();
@@ -551,6 +593,6 @@ function parseMortgageBookPage(remarks) {
 module.exports = {
   matchParcelByAddress, lookupParcelById, lookupParcelsByIds, parcelMatchesCase, applyParcelMatch,
   repairHybridLocation, hybridLocationLooksContaminated, normalizeMunicipalityCity,
-  verifyPostalLocation, parcelDistanceMeters, sameStreet,
+  verifyPostalLocation, censusLocationOnParcel, parcelDistanceMeters, sameStreet,
   parseStreet, surnamesFrom, parseMortgageBookPage
 };

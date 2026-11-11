@@ -5,7 +5,8 @@ const {
   applyParcelMatch,
   normalizeMunicipalityCity,
   sameStreet,
-  parcelDistanceMeters
+  parcelDistanceMeters,
+  censusLocationOnParcel
 } = require('./montco-parcel-match');
 
 const POSTAL_CITY_VERSION = 1;
@@ -152,6 +153,9 @@ async function normalizePostalCities({
     const zip = String(match.zip || representative.propertyZip || '').trim().slice(0, 5);
     records.push({
       id,
+      // No ZIP on the county parcel: the one used below is only the case's own, which
+      // for a parcel-matched case came from the court's defendant address.
+      zipFromCase: !String(match.zip || '').trim(),
       street: match.street,
       zip: /^\d{5}$/.test(zip) ? zip : '',
       municipality: normalizeMunicipalityCity(match.municipality || match.city),
@@ -174,13 +178,26 @@ async function normalizePostalCities({
     }
 
     for (const record of batch) {
-      const census = geocoded.get(record.id);
-      const postal = postalParts(census?.matchedAddress);
-      const distance = parcelDistanceMeters(census?.coordinates, record.match.parcelGeometry);
-      const valid = census?.status === 'Match' && census?.matchType === 'Exact' && postal &&
+      let census = geocoded.get(record.id);
+      let postal = postalParts(census?.matchedAddress);
+      let distance = parcelDistanceMeters(census?.coordinates, record.match.parcelGeometry);
+      let source = 'US Census Batch Geocoder';
+      let valid = census?.status === 'Match' && census?.matchType === 'Exact' && postal &&
         sameStreet(record.street, postal.street) &&
         (!record.zip || postal.zip === record.zip) &&
         Number.isFinite(distance) && distance <= 250;
+      if (!valid && record.zipFromCase) {
+        // The case's ZIP may simply be wrong (another town's). Look the street up in
+        // the parcel's municipality and accept only a result on the parcel itself.
+        const onParcel = await censusLocationOnParcel(record.street, record.municipality, record.match.parcelGeometry);
+        if (onParcel) {
+          census = { matchedAddress: onParcel.matchedAddress };
+          postal = { street: record.street, city: onParcel.city, zip: onParcel.zip };
+          distance = onParcel.parcelDistanceMeters;
+          source = 'US Census Geocoder (by municipality, on parcel)';
+          valid = true;
+        }
+      }
       result.processed++;
       if (!valid) {
         result.failed++;
@@ -203,7 +220,7 @@ async function normalizePostalCities({
           postalCity: c.propertyCity,
           postalZip: c.propertyZip,
           matchedAddress: census.matchedAddress,
-          source: 'US Census Batch Geocoder',
+          source,
           parcelDistanceMeters: Math.round(distance),
           verifiedAt: new Date().toISOString()
         };
