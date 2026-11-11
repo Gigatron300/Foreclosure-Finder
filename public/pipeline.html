@@ -581,6 +581,14 @@
         }
         .filter-dropdown-option:hover { background: var(--surface-3); }
         .filter-dropdown-option input { accent-color: var(--brand-gold); }
+        #repeatDefendantFilterButton { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #repeatDefendantFilterButton.is-active { border-color: var(--brand-gold); color: var(--brand-gold-dark); font-weight: 600; }
+        .repeat-defendant-panel { width: 380px; max-height: 440px; }
+        .repeat-defendant-panel .filter-dropdown-options { max-height: 360px; }
+        .repeat-defendant-panel .filter-dropdown-option span:first-of-type { flex: 1; min-width: 0; }
+        .repeat-defendant-panel .opt-count { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+        .repeat-defendant-panel .opt-divider { border-top: 1px solid var(--border); margin: 4px 0; }
+        .filter-dropdown-search { width: 100%; font: inherit; font-size: 0.8rem; padding: 5px 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); }
         .filter-dropdown-empty {
             padding: 12px;
             color: var(--muted);
@@ -1280,7 +1288,6 @@
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
             <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
             <button class="btn btn-outline filter-danger" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)">Hide Closed</button>
-            <button class="btn btn-outline filter-gold" id="repeatDefendantFilter" onclick="toggleRepeatDefendants()" title="Show only open properties whose defendant also has an open case on another property, with each defendant's properties side by side. Closed cases do not count.">Repeat Defendants</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1329,6 +1336,18 @@
                     </div>
                     <div id="tagFilterOptions" class="filter-dropdown-options">
                         <div class="filter-dropdown-empty">No tags yet</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="filter-dropdown-group" style="min-width: 190px;">
+                <button type="button" id="repeatDefendantFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('repeatDefendantFilterDropdown', event)" title="Defendants with more than one case, open or closed. Pick one to see all of their properties, or show every repeat defendant at once.">All defendants</button>
+                <div id="repeatDefendantFilterDropdown" class="filter-dropdown-panel repeat-defendant-panel">
+                    <div class="filter-dropdown-actions">
+                        <input type="search" id="repeatDefendantSearch" class="filter-dropdown-search" placeholder="Find a defendant..." oninput="renderRepeatDefendantOptions()" autocomplete="off">
+                    </div>
+                    <div id="repeatDefendantOptions" class="filter-dropdown-options">
+                        <div class="filter-dropdown-empty">Loading...</div>
                     </div>
                 </div>
             </div>
@@ -1591,13 +1610,14 @@
                 c._defKey = c.defendantKey || '';
                 if (!c._defKey) continue;
                 let group = groups.get(c._defKey);
-                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.defendant, activeProperties: new Map(), pageProperties: new Map(), closed: [] });
+                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.defendant, activeProperties: new Map(), pageProperties: new Map(), closed: [], openCases: 0 });
                 const pk = defendantPropertyKey(c);
                 addTo(group.pageProperties, pk, c);
                 if (c.liveClosed) {
                     group.closed.push({ caseNumber: c.caseNumber, filed: c.commencedDate || '', caseType: c.caseType || '', status: c.liveStatus || 'CLOSED', place: placeOf(c) });
                 } else {
                     addTo(group.activeProperties, pk, c);
+                    group.openCases++;
                 }
             }
             for (const [key, rows] of Object.entries(data.defendantHistory || {})) {
@@ -1606,7 +1626,10 @@
                 for (const r of rows) if (!onPage.has(r.caseNumber)) group.closed.push({ ...r, place: '' });
             }
             const filedTime = x => { const t = new Date(x.filed).getTime(); return Number.isFinite(t) ? t : 0; };
-            for (const group of groups.values()) group.closed.sort((a, b) => filedTime(b) - filedTime(a));
+            for (const group of groups.values()) {
+                group.closed.sort((a, b) => filedTime(b) - filedTime(a));
+                group.totalCases = group.openCases + group.closed.length;
+            }
             montcoDefendantGroups = groups;
             montcoDefendantGroupsFor = data;
         }
@@ -1625,16 +1648,70 @@
             return null;
         }
 
-        // For the Repeat Defendants filter: an open card whose defendant has open
-        // cases on 2+ properties. Closed history alone does not count.
+        // A repeat defendant has 2+ cases in all, open or closed (Hide Closed can drop
+        // the closed cards). Returns the card's repeat-defendant group, or null.
         function repeatDefendantGroup(card) {
-            const members = card._stackMembers || [card];
-            if (!members.some(m => !m.liveClosed)) return null;
-            for (const m of members) {
+            for (const m of (card._stackMembers || [card])) {
                 const group = m._defKey && montcoDefendantGroups.get(m._defKey);
-                if (group && group.activeProperties.size > 1) return group;
+                if (group && group.totalCases > 1) return group;
             }
             return null;
+        }
+
+        function repeatDefendantCounts(group) {
+            return group.closed.length ? `(${group.openCases} open, ${group.closed.length} closed)` : `(${group.openCases} open)`;
+        }
+
+        // The dropdown: off, every repeat defendant, or one defendant. Rebuilt only
+        // when the data changes, so a half-typed search in it survives a reload.
+        let repeatDefendantListFor = null;
+        let repeatDefendantList = [];
+        function populateRepeatDefendantFilter() {
+            if (repeatDefendantListFor !== montcoDefendantGroups) {
+                repeatDefendantListFor = montcoDefendantGroups;
+                repeatDefendantList = [...montcoDefendantGroups.values()]
+                    .filter(g => g.totalCases > 1)
+                    .sort((a, b) => (b.totalCases - a.totalCases) || (b.openCases - a.openCases) || a.name.localeCompare(b.name));
+                renderRepeatDefendantOptions();
+            }
+            const button = document.getElementById('repeatDefendantFilterButton');
+            if (!button) return;
+            const focused = defendantFocus && montcoDefendantGroups.get(defendantFocus);
+            button.textContent = focused ? focused.name : repeatDefendantsOnly ? 'Every repeat defendant' : 'All defendants';
+            button.classList.toggle('is-active', !!focused || repeatDefendantsOnly);
+            document.querySelectorAll('#repeatDefendantOptions input').forEach(input => {
+                input.checked = input.value === (focused ? focused.key : repeatDefendantsOnly ? '__all__' : '');
+            });
+        }
+
+        function renderRepeatDefendantOptions() {
+            const box = document.getElementById('repeatDefendantOptions');
+            if (!box) return;
+            const query = normalizeMontcoSearchText((document.getElementById('repeatDefendantSearch') || {}).value || '');
+            const current = defendantFocus || (repeatDefendantsOnly ? '__all__' : '');
+            const row = (value, name, count) => `<label class="filter-dropdown-option"><input type="radio" name="repeatDefendantOption" value="${escapeAttr(value)}"${value === current ? ' checked' : ''} onchange="selectRepeatDefendant(this.value)"><span>${escapeAttr(name)}</span>${count ? `<span class="opt-count">${count}</span>` : ''}</label>`;
+            const matches = repeatDefendantList.filter(g => !query || normalizeMontcoSearchText(g.name).includes(query));
+            let html = '';
+            if (!query) {
+                html += row('', 'All defendants', '');
+                html += row('__all__', 'Every repeat defendant', `${repeatDefendantList.length}`);
+                html += '<div class="opt-divider"></div>';
+            }
+            html += matches.map(g => row(g.key, g.name, repeatDefendantCounts(g))).join('');
+            if (!matches.length) html += `<div class="filter-dropdown-empty">${repeatDefendantList.length ? 'No repeat defendant matches that.' : 'No repeat defendants.'}</div>`;
+            box.innerHTML = html;
+        }
+
+        function selectRepeatDefendant(value) {
+            closeAllFilterDropdowns();
+            if (value && value !== '__all__') {
+                repeatDefendantsOnly = false;
+                focusDefendant(value);
+                return;
+            }
+            defendantFocus = null;
+            repeatDefendantsOnly = value === '__all__';
+            loadData();
         }
 
         function repeatDefendantBadge({ group, closed }) {
@@ -1677,8 +1754,9 @@
             }
             const hidden = group.pageProperties.size - shown.size;
             const open = group.activeProperties.size;
-            bar.innerHTML = `<span>Every property for <strong>${escapeAttr(group.name)}</strong>: open on ${open} ${open === 1 ? 'property' : 'properties'}`
-                + (group.closed.length ? `, ${group.closed.length} closed ${group.closed.length === 1 ? 'case' : 'cases'} on record` : '') + '</span>'
+            const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+            bar.innerHTML = `<span>Every property for <strong>${escapeAttr(group.name)}</strong>: ${plural(group.openCases, 'open case', 'open cases')} on ${plural(open, 'property', 'properties')}`
+                + (group.closed.length ? `, ${plural(group.closed.length, 'closed case', 'closed cases')} on record` : '') + '</span>'
                 + (hidden > 0 ? `<span class="focus-note">${hidden} hidden by the filters above</span>` : '')
                 + '<button type="button" onclick="clearDefendantFocus()">&#10005; Back to all properties</button>';
             bar.hidden = false;
@@ -1701,11 +1779,6 @@
             loadData();
         }
 
-        function toggleRepeatDefendants() {
-            repeatDefendantsOnly = !repeatDefendantsOnly;
-            document.getElementById('repeatDefendantFilter').classList.toggle('is-active', repeatDefendantsOnly);
-            loadData();
-        }
 
         function isUnreliableAddress(c) {
             if (c.inMontgomeryCounty === false) return true;
@@ -2700,6 +2773,7 @@
 
                 buildDefendantGroups(data);
                 if (defendantFocus && !montcoDefendantGroups.has(defendantFocus)) defendantFocus = null;
+                populateRepeatDefendantFilter();
 
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);
@@ -2802,8 +2876,8 @@
                 if (defendantFocus) {
                     visibleCases = visibleCases.filter(g => (g._stackMembers || [g]).some(m => m._defKey === defendantFocus));
                 } else if (repeatDefendantsOnly) {
-                    // Open cards whose defendant is open on 2+ properties, each defendant's
-                    // side by side: biggest groups first, the chosen sort order within one.
+                    // Every repeat defendant's cards, each defendant's side by side: most
+                    // cases first, the chosen sort order within a defendant.
                     const order = new Map();
                     visibleCases = visibleCases.filter(g => {
                         const group = repeatDefendantGroup(g);
@@ -2812,7 +2886,7 @@
                     });
                     visibleCases = visibleCases
                         .map((g, i) => ({ g, i, group: repeatDefendantGroup(g) }))
-                        .sort((a, b) => (b.group.activeProperties.size - a.group.activeProperties.size)
+                        .sort((a, b) => (b.group.totalCases - a.group.totalCases)
                             || (order.get(a.group.key) - order.get(b.group.key)) || (a.i - b.i))
                         .map(x => x.g);
                 }
