@@ -171,7 +171,7 @@
         const notify = () => { if (opts.onChange) opts.onChange(); };
         const notifySoon = () => {
             clearTimeout(changeTimer);
-            changeTimer = setTimeout(notify, 150);
+            changeTimer = setTimeout(notify, 220);
         };
 
         function markBaseline() {
@@ -236,7 +236,7 @@
 
         function draw(force) {
             if (!map) return;
-            const itemKey = items.map(item => `${item.id}:${item.color}`).join('|');
+            const itemKey = items.map(item => `${item.id}:${item.color}${item.onTop ? '!' : ''}`).join('|');
             const signature = itemKey + '#' + (shape ? JSON.stringify(shape) : '');
             if (!force && signature === drawnSignature) return;
             drawnSignature = signature;
@@ -245,12 +245,17 @@
             const stroke = cssColor('surface');
             const inShape = shape ? currentFilter() : null;
             const colors = {};
-            for (const item of items) {
+            // Marked dots (item.onTop) are drawn last and a little larger, so a
+            // neighbour never hides them.
+            const ordered = items.some(item => item.onTop)
+                ? [...items.filter(item => !item.onTop), ...items.filter(item => item.onTop)]
+                : items;
+            for (const item of ordered) {
                 const fill = colors[item.color] || (colors[item.color] = cssColor(item.color));
                 const dimmed = inShape && !inShape(item.lat, item.lng);
                 const marker = L.circleMarker([item.lat, item.lng], {
                     renderer: dotRenderer,
-                    radius: 5.5,
+                    radius: item.onTop ? 7 : 5.5,
                     color: stroke,
                     weight: 1,
                     opacity: dimmed ? 0.4 : 1,
@@ -431,6 +436,10 @@
                 if (followBox.checked && !shape) notifySoon();
             });
 
+            // Never repaint the cards in the middle of a gesture: a new drag or zoom
+            // cancels the pending update, and the one after it settles is enough.
+            map.on('movestart zoomstart', () => clearTimeout(changeTimer));
+
             map.on('mousedown', onRadiusStart);
             map.on('click', onPolygonClick);
             map.on('mousemove', onPolygonMove);
@@ -502,7 +511,7 @@
             isOpen: () => open,
             /** True once the map exists, i.e. dots can be drawn and a filter can apply. */
             isReady: () => !!map,
-            /** items: [{ id, lat, lng, color, title, subtitle, meta }] */
+            /** items: [{ id, lat, lng, color, title, subtitle, meta, onTop }] */
             setItems(next) {
                 items = next || [];
                 itemsById = new Map(items.map(item => [item.id, item]));

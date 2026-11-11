@@ -433,6 +433,9 @@
         .load-more-btn:hover { border-color: var(--brand-gold); color: var(--brand-gold-dark); }
 
         .property-card {
+            /* Cards below the fold are not laid out or painted until scrolled near. */
+            content-visibility: auto;
+            contain-intrinsic-size: auto 820px;
             background: var(--surface); border-radius: 8px; overflow: hidden;
             transition: all 0.3s; border: 1px solid var(--border);
             box-shadow: var(--shadow);
@@ -1766,6 +1769,8 @@
             if (!camdenDataCache || !Array.isArray(camdenDataCache.cases)) return;
             const c = camdenDataCache.cases.find(x => x.instrumentNumber === instrumentNumber);
             if (c) Object.assign(c, patch);
+            // Repaint the dot when a tag is saved (here or in another tab).
+            if (patch && patch.userTags) setTimeout(() => { if (camdenMap.isOpen()) applyCamdenMap(camdenMapSource); }, 0);
         }
 
         // Notes and tags are saved on the server, so a tab that loads later sees them. This keeps
@@ -1821,6 +1826,13 @@
         // court case reads CLOSED, or the sheriff sale has already run (writ returned).
         const MAP_COLORS = { MORTGAGE: '#F28C28', TAX_LIEN: '#D62828', inactive: 'muted' };
         const mapCaseId = c => String(c.instrumentNumber || '').replace(/[^\w.\-]/g, '');
+        // A tag the user put on a property outranks its case type on the map.
+        const MAP_TAG_COLORS = [['PURSUE', '#16A34A'], ['PASS', '#7F1D1D'], ['VISITED', '#2563EB']];
+        function mapTagColor(tags) {
+            const set = new Set((tags || []).map(t => String(t).toUpperCase()));
+            const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));
+            return hit ? hit[1] : null;
+        }
         const camdenMap = CaseMap.create({
             mount: document.getElementById('camdenMapMount'),
             storageKey: TRACK_VIEW ? 'camdenTrackMap' : 'camdenMap',
@@ -1828,7 +1840,10 @@
             legend: [
                 { color: MAP_COLORS.MORTGAGE, label: 'Mortgage' },
                 { color: MAP_COLORS.TAX_LIEN, label: 'Tax lien' },
-                { color: MAP_COLORS.inactive, label: 'Closed, sheriff sale run, or other' }
+                { color: MAP_COLORS.inactive, label: 'Closed, sheriff sale run, or other' },
+                { color: MAP_TAG_COLORS[2][1], label: 'Visited' },
+                { color: MAP_TAG_COLORS[0][1], label: 'Pursue' },
+                { color: MAP_TAG_COLORS[1][1], label: 'Pass' }
             ],
             onChange: onCamdenMapChange,
             onSelect: pinCardForCase
@@ -1843,7 +1858,8 @@
                 id: mapCaseId(c),
                 lat: ll[0],
                 lng: ll[1],
-                color: (closed || saleRun) ? MAP_COLORS.inactive : (MAP_COLORS[c.plaintiffType] || MAP_COLORS.inactive),
+                onTop: !!mapTagColor(c.userTags),
+                color: mapTagColor(c.userTags) || ((closed || saleRun) ? MAP_COLORS.inactive : (MAP_COLORS[c.plaintiffType] || MAP_COLORS.inactive)),
                 title: c.propertyAddress || 'Address pending',
                 subtitle: [c.uspsTown || c.town, 'NJ'].filter(Boolean).join(', '),
                 meta: [
@@ -1901,6 +1917,7 @@
             // While a search is overriding the map the cards do not depend on it, so
             // only the dots and the summary need refreshing.
             if (camdenSearchOverridesMap && camdenMap.isOpen() && camdenMapSource.length) applyCamdenMap(camdenMapSource);
+            else if (camdenRenderContext) renderCamdenCards(camdenMapSource, { fromMap: true });
             else loadData(false);
         }
 
@@ -1908,7 +1925,7 @@
         // otherwise just redraw the dots, so a background lookup never resets scrolling.
         function refreshCamdenMapDots() {
             if (!camdenDataCache) return;
-            if (camdenMap.getFilter() && !camdenSearchOverridesMap) loadData(false);
+            if (camdenMap.getFilter() && !camdenSearchOverridesMap && camdenRenderContext) renderCamdenCards(camdenMapSource, { fromMap: true });
             else applyCamdenMap(camdenMapSource);
         }
 
@@ -2029,7 +2046,51 @@
         let camdenRenderCursor = 0;
         let camdenLoadMoreObserver = null;
 
-        function renderNextCasePage() {
+        // The last step of every refresh, and the whole of a map move: apply the map
+        // to the cards the other filters let through, sort, update the counts, paint.
+        // A map move (fromMap) skips the repaint when the same cards come out, and
+        // paints a short first page; the rest load as the page is scrolled.
+        const CAMDEN_MAP_PAGE_SIZE = 12;
+        let camdenRenderContext = null;
+        let camdenRenderedKey = null;
+        function renderCamdenCards(source, { fromMap = false } = {}) {
+            const grid = document.getElementById('casesGrid');
+            if (!grid || !camdenRenderContext) return;
+            camdenMapSource = source;
+            let cases = applyCamdenMap(source);
+            const mapFiltering = cases !== source;
+            cases = sortCases(cases, document.getElementById('sortBy').value);
+
+            document.getElementById('totalCases').textContent = cases.length;
+            document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
+            document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
+            document.getElementById('caseCount').textContent = `(${cases.length})`;
+
+            if (cases.length === 0) {
+                camdenRenderedKey = null;
+                grid.innerHTML = `<div class="no-results"><p>${mapFiltering && source.length
+                    ? 'No cases in this part of the map. Move or zoom the map, clear the shape, or click Reset view.'
+                    : camdenRenderContext.emptyMessage}</p></div>`;
+                return;
+            }
+
+            const list = withPinnedFirst(cases);
+            const key = list.map(mapCaseId).join(',');
+            if (fromMap && key === camdenRenderedKey) return;
+            camdenRenderedKey = key;
+
+            // Paint in pages (see renderNextCasePage) so large result sets
+            // don't lock the browser. The full filtered/sorted list is held
+            // in camdenRenderState; only a slice is in the DOM at a time.
+            if (camdenLoadMoreObserver) camdenLoadMoreObserver.disconnect();
+            camdenRenderState = { cases: list, addressCounts: camdenRenderContext.addressCounts, sheriffKeys: camdenRenderContext.sheriffKeys };
+            camdenRenderCursor = 0;
+            grid.innerHTML = '';
+            renderNextCasePage(fromMap ? CAMDEN_MAP_PAGE_SIZE : CAMDEN_PAGE_SIZE);
+            markPinnedCard();
+        }
+
+        function renderNextCasePage(pageSize) {
             const grid = document.getElementById('casesGrid');
             if (!grid || !camdenRenderState) return;
             const { cases, addressCounts, sheriffKeys } = camdenRenderState;
@@ -2037,7 +2098,7 @@
             const existingSentinel = document.getElementById('casesLoadMore');
             if (existingSentinel) existingSentinel.remove();
 
-            const end = Math.min(camdenRenderCursor + CAMDEN_PAGE_SIZE, cases.length);
+            const end = Math.min(camdenRenderCursor + (pageSize > 0 ? pageSize : CAMDEN_PAGE_SIZE), cases.length);
             const html = cases.slice(camdenRenderCursor, end).map(c => {
                 const key = getAddressRepeatKey(c);
                 const repeatCount = key ? (addressCounts.get(key) || 1) : 1;
@@ -2174,31 +2235,12 @@
                 // overrides that: it finds a property wherever the map happens to be.
                 camdenSearchOverridesMap = searchTerms.length > 0;
                 if (forceRefresh) camdenCoordsRequested = false;
-                camdenMapSource = cases;
-                cases = applyCamdenMap(cases);
-                const mapFiltering = cases !== camdenMapSource;
-
-                cases = sortCases(cases, sortBy);
-
-                // Stats (from unfiltered data for totals)
-                document.getElementById('totalCases').textContent = cases.length;
-                document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
-                document.getElementById('taxLienCount').textContent = cases.filter(c => c.plaintiffType === 'TAX_LIEN').length;
+                // Stats that do not depend on the map
                 document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
                 document.getElementById('reinstatedCount').textContent = allCases.filter(c => c.courtStatus === 'REINSTATED').length || '-';
                 document.getElementById('closedCount').textContent = allCases.filter(c => c.courtStatus === 'CLOSED').length || '-';
                 document.getElementById('stayCount').textContent = allCases.filter(c => c.courtStatus === 'STAY').length || '-';
                 document.getElementById('recheckCount').textContent = allCases.filter(c => c.courtStatus === 'RECHECK').length || '-';
-                document.getElementById('caseCount').textContent = `(${cases.length})`;
-
-                if (cases.length === 0) {
-                    grid.innerHTML = mapFiltering && camdenMapSource.length
-                        ? '<div class="no-results"><p>No cases in this part of the map. Move or zoom the map, clear the shape, or click Reset view.</p></div>'
-                        : TRACK_VIEW
-                        ? '<div class="no-results"><p>' + (allCases.length ? 'No tracked cards match these filters.' : 'No tracked cards yet. Mark a card TRACK on the Camden Pipeline tab and it shows up here.') + '</p></div>'
-                        : '<div class="no-results"><p>No cases found. Upload a CSV to get started.</p></div>';
-                    return;
-                }
 
                 const addressCounts = new Map();
                 for (const c of allCases) {
@@ -2207,16 +2249,14 @@
                     addressCounts.set(key, (addressCounts.get(key) || 0) + 1);
                 }
                 const sheriffKeys = await getCamdenSheriffAddressKeys();
-
-                // Paint in pages (see renderNextCasePage) so large result sets
-                // don't lock the browser. The full filtered/sorted list is held
-                // in camdenRenderState; only a slice is in the DOM at a time.
-                if (camdenLoadMoreObserver) camdenLoadMoreObserver.disconnect();
-                camdenRenderState = { cases: withPinnedFirst(cases), addressCounts, sheriffKeys };
-                camdenRenderCursor = 0;
-                grid.innerHTML = '';
-                renderNextCasePage();
-                markPinnedCard();
+                camdenRenderContext = {
+                    addressCounts,
+                    sheriffKeys,
+                    emptyMessage: TRACK_VIEW
+                        ? (allCases.length ? 'No tracked cards match these filters.' : 'No tracked cards yet. Mark a card TRACK on the Camden Pipeline tab and it shows up here.')
+                        : 'No cases found. Upload a CSV to get started.'
+                };
+                renderCamdenCards(cases);
             } catch (e) {
                 grid.innerHTML = `<div class="no-results"><p>Error: ${e.message}</p></div>`;
             }

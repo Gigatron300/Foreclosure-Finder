@@ -342,6 +342,9 @@
             gap: 20px;
         }
         .property-card {
+            /* Cards below the fold are not laid out or painted until scrolled near. */
+            content-visibility: auto;
+            contain-intrinsic-size: auto 760px;
             background: var(--surface);
             border: 1px solid var(--border);
             box-shadow: var(--shadow);
@@ -1341,7 +1344,7 @@
             </div>
 
             <div class="filter-dropdown-group" style="min-width: 190px;">
-                <button type="button" id="repeatDefendantFilterButton" class="filter-dropdown-button" onclick="toggleFilterDropdown('repeatDefendantFilterDropdown', event)" title="Defendants with more than one case, open or closed. Pick one to see all of their properties, or show every repeat defendant at once.">All defendants</button>
+                <button type="button" id="repeatDefendantFilterButton" class="filter-dropdown-button" onclick="renderRepeatDefendantOptions(); toggleFilterDropdown('repeatDefendantFilterDropdown', event)" title="Defendants with more than one case, open or closed. Pick one to see all of their properties, or show every repeat defendant at once.">All defendants</button>
                 <div id="repeatDefendantFilterDropdown" class="filter-dropdown-panel repeat-defendant-panel">
                     <div class="filter-dropdown-actions">
                         <input type="search" id="repeatDefendantSearch" class="filter-dropdown-search" placeholder="Find a defendant..." oninput="renderRepeatDefendantOptions()" autocomplete="off">
@@ -1446,6 +1449,7 @@
 
         // Keep the in-memory cards in step so a repaint (e.g. after a payoff save) shows the edit.
         function patchMemberCases(caseNumbers, patch) {
+            if (patch && patch.userTags) setTimeout(() => { if (montcoMap.isOpen()) applyMontcoMap(montcoMapSource); }, 0);
             const set = new Set(caseNumbers);
             for (const c of ((montcoDataCache && montcoDataCache.cases) || [])) {
                 if (!set.has(c.caseNumber)) continue;
@@ -1672,16 +1676,14 @@
                 repeatDefendantList = [...montcoDefendantGroups.values()]
                     .filter(g => g.totalCases > 1)
                     .sort((a, b) => (b.totalCases - a.totalCases) || (b.openCases - a.openCases) || a.name.localeCompare(b.name));
-                renderRepeatDefendantOptions();
             }
+            const panel = document.getElementById('repeatDefendantFilterDropdown');
+            if (panel && panel.classList.contains('open')) renderRepeatDefendantOptions();
             const button = document.getElementById('repeatDefendantFilterButton');
             if (!button) return;
             const focused = defendantFocus && montcoDefendantGroups.get(defendantFocus);
             button.textContent = focused ? focused.name : repeatDefendantsOnly ? 'Every repeat defendant' : 'All defendants';
             button.classList.toggle('is-active', !!focused || repeatDefendantsOnly);
-            document.querySelectorAll('#repeatDefendantOptions input').forEach(input => {
-                input.checked = input.value === (focused ? focused.key : repeatDefendantsOnly ? '__all__' : '');
-            });
         }
 
         function renderRepeatDefendantOptions() {
@@ -1697,7 +1699,11 @@
                 html += row('__all__', 'Every repeat defendant', `${repeatDefendantList.length}`);
                 html += '<div class="opt-divider"></div>';
             }
-            html += matches.map(g => row(g.key, g.name, repeatDefendantCounts(g))).join('');
+            // A long list is slow to build and no use to scroll: show the top of it and
+            // let the search box reach the rest.
+            const LIMIT = 100;
+            html += matches.slice(0, LIMIT).map(g => row(g.key, g.name, repeatDefendantCounts(g))).join('');
+            if (matches.length > LIMIT) html += `<div class="filter-dropdown-empty">${matches.length - LIMIT} more. Type a name above to find them.</div>`;
             if (!matches.length) html += `<div class="filter-dropdown-empty">${repeatDefendantList.length ? 'No repeat defendant matches that.' : 'No repeat defendants.'}</div>`;
             box.innerHTML = html;
         }
@@ -2430,7 +2436,49 @@
         let montcoRenderCursor = 0;
         let montcoLoadMoreObserver = null;
 
-        function renderNextCasePage() {
+        // The last step of every refresh, and the whole of a map move: apply the map
+        // to the cards the other filters let through, update the counts, paint.
+        // A map move (fromMap) skips the repaint when the same cards come out, and
+        // paints a short first page; the rest load as the page is scrolled.
+        const MONTCO_MAP_PAGE_SIZE = 12;
+        let montcoEmptyMessage = '';
+        let montcoRenderedKey = null;
+        function renderMontcoCards(source, { fromMap = false } = {}) {
+            const grid = document.getElementById('casesGrid');
+            if (!grid) return;
+            montcoMapSource = source;
+            const visibleCases = applyMontcoMap(source);
+            const mapFiltering = visibleCases !== source;
+
+            const visibleCaseCount = visibleCases.reduce((sum, c) => sum + (c._stackSize || 1), 0);
+            document.getElementById('totalCases').textContent = `${visibleCases.length} (${visibleCaseCount} cases)`;
+            document.getElementById('caseCount').textContent = `(${visibleCases.length})`;
+
+            if (visibleCases.length === 0) {
+                montcoRenderedKey = null;
+                grid.innerHTML = `<div class="no-results"><p>${mapFiltering && source.length
+                    ? 'No properties in this part of the map. Move or zoom the map, clear the shape, or click Reset view.'
+                    : montcoEmptyMessage}</p></div>`;
+                return;
+            }
+
+            const list = withPinnedFirst(visibleCases);
+            const key = list.map(c => c.caseNumber).join(',');
+            if (fromMap && key === montcoRenderedKey) return;
+            montcoRenderedKey = key;
+
+            // Paint in pages (see renderNextCasePage) so large result sets don't lock
+            // the browser. The full filtered/sorted list is held in montcoRenderState;
+            // only a slice is in the DOM at a time.
+            if (montcoLoadMoreObserver) montcoLoadMoreObserver.disconnect();
+            montcoRenderState = { cases: list };
+            montcoRenderCursor = 0;
+            grid.innerHTML = '';
+            renderNextCasePage(fromMap ? MONTCO_MAP_PAGE_SIZE : MONTCO_PAGE_SIZE);
+            markPinnedCard();
+        }
+
+        function renderNextCasePage(pageSize) {
             const grid = document.getElementById('casesGrid');
             if (!grid || !montcoRenderState) return;
             const { cases } = montcoRenderState;
@@ -2438,7 +2486,7 @@
             const existingSentinel = document.getElementById('casesLoadMore');
             if (existingSentinel) existingSentinel.remove();
 
-            const end = Math.min(montcoRenderCursor + MONTCO_PAGE_SIZE, cases.length);
+            const end = Math.min(montcoRenderCursor + (pageSize > 0 ? pageSize : MONTCO_PAGE_SIZE), cases.length);
             const html = cases.slice(montcoRenderCursor, end).map(c => createPropertyCard(c)).join('');
             grid.insertAdjacentHTML('beforeend', html);
             montcoRenderCursor = end;
@@ -2537,6 +2585,13 @@
         // Grey means it is no longer a live lead: every case on the parcel reads CLOSED,
         // or a sheriff's deed is on record (already sold at sheriff sale).
         const MAP_COLORS = { mortgage: '#F28C28', lien: '#D62828', inactive: 'muted' };
+        // A tag the user put on a property outranks its case type on the map.
+        const MAP_TAG_COLORS = [['PURSUE', '#16A34A'], ['PASS', '#7F1D1D'], ['VISITED', '#2563EB']];
+        function mapTagColor(tags) {
+            const set = new Set((tags || []).map(t => String(t).toUpperCase()));
+            const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));
+            return hit ? hit[1] : null;
+        }
         const montcoMap = CaseMap.create({
             mount: document.getElementById('montcoMapMount'),
             storageKey: TRACK_VIEW ? 'montcoTrackMap' : 'montcoMap',
@@ -2544,7 +2599,10 @@
             legend: [
                 { color: MAP_COLORS.mortgage, label: 'Mortgage' },
                 { color: MAP_COLORS.lien, label: 'Lien' },
-                { color: MAP_COLORS.inactive, label: 'Closed, sold at sheriff sale, or other' }
+                { color: MAP_COLORS.inactive, label: 'Closed, sold at sheriff sale, or other' },
+                { color: MAP_TAG_COLORS[2][1], label: 'Visited' },
+                { color: MAP_TAG_COLORS[0][1], label: 'Pursue' },
+                { color: MAP_TAG_COLORS[1][1], label: 'Pass' }
             ],
             onChange: onMontcoMapChange,
             onSelect: pinCardForCase
@@ -2569,10 +2627,12 @@
                 id: g.caseNumber,
                 lat: ll[0],
                 lng: ll[1],
-                color: (allClosed || sold) ? MAP_COLORS.inactive
+                onTop: !!mapTagColor(members.flatMap(m => m.userTags || [])),
+                color: mapTagColor(members.flatMap(m => m.userTags || []))
+                    || ((allClosed || sold) ? MAP_COLORS.inactive
                     : members.some(m => m.caseTypeKind === 'mortgage') ? MAP_COLORS.mortgage
                     : members.some(m => m.caseTypeKind === 'lien') ? MAP_COLORS.lien
-                    : MAP_COLORS.inactive,
+                    : MAP_COLORS.inactive),
                 title: g.propertyAddress || 'Address not available',
                 subtitle: [g.propertyCity, [g.propertyState || 'PA', g.propertyZip].filter(Boolean).join(' ')].filter(Boolean).join(', '),
                 meta: [
@@ -2631,14 +2691,14 @@
             // While a search is overriding the map the cards do not depend on it, so
             // only the dots and the summary need refreshing.
             if (montcoSearchOverridesMap && montcoMap.isOpen() && montcoMapSource.length) applyMontcoMap(montcoMapSource);
-            else loadData();
+            else renderMontcoCards(montcoMapSource, { fromMap: true });
         }
 
         // New coordinates arrived. Only repaint the cards if the map is narrowing them;
         // otherwise just redraw the dots, so a background lookup never resets scrolling.
         function refreshMontcoMapDots() {
             if (!montcoDataCache) return;
-            if (montcoMap.getFilter() && !montcoSearchOverridesMap) loadData();
+            if (montcoMap.getFilter() && !montcoSearchOverridesMap) renderMontcoCards(montcoMapSource, { fromMap: true });
             else applyMontcoMap(montcoMapSource);
         }
 
@@ -2686,6 +2746,7 @@
 
         // Moves the pinned property to the front of the list about to be rendered.
         function withPinnedFirst(groups) {
+            for (const g of groups) g._mapPinned = false;
             if (!montcoPinnedCase) return groups;
             const index = groups.findIndex(g => (g._stackMembers || [g]).some(m => m.caseNumber === montcoPinnedCase));
             if (index < 0) return groups;
@@ -2900,38 +2961,18 @@
                 // overrides that: it finds a property wherever the map happens to be.
                 montcoSearchOverridesMap = searchTerms.length > 0 || !!defendantFocus;
                 if (forceRefresh) montcoCoordsRequested = false;
-                montcoMapSource = visibleCases;
-                visibleCases = applyMontcoMap(visibleCases);
-                const mapFiltering = visibleCases !== montcoMapSource;
+                montcoEmptyMessage = searchTerms.length
+                    ? 'No properties match your search.'
+                    : 'No properties found. Upload a CSV and click "Process Pipeline Data" to get started.';
 
-                // Update stats (before filtering for sweet spot only)
+                // Stats that do not depend on the map
                 const allCases = data.cases || [];
-                const visibleCaseCount = visibleCases.reduce((sum, c) => sum + (c._stackSize || 1), 0);
-                document.getElementById('totalCases').textContent = `${visibleCases.length} (${visibleCaseCount} cases)`;
                 document.getElementById('withAddress').textContent = cases.filter(c => c.propertyAddress).length;
                 document.getElementById('sweetSpotCount').textContent = allCases.filter(c => c.inSweetSpot).length;
                 const avgMonths = cases.length > 0 ? Math.round(cases.reduce((sum, c) => sum + (c.monthsOpen || Math.round((c.daysOpen || 0) / 30)), 0) / cases.length) : 0;
                 document.getElementById('avgMonths').textContent = avgMonths;
-                document.getElementById('caseCount').textContent = `(${visibleCases.length})`;
 
-                if (visibleCases.length === 0) {
-                    grid.innerHTML = mapFiltering && montcoMapSource.length
-                        ? '<div class="no-results"><p>No properties in this part of the map. Move or zoom the map, clear the shape, or click Reset view.</p></div>'
-                        : searchTerms.length
-                        ? '<div class="no-results"><p>No properties match your search.</p></div>'
-                        : '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
-                    return;
-                }
-
-                // Paint in pages (see renderNextCasePage) so large result sets don't lock
-                // the browser. The full filtered/sorted list is held in montcoRenderState;
-                // only a slice is in the DOM at a time.
-                if (montcoLoadMoreObserver) montcoLoadMoreObserver.disconnect();
-                montcoRenderState = { cases: withPinnedFirst(visibleCases) };
-                montcoRenderCursor = 0;
-                grid.innerHTML = '';
-                renderNextCasePage();
-                markPinnedCard();
+                renderMontcoCards(visibleCases);
             } catch (error) {
                 if (loadSequence !== montcoLoadSequence) return;
                 grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;
