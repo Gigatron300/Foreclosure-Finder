@@ -2623,7 +2623,7 @@
         const MAP_COLORS = { mortgage: '#F28C28', lien: '#D62828', inactive: 'muted' };
         // A tag the user put on a property outranks its case type on the map.
         // First match wins: a visited property shows as visited whatever else it is tagged.
-        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', '#7F1D1D']];
+        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', 'ink']];   // 'ink' = black, or near-white in the dark theme so it stays visible
         function mapTagColor(tags) {
             const set = new Set((tags || []).map(t => String(t).toUpperCase()));
             const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));

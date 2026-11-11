@@ -138,7 +138,7 @@
         for (const entry of opts.legend || []) {
             const item = document.createElement('span');
             const dot = document.createElement('i');
-            dot.style.background = cssColor(entry.color);
+            dot.style.background = String(entry.color).startsWith('#') ? entry.color : `var(--${entry.color})`;
             item.append(dot, entry.label);
             legend.appendChild(item);
         }
