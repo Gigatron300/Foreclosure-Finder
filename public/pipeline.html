@@ -1332,7 +1332,7 @@
             </div>
         </div>
 
-        <!-- Collapsible map (case-map.js). Panning, zooming or drawing a radius filters the cards. -->
+        <!-- Collapsible map (case-map.js). Panning, zooming, or drawing a radius or area filters the cards; a search overrides it. -->
         <div id="montcoMapMount"></div>
 
         <div class="results-header">
@@ -2297,6 +2297,7 @@
         let montcoCoordsStatus = null;
         let montcoCoordsTimer = null;
         let montcoMapSource = [];   // cards after every filter except the map
+        let montcoSearchOverridesMap = false;   // a search is active, so the map does not narrow the cards
 
         // Dots are coloured by case type. A parcel with both kinds shows as a mortgage.
         // Grey means it is no longer a live lead: every case on the parcel reads CLOSED,
@@ -2368,15 +2369,17 @@
             }
             montcoMap.setItems(items);
 
-            const filter = montcoMap.getFilter();
+            const filter = montcoSearchOverridesMap ? null : montcoMap.getFilter();
             const shown = filter ? groups.filter(g => g._ll && filter(g._ll[0], g._ll[1])) : groups;
+            const filterLabel = { radius: 'radius', area: 'drawn area', view: 'map area' }[montcoMap.filterKind()];
 
             const parts = [];
             const st = montcoCoordsStatus;
             if (!st) parts.push('Loading locations\u2026');
             else {
                 parts.push(`${items.length} of ${groups.length} properties on the map`);
-                if (filter) parts.push(`showing the ${shown.length} inside the ${montcoMap.filterKind() === 'radius' ? 'radius' : 'map area'}`);
+                if (filter) parts.push(`showing the ${shown.length} inside the ${filterLabel}`);
+                else if (montcoSearchOverridesMap && montcoMap.getFilter()) parts.push(`searching everywhere, not just the ${filterLabel}`);
                 if (st.running) parts.push(`locating properties${st.total ? ` (${st.done} of ${st.total})` : ''}\u2026`);
                 else if (st.error && st.pending) parts.push('some locations could not be looked up yet; retrying shortly');
                 else if (unlocated) parts.push(`${unlocated} could not be placed${filter ? ' and are hidden while the map filters' : ''}`);
@@ -2385,16 +2388,20 @@
             return filter ? shown : groups;
         }
 
-        // The map's view / radius changed, or the panel opened or closed.
+        // The map's view or drawn shape changed, or the panel opened or closed.
         function onMontcoMapChange() {
-            if (montcoDataCache) loadData();
+            if (!montcoDataCache) return;
+            // While a search is overriding the map the cards do not depend on it, so
+            // only the dots and the summary need refreshing.
+            if (montcoSearchOverridesMap && montcoMap.isOpen() && montcoMapSource.length) applyMontcoMap(montcoMapSource);
+            else loadData();
         }
 
         // New coordinates arrived. Only repaint the cards if the map is narrowing them;
         // otherwise just redraw the dots, so a background lookup never resets scrolling.
         function refreshMontcoMapDots() {
             if (!montcoDataCache) return;
-            if (montcoMap.getFilter()) loadData();
+            if (montcoMap.getFilter() && !montcoSearchOverridesMap) loadData();
             else applyMontcoMap(montcoMapSource);
         }
 
@@ -2629,8 +2636,10 @@
                     visibleCases = visibleCases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
 
-                // Map last: its dots are everything the filters above let through, and
-                // its view / radius then narrows the cards.
+                // Map last: its dots are everything the filters above let through, and its
+                // view (or a radius / area drawn on it) then narrows the cards. A search
+                // overrides that: it finds a property wherever the map happens to be.
+                montcoSearchOverridesMap = searchTerms.length > 0;
                 if (forceRefresh) montcoCoordsRequested = false;
                 montcoMapSource = visibleCases;
                 visibleCases = applyMontcoMap(visibleCases);
@@ -2648,7 +2657,7 @@
 
                 if (visibleCases.length === 0) {
                     grid.innerHTML = mapFiltering && montcoMapSource.length
-                        ? '<div class="no-results"><p>No properties in this part of the map. Zoom out, move the map, or click Reset view.</p></div>'
+                        ? '<div class="no-results"><p>No properties in this part of the map. Move or zoom the map, clear the shape, or click Reset view.</p></div>'
                         : searchTerms.length
                         ? '<div class="no-results"><p>No properties match your search.</p></div>'
                         : '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';

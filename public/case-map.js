@@ -1,9 +1,9 @@
 // Collapsible property map shared by the pipeline pages.
 //
 // The page hands it the properties that pass its other filters (setItems) and
-// asks it for a location filter (getFilter) to apply to the cards. The map calls
-// onChange whenever that filter changes: the user pans or zooms, draws a radius,
-// or opens / closes the panel.
+// asks it for a location filter (getFilter) to apply to the cards: a shape the user
+// drew (a radius or a free-form area), or else the area the map is showing once the
+// user has panned or zoomed. The map calls onChange whenever that filter changes.
 //
 // Leaflet and the map tiles are only downloaded the first time the panel opens.
 (function () {
@@ -88,7 +88,7 @@
      *   storageKey   localStorage prefix for the open / closed state
      *   defaultView  { center: [lat, lng], zoom } used when nothing is plotted
      *   legend       [{ color: '#F28C28', label: 'Mortgage' }]  (hex, or a CSS variable name)
-     *   onChange()   the location filter changed; re-filter the cards
+     *   onChange()   the location filter changed (view, shape, panel opened / closed); re-filter the cards
      *   onSelect(id) a dot was clicked
      */
     function create(opts) {
@@ -107,12 +107,13 @@
             <div class="case-map-body">
                 <div class="case-map-toolbar">
                     <label title="Show only the properties inside the area the map is showing"><input type="checkbox" data-role="follow" checked> Cards follow the map</label>
-                    <button type="button" class="case-map-btn" data-role="draw" title="Click the map for a 1 mile circle, or click and drag to size your own">Draw radius</button>
+                    <button type="button" class="case-map-btn" data-role="drawRadius" title="Show only the properties inside a circle. Click the map for a 1 mile circle, or click and drag to size your own.">Draw radius</button>
+                    <button type="button" class="case-map-btn" data-role="drawArea" title="Show only the properties inside an area you outline. Click each corner, then double-click (or click the first corner again) to finish.">Draw area</button>
                     <span class="case-map-radius" data-role="radiusBox" hidden>
                         <input type="number" data-role="miles" min="0.05" step="0.25" aria-label="Radius in miles"> mi
-                        <button type="button" class="case-map-btn" data-role="clear">Clear radius</button>
                     </span>
-                    <button type="button" class="case-map-btn" data-role="reset" title="Zoom back out to every property and stop filtering by map area">Reset view</button>
+                    <button type="button" class="case-map-btn" data-role="clear" title="Remove the radius or area and show every property again" hidden>Clear shape</button>
+                    <button type="button" class="case-map-btn" data-role="reset" title="Zoom back out to every property, remove any radius or area, and stop filtering by map area">Reset view</button>
                     <span class="case-map-legend"></span>
                 </div>
                 <div class="case-map-canvas"></div>
@@ -125,7 +126,9 @@
         const canvas = panel.querySelector('.case-map-canvas');
         const legend = panel.querySelector('.case-map-legend');
         const followBox = el('follow');
-        const drawBtn = el('draw');
+        const radiusBtn = el('drawRadius');
+        const areaBtn = el('drawArea');
+        const clearBtn = el('clear');
         const radiusBox = el('radiusBox');
         const milesInput = el('miles');
 
@@ -143,8 +146,13 @@
         let dotLayer = null;
         let dotRenderer = null;
         let highlightMarker = null;
-        let radiusCircle = null;
-        let radius = null;          // { center: LatLng, meters }
+        // A drawn shape filters the cards and takes over from the map's view:
+        //   { kind: 'radius', center: LatLng, meters }  or  { kind: 'polygon', points: [[lat, lng], ...] }
+        let shape = null;
+        let shapeLayer = null;
+        let drawMode = null;        // 'radius' | 'polygon' while the user is drawing
+        let draft = null;           // polygon in progress: { points, line, band }
+        let lastDrawEnd = 0;
         let userMoved = false;      // the user has panned / zoomed since the last fit
         let baseline = null;        // view the map itself last set (fit, resize)
         let selfMoving = false;
@@ -152,7 +160,7 @@
         let itemsById = new Map();
         let drawnSignature = null;
         let fittedSignature = null;
-        let drawing = false;
+
         let changeTimer = null;
 
         const notify = () => { if (opts.onChange) opts.onChange(); };
@@ -196,34 +204,45 @@
             return true;
         }
 
+        // A drawn shape wins. Without one, the cards follow the area in view, but only
+        // once the user has moved the map: just opening the panel filters nothing.
         function currentFilter() {
             if (!open || !map) return null;
-            if (radius) {
-                const { center, meters } = radius;
-                return (lat, lng) => map.distance([lat, lng], center) <= meters;
-            }
-            if (followBox.checked && userMoved) {
+            if (!shape) {
+                if (!followBox.checked || !userMoved) return null;
                 const bounds = map.getBounds();
                 return (lat, lng) => bounds.contains([lat, lng]);
             }
-            return null;
+            if (shape.kind === 'radius') {
+                const { center, meters } = shape;
+                return (lat, lng) => map.distance([lat, lng], center) <= meters;
+            }
+            const points = shape.points;
+            return (lat, lng) => {
+                let inside = false;
+                for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+                    const [latI, lngI] = points[i];
+                    const [latJ, lngJ] = points[j];
+                    if ((latI > lat) !== (latJ > lat) && lng < (lngJ - lngI) * (lat - latI) / (latJ - latI) + lngI) inside = !inside;
+                }
+                return inside;
+            };
         }
 
         function draw(force) {
             if (!map) return;
-            const radiusKey = radius ? `${radius.center.lat},${radius.center.lng},${radius.meters}` : '';
             const itemKey = items.map(item => `${item.id}:${item.color}`).join('|');
-            const signature = itemKey + '#' + radiusKey;
+            const signature = itemKey + '#' + (shape ? JSON.stringify(shape) : '');
             if (!force && signature === drawnSignature) return;
             drawnSignature = signature;
 
             dotLayer.clearLayers();
             const stroke = cssColor('surface');
-            const inRadius = radius ? currentFilter() : null;
+            const inShape = shape ? currentFilter() : null;
             const colors = {};
             for (const item of items) {
                 const fill = colors[item.color] || (colors[item.color] = cssColor(item.color));
-                const dimmed = inRadius && !inRadius(item.lat, item.lng);
+                const dimmed = inShape && !inShape(item.lat, item.lng);
                 const marker = L.circleMarker([item.lat, item.lng], {
                     renderer: dotRenderer,
                     radius: 5.5,
@@ -239,13 +258,14 @@
 
             // Until the user takes over the view, keep everything that is plotted in frame
             // (so picking a town in the filters zooms the map to that town).
-            if (!userMoved && !radius && itemKey !== fittedSignature) {
+            if (!userMoved && !shape && itemKey !== fittedSignature) {
                 if (fitToItems()) fittedSignature = itemKey;
             }
         }
 
         function showPopup(item) {
-            if (drawing) return;
+            // A click that places or finishes a shape must not also open the dot under it.
+            if (drawMode || Date.now() - lastDrawEnd < 400) return;
             const box = document.createElement('div');
             const add = (className, text) => {
                 if (!text) return;
@@ -261,38 +281,48 @@
             if (opts.onSelect) opts.onSelect(item.id);
         }
 
-        function setRadius(center, meters) {
-            radius = { center, meters };
-            if (!radiusCircle) {
-                radiusCircle = L.circle(center, {
-                    radius: meters, color: cssColor('brand-gold'), weight: 2,
-                    fillColor: cssColor('brand-gold'), fillOpacity: 0.08, interactive: false
-                }).addTo(map);
-            } else {
-                radiusCircle.setLatLng(center).setRadius(meters);
+        function setShape(next) {
+            shape = next;
+            if (shapeLayer) { shapeLayer.remove(); shapeLayer = null; }
+            if (shape) {
+                const gold = cssColor('brand-gold');
+                const style = { color: gold, weight: 2, fillColor: gold, fillOpacity: 0.08, interactive: false };
+                shapeLayer = (shape.kind === 'radius'
+                    ? L.circle(shape.center, { radius: shape.meters, ...style })
+                    : L.polygon(shape.points, style)).addTo(map);
             }
-            milesInput.value = (meters / METERS_PER_MILE).toFixed(2);
-            radiusBox.hidden = false;
+            const isRadius = !!shape && shape.kind === 'radius';
+            if (isRadius) milesInput.value = (shape.meters / METERS_PER_MILE).toFixed(2);
+            radiusBox.hidden = !isRadius;
+            clearBtn.hidden = !shape;
         }
 
-        function clearRadius() {
-            radius = null;
-            if (radiusCircle) { radiusCircle.remove(); radiusCircle = null; }
-            radiusBox.hidden = true;
+        function dropDraft() {
+            if (!draft) return;
+            draft.line.remove();
+            draft.band.remove();
+            draft = null;
         }
 
-        function setDrawing(on) {
-            drawing = on;
-            drawBtn.classList.toggle('is-active', on);
-            drawBtn.textContent = on ? 'Click or drag on the map…' : 'Draw radius';
-            canvas.classList.toggle('is-drawing', on);
+        function setDrawMode(mode) {
+            dropDraft();
+            if (drawMode && !mode) lastDrawEnd = Date.now();
+            drawMode = mode;
+            radiusBtn.classList.toggle('is-active', mode === 'radius');
+            radiusBtn.textContent = mode === 'radius' ? 'Click or drag on the map\u2026' : 'Draw radius';
+            areaBtn.classList.toggle('is-active', mode === 'polygon');
+            areaBtn.textContent = mode === 'polygon' ? 'Click corners, double-click to finish\u2026' : 'Draw area';
+            canvas.classList.toggle('is-drawing', !!mode);
             if (!map) return;
-            if (on) { map.dragging.disable(); map.closePopup(); }
-            else map.dragging.enable();
+            // A radius is dragged out, so the map must hold still; an area is clicked
+            // corner by corner, so the map can still be panned between clicks.
+            if (mode === 'radius') map.dragging.disable(); else map.dragging.enable();
+            if (mode === 'polygon') map.doubleClickZoom.disable(); else map.doubleClickZoom.enable();
+            if (mode) map.closePopup();
         }
 
-        function onDrawStart(e) {
-            if (!drawing) return;
+        function onRadiusStart(e) {
+            if (drawMode !== 'radius') return;
             if (e.originalEvent) e.originalEvent.preventDefault();
             const center = e.latlng;
             const startPoint = e.containerPoint;
@@ -302,20 +332,59 @@
                 dragged = dragged || move.containerPoint.distanceTo(startPoint) > 6;
                 if (!dragged) return;
                 meters = map.distance(center, move.latlng);
-                setRadius(center, meters);
+                setShape({ kind: 'radius', center, meters });
             };
             const onUp = () => {
                 map.off('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
                 if (!dragged) meters = DEFAULT_RADIUS_MILES * METERS_PER_MILE;
-                setRadius(center, meters);
-                setDrawing(false);
-                if (!dragged) selfMove(() => map.fitBounds(radiusCircle.getBounds().pad(0.1), { animate: false }));
+                setShape({ kind: 'radius', center, meters });
+                setDrawMode(null);
+                if (!dragged) selfMove(() => map.fitBounds(shapeLayer.getBounds().pad(0.1), { animate: false }));
                 draw(true);
                 notify();
             };
             map.on('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
+        }
+
+        function finishPolygon() {
+            if (!draft || draft.points.length < 3) return;
+            const points = draft.points.map(p => [p.lat, p.lng]);
+            setDrawMode(null);
+            setShape({ kind: 'polygon', points });
+            draw(true);
+            notify();
+        }
+
+        function onPolygonClick(e) {
+            if (drawMode !== 'polygon') return;
+            if (!draft) {
+                const gold = cssColor('brand-gold');
+                draft = {
+                    points: [],
+                    line: L.polyline([], { color: gold, weight: 2, interactive: false }).addTo(map),
+                    band: L.polyline([], { color: gold, weight: 1, dashArray: '4 4', interactive: false }).addTo(map)
+                };
+            }
+            const points = draft.points;
+            if (points.length) {
+                const here = e.containerPoint;
+                // The second click of a double-click lands on the corner just placed.
+                if (map.latLngToContainerPoint(points[points.length - 1]).distanceTo(here) < 4) return;
+                // Clicking the first corner again closes the area.
+                if (points.length >= 3 && map.latLngToContainerPoint(points[0]).distanceTo(here) < 12) { finishPolygon(); return; }
+            }
+            points.push(e.latlng);
+            draft.line.setLatLngs(points);
+        }
+
+        function onPolygonMove(e) {
+            if (!draft || !draft.points.length) return;
+            const points = draft.points;
+            draft.band.setLatLngs(points.length > 1
+                ? [points[points.length - 1], e.latlng, points[0]]
+                : [points[0], e.latlng]);
         }
 
         async function ensureMap() {
@@ -341,21 +410,24 @@
             // taken over the view, that nudge must not start filtering the cards.
             let autoPanning = false;
             map.on('autopanstart', () => { if (!userMoved) autoPanning = true; });
-
             map.on('moveend', () => {
                 if (autoPanning) { autoPanning = false; markBaseline(); return; }
                 if (selfMoving || atBaseline()) return;
                 userMoved = true;
-                if (followBox.checked && !radius) notifySoon();
+                if (followBox.checked && !shape) notifySoon();
             });
-            map.on('mousedown', onDrawStart);
+
+            map.on('mousedown', onRadiusStart);
+            map.on('click', onPolygonClick);
+            map.on('mousemove', onPolygonMove);
+            map.on('dblclick', () => { if (drawMode === 'polygon') finishPolygon(); });
 
             // Leaflet cannot see its container being shown or resized by the page
             // (sign-in reveal, panel reopened), so re-measure whenever that happens.
             new ResizeObserver(() => {
                 if (!open || !canvas.clientWidth) return;
                 selfMove(() => map.invalidateSize({ animate: false }));
-                if (!userMoved && !radius) { fittedSignature = null; drawnSignature = null; draw(false); }
+                if (!userMoved && !shape) { fittedSignature = null; drawnSignature = null; draw(false); }
             }).observe(canvas);
 
             // Dot colours come from the theme, so repaint when it switches.
@@ -373,21 +445,22 @@
                 // The container was display:none, so Leaflet has to re-measure it. Before
                 // the user has moved, also re-centre: the earlier fit used the wrong size.
                 selfMove(() => map.invalidateSize({ animate: false }));
-                if (!userMoved && !radius) { fittedSignature = null; drawnSignature = null; }
-            } else if (drawing) {
-                setDrawing(false);
+                if (!userMoved && !shape) { fittedSignature = null; drawnSignature = null; }
+            } else if (drawMode) {
+                setDrawMode(null);
             }
             notify();
         }
 
         header.addEventListener('click', () => setOpen(!open));
         followBox.addEventListener('change', notify);
-        drawBtn.addEventListener('click', () => setDrawing(!drawing));
-        el('clear').addEventListener('click', () => { clearRadius(); draw(true); notify(); });
+        radiusBtn.addEventListener('click', () => setDrawMode(drawMode === 'radius' ? null : 'radius'));
+        areaBtn.addEventListener('click', () => setDrawMode(drawMode === 'polygon' ? null : 'polygon'));
+        clearBtn.addEventListener('click', () => { setShape(null); draw(true); notify(); });
         el('reset').addEventListener('click', () => {
             if (!map) return;
-            clearRadius();
-            if (drawing) setDrawing(false);
+            setDrawMode(null);
+            setShape(null);
             userMoved = false;
             fittedSignature = null;
             drawnSignature = null;
@@ -395,13 +468,17 @@
         });
         milesInput.addEventListener('change', () => {
             const miles = parseFloat(milesInput.value);
-            if (!radius || !Number.isFinite(miles) || miles <= 0) return;
-            setRadius(radius.center, miles * METERS_PER_MILE);
-            selfMove(() => map.fitBounds(radiusCircle.getBounds().pad(0.1), { animate: false }));
+            if (!shape || shape.kind !== 'radius' || !Number.isFinite(miles) || miles <= 0) return;
+            setShape({ kind: 'radius', center: shape.center, meters: miles * METERS_PER_MILE });
+            selfMove(() => map.fitBounds(shapeLayer.getBounds().pad(0.1), { animate: false }));
             draw(true);
             notify();
         });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && drawing) setDrawing(false); });
+        document.addEventListener('keydown', (e) => {
+            if (!drawMode) return;
+            if (e.key === 'Escape') setDrawMode(null);
+            else if (e.key === 'Enter' && drawMode === 'polygon') finishPolygon();
+        });
 
         let startOpen = false;
         try { startOpen = localStorage.getItem(storageKey) === '1'; } catch (e) {}
@@ -419,7 +496,8 @@
             },
             /** null when the map is not filtering, else (lat, lng) => boolean. */
             getFilter: currentFilter,
-            filterKind: () => (currentFilter() ? (radius ? 'radius' : 'area') : null),
+            /** 'radius' | 'area' (drawn) | 'view' (what the map is showing) | null */
+            filterKind: () => (!currentFilter() ? null : !shape ? 'view' : shape.kind === 'radius' ? 'radius' : 'area'),
             setSummary(text) { summary.textContent = text || ''; },
             highlight(id) {
                 if (!map || !open) return;
