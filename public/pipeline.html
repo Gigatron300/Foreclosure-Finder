@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="/theme.js"></script>
     <script src="/nav-access.js"></script>
+    <script src="/case-map.js"></script>
     <title>Pre-Foreclosure Pipeline | Blake Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -319,6 +320,7 @@
         .stat-value { font-family: var(--serif); font-size: 2.4rem; line-height: 1.1; font-weight: 700; color: var(--brand-gold); }
         .stat-label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; }
 
+        .property-card.map-located { outline: 3px solid var(--brand-gold); outline-offset: 2px; }
         .results-header {
             display: flex;
             justify-content: space-between;
@@ -1328,6 +1330,9 @@
             </div>
         </div>
 
+        <!-- Collapsible map (case-map.js). Panning, zooming or drawing a radius filters the cards. -->
+        <div id="montcoMapMount"></div>
+
         <div class="results-header">
             <h2>Properties <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
@@ -2282,6 +2287,159 @@
             caseSearchDebounce = setTimeout(() => loadData(), 200);
         }
 
+        // ---- Map panel -------------------------------------------------------
+        // Coordinates arrive separately from the cases (/api/pipeline/coords), keyed by
+        // case number, and only once the map is first opened.
+        let montcoCoords = {};
+        let montcoCoordsRequested = false;
+        let montcoCoordsStatus = null;
+        let montcoCoordsTimer = null;
+        let montcoMapSource = [];   // cards after every filter except the map
+
+        // Dots are coloured by case type. A parcel with both kinds shows as a mortgage.
+        // Grey means it is no longer a live lead: every case on the parcel reads CLOSED,
+        // or a sheriff's deed is on record (already sold at sheriff sale).
+        const MAP_COLORS = { mortgage: '#F28C28', lien: '#D62828', inactive: 'muted' };
+        const montcoMap = CaseMap.create({
+            mount: document.getElementById('montcoMapMount'),
+            storageKey: TRACK_VIEW ? 'montcoTrackMap' : 'montcoMap',
+            defaultView: { center: [40.21, -75.37], zoom: 10 },
+            legend: [
+                { color: MAP_COLORS.mortgage, label: 'Mortgage' },
+                { color: MAP_COLORS.lien, label: 'Lien' },
+                { color: MAP_COLORS.inactive, label: 'Closed, sold at sheriff sale, or other' }
+            ],
+            onChange: onMontcoMapChange,
+            onSelect: showCardForCase
+        });
+
+        function groupCoords(g) {
+            for (const m of (g._stackMembers || [g])) {
+                const ll = montcoCoords[m.caseNumber];
+                if (ll) return ll;
+            }
+            return null;
+        }
+
+        function montcoMapItem(g, ll) {
+            const members = g._stackMembers || [g];
+            const allClosed = members.every(m => m.liveClosed);
+            const sold = members.some(m => m.payoff && m.payoff.sold);
+            const grade = String(g.leadGrade || '').toUpperCase();
+            const typeLabel = g.caseTypeKind === 'mortgage' ? 'Mortgage' : g.caseTypeKind === 'lien' ? 'Lien' : '';
+            const months = g.monthsOpen || Math.round((g.daysOpen || 0) / 30);
+            return {
+                id: g.caseNumber,
+                lat: ll[0],
+                lng: ll[1],
+                color: (allClosed || sold) ? MAP_COLORS.inactive
+                    : members.some(m => m.caseTypeKind === 'mortgage') ? MAP_COLORS.mortgage
+                    : members.some(m => m.caseTypeKind === 'lien') ? MAP_COLORS.lien
+                    : MAP_COLORS.inactive,
+                title: g.propertyAddress || 'Address not available',
+                subtitle: [g.propertyCity, [g.propertyState || 'PA', g.propertyZip].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+                meta: [
+                    typeLabel,
+                    grade ? `Grade ${grade} (${g.leadScore || 0})` : '',
+                    months ? `${months} mo` : '',
+                    members.length > 1 ? `${members.length} cases` : '',
+                    sold ? 'Sold at sheriff sale' : allClosed ? 'Closed' : ''
+                ].filter(Boolean).join(' \u00b7 ')
+            };
+        }
+
+        // Draws the dots for `groups` and returns the cards the map leaves visible:
+        // the same array when the map is not filtering, a narrowed copy when it is.
+        function applyMontcoMap(groups) {
+            if (!montcoMap.isOpen()) {
+                montcoMap.setSummary('');
+                return groups;
+            }
+            if (!montcoCoordsRequested) loadMontcoCoords();
+
+            const items = [];
+            let unlocated = 0;
+            for (const g of groups) {
+                g._ll = groupCoords(g);
+                if (g._ll) items.push(montcoMapItem(g, g._ll));
+                else unlocated++;
+            }
+            montcoMap.setItems(items);
+
+            const filter = montcoMap.getFilter();
+            const shown = filter ? groups.filter(g => g._ll && filter(g._ll[0], g._ll[1])) : groups;
+
+            const parts = [];
+            const st = montcoCoordsStatus;
+            if (!st) parts.push('Loading locations\u2026');
+            else {
+                parts.push(`${items.length} of ${groups.length} properties on the map`);
+                if (filter) parts.push(`showing the ${shown.length} inside the ${montcoMap.filterKind() === 'radius' ? 'radius' : 'map area'}`);
+                if (st.running) parts.push(`locating properties${st.total ? ` (${st.done} of ${st.total})` : ''}\u2026`);
+                else if (st.error && st.pending) parts.push('some locations could not be looked up yet; retrying shortly');
+                else if (unlocated) parts.push(`${unlocated} could not be placed${filter ? ' and are hidden while the map filters' : ''}`);
+            }
+            montcoMap.setSummary(parts.join(' \u00b7 '));
+            return filter ? shown : groups;
+        }
+
+        // The map's view / radius changed, or the panel opened or closed.
+        function onMontcoMapChange() {
+            if (montcoDataCache) loadData();
+        }
+
+        // New coordinates arrived. Only repaint the cards if the map is narrowing them;
+        // otherwise just redraw the dots, so a background lookup never resets scrolling.
+        function refreshMontcoMapDots() {
+            if (!montcoDataCache) return;
+            if (montcoMap.getFilter()) loadData();
+            else applyMontcoMap(montcoMapSource);
+        }
+
+        async function loadMontcoCoords() {
+            montcoCoordsRequested = true;
+            clearTimeout(montcoCoordsTimer);
+            try {
+                const response = await fetch('/api/pipeline/coords', { headers: { 'X-Auth-Token': authToken } });
+                if (!response.ok) throw new Error(`Coordinates request failed (${response.status})`);
+                const data = await response.json();
+                montcoCoords = data.coords || {};
+                montcoCoordsStatus = data;
+                // Poll while the server is still looking properties up; after a failed
+                // lookup it waits a minute before it will try again.
+                if (data.running) montcoCoordsTimer = setTimeout(loadMontcoCoords, 3000);
+                else if (data.error && data.pending) montcoCoordsTimer = setTimeout(loadMontcoCoords, 65000);
+            } catch (error) {
+                montcoCoordsStatus = { error: error.message, pending: 1 };
+                montcoCoordsTimer = setTimeout(loadMontcoCoords, 65000);
+            }
+            refreshMontcoMapDots();
+        }
+
+        // "Show card" in a dot's popup: page the card in if it is not rendered yet, then scroll to it.
+        function showCardForCase(caseNumber) {
+            const grid = document.getElementById('casesGrid');
+            if (!grid || !montcoRenderState) return;
+            const index = montcoRenderState.cases.findIndex(c => c.caseNumber === caseNumber);
+            if (index < 0) return;
+            while (montcoRenderCursor <= index) renderNextCasePage();
+            const card = [...grid.querySelectorAll('.property-card')].find(el => el.dataset.case === caseNumber);
+            if (!card) return;
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.add('map-located');
+            setTimeout(() => card.classList.remove('map-located'), 2200);
+        }
+
+        // Hovering a card rings its dot on the map.
+        (function () {
+            const grid = document.getElementById('casesGrid');
+            grid.addEventListener('mouseover', (e) => {
+                const card = e.target.closest('.property-card');
+                montcoMap.highlight(card ? card.dataset.case : null);
+            });
+            grid.addEventListener('mouseleave', () => montcoMap.highlight(null));
+        })();
+
         async function fetchMontcoData(forceRefresh = false) {
             if (!forceRefresh && montcoDataCache) return montcoDataCache;
             if (!forceRefresh && montcoDataCachePromise) return montcoDataCachePromise;
@@ -2442,6 +2600,13 @@
                     visibleCases = visibleCases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
 
+                // Map last: its dots are everything the filters above let through, and
+                // its view / radius then narrows the cards.
+                if (forceRefresh) montcoCoordsRequested = false;
+                montcoMapSource = visibleCases;
+                visibleCases = applyMontcoMap(visibleCases);
+                const mapFiltering = visibleCases !== montcoMapSource;
+
                 // Update stats (before filtering for sweet spot only)
                 const allCases = data.cases || [];
                 const visibleCaseCount = visibleCases.reduce((sum, c) => sum + (c._stackSize || 1), 0);
@@ -2453,7 +2618,9 @@
                 document.getElementById('caseCount').textContent = `(${visibleCases.length})`;
 
                 if (visibleCases.length === 0) {
-                    grid.innerHTML = searchTerms.length
+                    grid.innerHTML = mapFiltering && montcoMapSource.length
+                        ? '<div class="no-results"><p>No properties in this part of the map. Zoom out, move the map, or click Reset view.</p></div>'
+                        : searchTerms.length
                         ? '<div class="no-results"><p>No properties match your search.</p></div>'
                         : '<div class="no-results"><p>No properties found. Upload a CSV and click "Process Pipeline Data" to get started.</p></div>';
                     return;

@@ -13,6 +13,7 @@ const {
 const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
 const { normalizePostalCities } = require('./scrapers/montco-postal-audit');
+const montcoCoords = require('./scrapers/montco-coords');
 const recorderParcelKey = montcoRecorder.parcelKey;
 const readRecorderCache = () => montcoRecorder.readCache();
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
@@ -45,6 +46,9 @@ const MONTCO_PAYOFF_FILE = path.join(CONFIG.outputDir, 'montco-payoff.json');
 // User tags and notes per MontCo case (keyed by case number). Kept apart from the
 // scraped data so a re-scrape or Clear Pipeline keeps them.
 const MONTCO_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'montco-annotations.json');
+// Map coordinates keyed by parcel / address (not by case), so they survive a
+// re-scrape or Clear Pipeline and each property is only ever looked up once.
+const MONTCO_COORDS_FILE = path.join(CONFIG.outputDir, 'montco-coords.json');
 // Court session cookies (solved locally past the Cloudflare/Turnstile gate),
 // uploaded here so the headless scrape can reuse them. Path matches
 // montco-courts.js CONFIG.sessionPath so the scraper reads the same file.
@@ -897,6 +901,77 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
     } else {
       res.status(500).json({ error: error.message });
     }
+  }
+});
+
+// Map coordinates for the pipeline cards, keyed by case number. Missing ones are
+// looked up in the background (county parcel layer, then the Census geocoder) and
+// cached by parcel/address; the page polls while `running` is true.
+let montcoCoordsJob = { running: false, total: 0, done: 0, error: null, lastAttempt: 0 };
+const MONTCO_COORDS_RETRY_MS = 60 * 1000;
+
+async function readMontcoCoords() {
+  try {
+    return JSON.parse(await fs.readFile(MONTCO_COORDS_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+function startMontcoCoordsFill(cases, cache) {
+  if (montcoCoordsJob.running) return;
+  montcoCoordsJob = { running: true, total: 0, done: 0, error: null, lastAttempt: Date.now() };
+  const job = montcoCoordsJob;
+  (async () => {
+    try {
+      await montcoCoords.fillCoords({
+        cases,
+        cache,
+        save: async () => {
+          const tmp = MONTCO_COORDS_FILE + '.tmp';
+          await fs.writeFile(tmp, JSON.stringify(cache));
+          await fs.rename(tmp, MONTCO_COORDS_FILE);
+        },
+        onProgress: ({ total, done }) => { job.total = total; job.done = done; }
+      });
+    } catch (error) {
+      job.error = error.message;
+      console.error('[montco-coords] lookup failed:', error.message);
+    } finally {
+      job.running = false;
+    }
+  })();
+}
+
+app.get('/api/pipeline/coords', checkAuth, async (req, res) => {
+  try {
+    let cases = [];
+    try {
+      cases = JSON.parse(await fs.readFile(PIPELINE_DATA_FILE, 'utf8')).cases || [];
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+    const cache = await readMontcoCoords();
+    const coords = {};
+    for (const c of cases) {
+      const ll = montcoCoords.coordsForCase(c, cache);
+      if (ll && c.caseNumber) coords[c.caseNumber] = ll;
+    }
+    const pending = montcoCoords.pendingLookups(cases, cache);
+    const pendingCount = pending.parcels.length + pending.addresses.length;
+    // After a failed attempt (county or Census service down), wait before trying again.
+    const coolingDown = montcoCoordsJob.error && Date.now() - montcoCoordsJob.lastAttempt < MONTCO_COORDS_RETRY_MS;
+    if (pendingCount && !montcoCoordsJob.running && !coolingDown) startMontcoCoordsFill(cases, cache);
+    res.json({
+      coords,
+      running: montcoCoordsJob.running,
+      pending: pendingCount,
+      total: montcoCoordsJob.total,
+      done: montcoCoordsJob.done,
+      error: montcoCoordsJob.running ? null : montcoCoordsJob.error
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
