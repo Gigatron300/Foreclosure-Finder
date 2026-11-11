@@ -245,7 +245,7 @@
             const stroke = cssColor('surface');
             const inShape = shape ? currentFilter() : null;
             const colors = {};
-            // Marked dots (item.onTop) are drawn last and a little larger, so a
+            // Marked dots (item.onTop) are drawn last, at the same size, so a
             // neighbour never hides them.
             const ordered = items.some(item => item.onTop)
                 ? [...items.filter(item => !item.onTop), ...items.filter(item => item.onTop)]
@@ -255,7 +255,7 @@
                 const dimmed = inShape && !inShape(item.lat, item.lng);
                 const marker = L.circleMarker([item.lat, item.lng], {
                     renderer: dotRenderer,
-                    radius: item.onTop ? 7 : 5.5,
+                    radius: 5.5,
                     color: stroke,
                     weight: 1,
                     opacity: dimmed ? 0.4 : 1,
