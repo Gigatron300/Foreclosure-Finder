@@ -165,4 +165,7 @@ async function fillCoords({ cases, cache, save = async () => {}, onProgress = ()
   return { total: total + Math.max(0, extra), done };
 }
 
-module.exports = { fillCoords, pendingLookups, coordsForCase, centroidOf, geocodeAddresses, parcelKeyFor, addressKeyFor };
+module.exports = {
+  fillCoords, pendingLookups, coordsForCase, centroidOf, geocodeAddresses, parcelKeyFor, addressKeyFor,
+  isHit, isFreshMiss
+};

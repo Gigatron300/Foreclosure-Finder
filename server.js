@@ -14,6 +14,7 @@ const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
 const { normalizePostalCities } = require('./scrapers/montco-postal-audit');
 const montcoCoords = require('./scrapers/montco-coords');
+const camdenCoords = require('./scrapers/camden-coords');
 const recorderParcelKey = montcoRecorder.parcelKey;
 const readRecorderCache = () => montcoRecorder.readCache();
 const { parseCSVLine, parseCamdenCSV, enrichCamdenCases, scoreCamdenCase, classifyDefendant } = require('./scrapers/camden-enrichment');
@@ -49,6 +50,7 @@ const MONTCO_ANNOTATIONS_FILE = path.join(CONFIG.outputDir, 'montco-annotations.
 // Map coordinates keyed by parcel / address (not by case), so they survive a
 // re-scrape or Clear Pipeline and each property is only ever looked up once.
 const MONTCO_COORDS_FILE = path.join(CONFIG.outputDir, 'montco-coords.json');
+const CAMDEN_COORDS_FILE = path.join(CONFIG.outputDir, 'camden-coords.json');
 // Court session cookies (solved locally past the Cloudflare/Turnstile gate),
 // uploaded here so the headless scrape can reuse them. Path matches
 // montco-courts.js CONFIG.sessionPath so the scraper reads the same file.
@@ -904,76 +906,82 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
   }
 });
 
-// Map coordinates for the pipeline cards, keyed by case number. Missing ones are
-// looked up in the background (county parcel layer, then the Census geocoder) and
+// Map coordinates for the pipeline cards, keyed by case id. Missing ones are looked
+// up in the background (the county's parcel layer, then the Census geocoder) and
 // cached by parcel/address; the page polls while `running` is true.
-let montcoCoordsJob = { running: false, total: 0, done: 0, error: null, lastAttempt: 0 };
-const MONTCO_COORDS_RETRY_MS = 60 * 1000;
+// Shared by MontCo (/api/pipeline/coords) and Camden (/api/camden/coords).
+const COORDS_RETRY_MS = 60 * 1000;
 
-async function readMontcoCoords() {
-  try {
-    return JSON.parse(await fs.readFile(MONTCO_COORDS_FILE, 'utf8'));
-  } catch (e) {
-    return {};
+function coordsHandler({ label, dataFile, cacheFile, lookup, idOf }) {
+  let job = { running: false, total: 0, done: 0, error: null, lastAttempt: 0 };
+
+  function startFill(cases, cache) {
+    job = { running: true, total: 0, done: 0, error: null, lastAttempt: Date.now() };
+    const current = job;
+    (async () => {
+      try {
+        await lookup.fillCoords({
+          cases,
+          cache,
+          save: async () => {
+            const tmp = cacheFile + '.tmp';
+            await fs.writeFile(tmp, JSON.stringify(cache));
+            await fs.rename(tmp, cacheFile);
+          },
+          onProgress: ({ total, done }) => { current.total = total; current.done = done; }
+        });
+      } catch (error) {
+        current.error = error.message;
+        console.error(`[${label}-coords] lookup failed:`, error.message);
+      } finally {
+        current.running = false;
+      }
+    })();
   }
-}
 
-function startMontcoCoordsFill(cases, cache) {
-  if (montcoCoordsJob.running) return;
-  montcoCoordsJob = { running: true, total: 0, done: 0, error: null, lastAttempt: Date.now() };
-  const job = montcoCoordsJob;
-  (async () => {
+  return async (req, res) => {
     try {
-      await montcoCoords.fillCoords({
-        cases,
-        cache,
-        save: async () => {
-          const tmp = MONTCO_COORDS_FILE + '.tmp';
-          await fs.writeFile(tmp, JSON.stringify(cache));
-          await fs.rename(tmp, MONTCO_COORDS_FILE);
-        },
-        onProgress: ({ total, done }) => { job.total = total; job.done = done; }
+      let cases = [];
+      try {
+        cases = JSON.parse(await fs.readFile(dataFile, 'utf8')).cases || [];
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+      let cache = {};
+      try { cache = JSON.parse(await fs.readFile(cacheFile, 'utf8')); } catch (e) {}
+
+      const coords = {};
+      for (const c of cases) {
+        const ll = lookup.coordsForCase(c, cache);
+        const id = idOf(c);
+        if (ll && id) coords[id] = ll;
+      }
+      const pending = lookup.pendingLookups(cases, cache);
+      const pendingCount = pending.parcels.length + pending.addresses.length;
+      // After a failed attempt (parcel or Census service down), wait before trying again.
+      const coolingDown = job.error && Date.now() - job.lastAttempt < COORDS_RETRY_MS;
+      if (pendingCount && !job.running && !coolingDown) startFill(cases, cache);
+      res.json({
+        coords,
+        running: job.running,
+        pending: pendingCount,
+        total: job.total,
+        done: job.done,
+        error: job.running ? null : job.error
       });
     } catch (error) {
-      job.error = error.message;
-      console.error('[montco-coords] lookup failed:', error.message);
-    } finally {
-      job.running = false;
+      res.status(500).json({ error: error.message });
     }
-  })();
+  };
 }
 
-app.get('/api/pipeline/coords', checkAuth, async (req, res) => {
-  try {
-    let cases = [];
-    try {
-      cases = JSON.parse(await fs.readFile(PIPELINE_DATA_FILE, 'utf8')).cases || [];
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-    const cache = await readMontcoCoords();
-    const coords = {};
-    for (const c of cases) {
-      const ll = montcoCoords.coordsForCase(c, cache);
-      if (ll && c.caseNumber) coords[c.caseNumber] = ll;
-    }
-    const pending = montcoCoords.pendingLookups(cases, cache);
-    const pendingCount = pending.parcels.length + pending.addresses.length;
-    // After a failed attempt (county or Census service down), wait before trying again.
-    const coolingDown = montcoCoordsJob.error && Date.now() - montcoCoordsJob.lastAttempt < MONTCO_COORDS_RETRY_MS;
-    if (pendingCount && !montcoCoordsJob.running && !coolingDown) startMontcoCoordsFill(cases, cache);
-    res.json({
-      coords,
-      running: montcoCoordsJob.running,
-      pending: pendingCount,
-      total: montcoCoordsJob.total,
-      done: montcoCoordsJob.done,
-      error: montcoCoordsJob.running ? null : montcoCoordsJob.error
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+app.get('/api/pipeline/coords', checkAuth, coordsHandler({
+  label: 'montco',
+  dataFile: PIPELINE_DATA_FILE,
+  cacheFile: MONTCO_COORDS_FILE,
+  lookup: montcoCoords,
+  idOf: c => c.caseNumber
+}));
 
 app.get('/api/pipeline/stats', checkAuth, async (req, res) => {
   try {
@@ -1775,6 +1783,15 @@ app.get('/api/camden/csv-status', checkAuth, async (req, res) => {
 });
 
 // Get Camden pipeline data
+// Map coordinates for the Camden cards, keyed by instrument number (see coordsHandler).
+app.get('/api/camden/coords', checkAuth, coordsHandler({
+  label: 'camden',
+  dataFile: CAMDEN_DATA_FILE,
+  cacheFile: CAMDEN_COORDS_FILE,
+  lookup: camdenCoords,
+  idOf: c => c.instrumentNumber
+}));
+
 app.get('/api/camden', checkAuth, async (req, res) => {
   try {
     const content = await fs.readFile(CAMDEN_DATA_FILE, 'utf8');
