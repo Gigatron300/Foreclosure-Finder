@@ -320,7 +320,9 @@
         .stat-value { font-family: var(--serif); font-size: 2.4rem; line-height: 1.1; font-weight: 700; color: var(--brand-gold); }
         .stat-label { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; }
 
-        .property-card.map-located { outline: 3px solid var(--brand-gold); outline-offset: 2px; }
+        .property-card.map-pinned { outline: 3px solid var(--brand-gold); outline-offset: 2px; }
+        .map-pin-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--brand-gold); color: var(--on-gold); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+        .map-pin-bar button { background: none; border: 0; color: inherit; font-size: 0.9rem; cursor: pointer; padding: 0 2px; }
         .results-header {
             display: flex;
             justify-content: space-between;
@@ -2310,7 +2312,7 @@
                 { color: MAP_COLORS.inactive, label: 'Closed, sold at sheriff sale, or other' }
             ],
             onChange: onMontcoMapChange,
-            onSelect: showCardForCase
+            onSelect: pinCardForCase
         });
 
         function groupCoords(g) {
@@ -2416,18 +2418,45 @@
             refreshMontcoMapDots();
         }
 
-        // "Show card" in a dot's popup: page the card in if it is not rendered yet, then scroll to it.
-        function showCardForCase(caseNumber) {
-            const grid = document.getElementById('casesGrid');
-            if (!grid || !montcoRenderState) return;
-            const index = montcoRenderState.cases.findIndex(c => c.caseNumber === caseNumber);
-            if (index < 0) return;
-            while (montcoRenderCursor <= index) renderNextCasePage();
-            const card = [...grid.querySelectorAll('.property-card')].find(el => el.dataset.case === caseNumber);
-            if (!card) return;
-            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            card.classList.add('map-located');
-            setTimeout(() => card.classList.remove('map-located'), 2200);
+        // Clicking a dot pins that property's card to the top left of the grid, so it
+        // can be read next to the map. It stays there until another dot is clicked or
+        // it is dismissed; the rest of the cards keep their order.
+        let montcoPinnedCase = null;
+
+        function pinCardForCase(caseNumber) {
+            montcoPinnedCase = caseNumber;
+            loadData().then(() => {
+                const card = document.querySelector('#casesGrid .property-card.map-pinned');
+                if (!card) return;
+                // Bring enough of the card into view to read it, without losing the map.
+                const wantedTop = window.innerHeight - 380;
+                const top = card.getBoundingClientRect().top;
+                if (top > wantedTop) window.scrollBy({ top: top - wantedTop, behavior: 'smooth' });
+            });
+        }
+
+        function unpinMapCard() {
+            montcoPinnedCase = null;
+            loadData();
+        }
+
+        // Moves the pinned property to the front of the list about to be rendered.
+        function withPinnedFirst(groups) {
+            if (!montcoPinnedCase) return groups;
+            const index = groups.findIndex(g => (g._stackMembers || [g]).some(m => m.caseNumber === montcoPinnedCase));
+            if (index < 0) return groups;
+            const pinned = groups[index];
+            pinned._mapPinned = true;
+            return [pinned, ...groups.slice(0, index), ...groups.slice(index + 1)];
+        }
+
+        function markPinnedCard() {
+            const first = document.querySelector('#casesGrid .property-card');
+            if (!first || !montcoRenderState || !montcoRenderState.cases[0] || !montcoRenderState.cases[0]._mapPinned) return;
+            first.classList.add('map-pinned');
+            first.insertAdjacentHTML('afterbegin',
+                '<div class="map-pin-bar"><span>Selected on the map</span>' +
+                '<button type="button" onclick="unpinMapCard()" title="Put this card back in its place">&#10005;</button></div>');
         }
 
         // Hovering a card rings its dot on the map.
@@ -2630,10 +2659,11 @@
                 // the browser. The full filtered/sorted list is held in montcoRenderState;
                 // only a slice is in the DOM at a time.
                 if (montcoLoadMoreObserver) montcoLoadMoreObserver.disconnect();
-                montcoRenderState = { cases: visibleCases };
+                montcoRenderState = { cases: withPinnedFirst(visibleCases) };
                 montcoRenderCursor = 0;
                 grid.innerHTML = '';
                 renderNextCasePage();
+                markPinnedCard();
             } catch (error) {
                 if (loadSequence !== montcoLoadSequence) return;
                 grid.innerHTML = `<div class="no-results"><p>Error: ${error.message}</p></div>`;

@@ -69,7 +69,6 @@
             .case-map-message { padding: 24px 20px; color: var(--muted); font-size: 0.85rem; }
             .case-map-popup-title { font-weight: 600; font-size: 0.9rem; color: #232323; }
             .case-map-popup-sub, .case-map-popup-meta { font-size: 0.78rem; color: #5b564d; margin-top: 2px; }
-            .case-map-popup-link { margin-top: 8px; font: inherit; font-size: 0.78rem; padding: 4px 10px; background: #C9943A; color: #232323; border: 0; cursor: pointer; }
             [data-theme="dark"] .case-map-canvas .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9); }
             @media (max-width: 700px) { .case-map-canvas { height: 320px; } .case-map-legend { margin-left: 0; } }
         `;
@@ -90,7 +89,7 @@
      *   defaultView  { center: [lat, lng], zoom } used when nothing is plotted
      *   legend       [{ color: '#F28C28', label: 'Mortgage' }]  (hex, or a CSS variable name)
      *   onChange()   the location filter changed; re-filter the cards
-     *   onSelect(id) "Show card" was clicked in a dot's popup
+     *   onSelect(id) a dot was clicked
      */
     function create(opts) {
         injectStyles();
@@ -258,15 +257,8 @@
             add('case-map-popup-title', item.title);
             add('case-map-popup-sub', item.subtitle);
             add('case-map-popup-meta', item.meta);
-            if (opts.onSelect) {
-                const link = document.createElement('button');
-                link.type = 'button';
-                link.className = 'case-map-popup-link';
-                link.textContent = 'Show card';
-                link.onclick = () => { map.closePopup(); opts.onSelect(item.id); };
-                box.appendChild(link);
-            }
             L.popup({ offset: [0, -4] }).setLatLng([item.lat, item.lng]).setContent(box).openOn(map);
+            if (opts.onSelect) opts.onSelect(item.id);
         }
 
         function setRadius(center, meters) {
