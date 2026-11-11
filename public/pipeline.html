@@ -437,6 +437,12 @@
         .sheriff-dot, .repeat-dot, .address-warning-dot { width: 6px; height: 6px; border-radius: 50%; }
         .sheriff-dot { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent); }
         .repeat-flag { border: 1px solid color-mix(in srgb, var(--brand-gold) 45%, transparent); background: var(--brand-gold-tint); color: var(--brand-gold-dark); }
+        button.repeat-flag { font-family: inherit; line-height: inherit; cursor: pointer; }
+        button.repeat-flag:hover { border-color: var(--brand-gold); }
+        .defendant-focus-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: -0.5rem 0 1.25rem; padding: 10px 16px; background: var(--brand-gold-tint); border: 1px solid color-mix(in srgb, var(--brand-gold) 45%, transparent); color: var(--ink); font-size: 0.85rem; }
+        .defendant-focus-bar[hidden] { display: none; }
+        .defendant-focus-bar .focus-note { color: var(--muted); }
+        .defendant-focus-bar button { margin-left: auto; font: inherit; font-size: 0.78rem; padding: 4px 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--border-strong); cursor: pointer; }
         .repeat-dot { background: var(--brand-gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-gold) 20%, transparent); }
         .address-warning-flag.out-of-county { border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); background: var(--danger-tint); color: var(--danger); }
         .address-warning-flag.defendant-source { border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); background: var(--warning-tint); color: var(--warning); }
@@ -1274,6 +1280,7 @@
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
             <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
             <button class="btn btn-outline filter-danger" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)">Hide Closed</button>
+            <button class="btn btn-outline filter-gold" id="repeatDefendantFilter" onclick="toggleRepeatDefendants()" title="Show only properties whose defendant also has a case on another property, with each defendant's properties side by side">Repeat Defendants</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1338,6 +1345,7 @@
         <div class="results-header">
             <h2>Properties <span class="case-count" id="caseCount">(0)</span></h2>
         </div>
+        <div class="defendant-focus-bar" id="defendantFocusBar" hidden></div>
         
         <datalist id="tagSuggestions">
             <option value="TRACK">
@@ -1545,6 +1553,115 @@
         let sweetSpotOnly = false;
         let hideUnreliable = false;
         let hideClosed = false;
+        let repeatDefendantsOnly = false;
+        let defendantFocus = null;     // defendant key whose properties are all being shown
+
+        // ---- Same defendant on several properties ----------------------------
+        // Court captions spell one defendant several ways ("WEINTRAUB HERBERT
+        // FOUNDATION LLC THE" / "HERBERT WEINTRAUB FOUNDATION LLC"), so names are
+        // compared as a set of words, ignoring order, punctuation and filler words.
+        const DEFENDANT_NAME_FILLER = new Set(['THE', 'AND', 'LLC', 'INC', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'LTD', 'LP', 'LLP']);
+        function defendantKey(name) {
+            const words = String(name || '').toUpperCase()
+                .replace(/&/g, ' AND ')
+                .replace(/\bET\s*AL\b/g, ' ')
+                .replace(/[^A-Z0-9 ]+/g, ' ')
+                .split(/\s+/)
+                .filter(w => w && !DEFENDANT_NAME_FILLER.has(w));
+            // "UNKNOWN HEIRS..." captions are not one person.
+            if (!words.length || words.includes('UNKNOWN')) return '';
+            return [...new Set(words)].sort().join(' ');
+        }
+
+        // One property = one parcel, or one street address when there is no parcel.
+        function defendantPropertyKey(c) {
+            const parcel = primaryParcelKey(c.parcelNumber).replace(/\D/g, '');
+            if (parcel) return 'p:' + parcel;
+            const address = normalizeMontcoSearchText(c.propertyAddress);
+            return address ? `a:${address}|${String(c.propertyZip || '').slice(0, 5)}` : 'c:' + c.caseNumber;
+        }
+
+        // Built from every case on the page (not just the filtered ones), so a badge
+        // always counts the defendant's full set of properties.
+        let montcoDefendantGroups = new Map();
+        let montcoDefendantGroupsFor = null;
+        function buildDefendantGroups(allCases) {
+            if (montcoDefendantGroupsFor === allCases) return;
+            const groups = new Map();
+            for (const c of allCases) {
+                c._defKey = defendantKey(c.defendant);
+                if (!c._defKey) continue;
+                let group = groups.get(c._defKey);
+                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.defendant, cases: [], properties: new Map() });
+                group.cases.push(c);
+                const pk = defendantPropertyKey(c);
+                if (!group.properties.has(pk)) group.properties.set(pk, []);
+                group.properties.get(pk).push(c);
+            }
+            montcoDefendantGroups = groups;
+            montcoDefendantGroupsFor = allCases;
+        }
+
+        // The defendant group a card belongs to, when that defendant is on 2+ properties.
+        function repeatDefendantGroup(card) {
+            for (const m of (card._stackMembers || [card])) {
+                const group = m._defKey && montcoDefendantGroups.get(m._defKey);
+                if (group && group.properties.size > 1) return group;
+            }
+            return null;
+        }
+
+        function repeatDefendantBadge(group) {
+            const n = group.properties.size;
+            const caseCount = group.cases.length;
+            const lines = [...group.properties.values()].map(members => {
+                const m = members[0];
+                const place = [m.propertyAddress || 'No address', m.propertyCity].filter(Boolean).join(', ');
+                return `${place} (${members.map(x => x.caseNumber).join(', ')})`;
+            });
+            const title = `${group.name}: ${caseCount} cases on ${n} properties. Click to show them all.\n`
+                + lines.slice(0, 15).join('\n') + (lines.length > 15 ? `\n...and ${lines.length - 15} more` : '');
+            return `<button type="button" class="repeat-flag" data-defendant="${escapeAttr(group.key)}" onclick="focusDefendant(this.dataset.defendant)" title="${escapeAttr(title)}"><span class="repeat-dot"></span>Defendant on ${n} properties</button>`;
+        }
+
+        function renderDefendantFocusBar(visibleCards) {
+            const bar = document.getElementById('defendantFocusBar');
+            if (!bar) return;
+            const group = defendantFocus && montcoDefendantGroups.get(defendantFocus);
+            if (!group) { bar.hidden = true; bar.innerHTML = ''; return; }
+            const shown = new Set();
+            for (const card of visibleCards) {
+                for (const m of (card._stackMembers || [card])) if (m._defKey === group.key) shown.add(defendantPropertyKey(m));
+            }
+            const hidden = group.properties.size - shown.size;
+            bar.innerHTML = `<span>Every property for <strong>${escapeAttr(group.name)}</strong>: ${group.cases.length} cases on ${group.properties.size} properties</span>`
+                + (hidden > 0 ? `<span class="focus-note">${hidden} hidden by the filters above</span>` : '')
+                + '<button type="button" onclick="clearDefendantFocus()">&#10005; Back to all properties</button>';
+            bar.hidden = false;
+        }
+
+        function focusDefendant(key) {
+            defendantFocus = key;
+            // The badge is often clicked from a search result; that search would hide
+            // the defendant's other properties.
+            const search = document.getElementById('caseSearch');
+            if (search) search.value = '';
+            loadData().then(() => {
+                const header = document.querySelector('.results-header');
+                if (header) header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
+        function clearDefendantFocus() {
+            defendantFocus = null;
+            loadData();
+        }
+
+        function toggleRepeatDefendants() {
+            repeatDefendantsOnly = !repeatDefendantsOnly;
+            document.getElementById('repeatDefendantFilter').classList.toggle('is-active', repeatDefendantsOnly);
+            loadData();
+        }
 
         function isUnreliableAddress(c) {
             if (c.inMontgomeryCounty === false) return true;
@@ -2537,6 +2654,9 @@
                     if (!c._searchText) refreshMontcoCaseSearchIndex(c);
                 }
 
+                buildDefendantGroups(data.cases || []);
+                if (defendantFocus && !montcoDefendantGroups.has(defendantFocus)) defendantFocus = null;
+
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);
 
@@ -2635,6 +2755,24 @@
                 if (hideClosed) {
                     visibleCases = visibleCases.filter(c => (c._stackMembers || [c]).some(m => !m.liveClosed));
                 }
+                if (defendantFocus) {
+                    visibleCases = visibleCases.filter(g => (g._stackMembers || [g]).some(m => m._defKey === defendantFocus));
+                } else if (repeatDefendantsOnly) {
+                    // Keep each defendant's properties side by side: biggest groups first,
+                    // and the chosen sort order within a group.
+                    const order = new Map();
+                    visibleCases = visibleCases.filter(g => {
+                        const group = repeatDefendantGroup(g);
+                        if (group && !order.has(group.key)) order.set(group.key, order.size);
+                        return !!group;
+                    });
+                    visibleCases = visibleCases
+                        .map((g, i) => ({ g, i, group: repeatDefendantGroup(g) }))
+                        .sort((a, b) => (b.group.properties.size - a.group.properties.size)
+                            || (order.get(a.group.key) - order.get(b.group.key)) || (a.i - b.i))
+                        .map(x => x.g);
+                }
+                renderDefendantFocusBar(visibleCases);
                 if (searchTerms.length) {
                     visibleCases = visibleCases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
@@ -2642,7 +2780,7 @@
                 // Map last: its dots are everything the filters above let through, and its
                 // view (or a radius / area drawn on it) then narrows the cards. A search
                 // overrides that: it finds a property wherever the map happens to be.
-                montcoSearchOverridesMap = searchTerms.length > 0;
+                montcoSearchOverridesMap = searchTerms.length > 0 || !!defendantFocus;
                 if (forceRefresh) montcoCoordsRequested = false;
                 montcoMapSource = visibleCases;
                 visibleCases = applyMontcoMap(visibleCases);
@@ -2688,7 +2826,7 @@
             const state = c.propertyState || 'PA';
             const zip = c.propertyZip || '';
             const location = [city, state, zip].filter(Boolean).join(', ');
-            const isRepeatDefendant = !!c.repeatDefendant && (c.priorCaseCount || 0) > 0;
+            const defendantGroup = repeatDefendantGroup(c);
             
             // Build Street View URL
             const fullAddress = `${address}, ${city}, ${state} ${zip}`;
@@ -2794,7 +2932,7 @@
                             ${closedBadge(c)}
                             ${c.payoff && c.payoff.facts && c.payoff.facts.lienListFiled ? `<span class="address-warning-flag lien-list" title="${escapeAttr(`A Rule 3129 affidavit was filed${c.payoff.facts.lienListDate ? ' on ' + c.payoff.facts.lienListDate : ''}. It lists every lien holder of record, the easiest way to see everything that must be paid off.`)}"><span class="address-warning-dot"></span>3129 on file</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
-                            ${isRepeatDefendant ? `<span class="repeat-flag" title="Defendant has ${c.priorCaseCount} prior case(s) in the uploaded data"><span class="repeat-dot"></span>Repeat x${c.priorCaseCount}</span>` : ''}
+                            ${defendantGroup ? repeatDefendantBadge(defendantGroup) : ''}
                             ${String(c.parcelType || '').toUpperCase() === 'MOBILE HOME' ? `<span class="address-warning-flag mobile-home" title="Montgomery County classifies this tax parcel as a mobile home"><span class="address-warning-dot"></span>Mobile Home</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
                             ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>${c.parcelValidationStatus === 'not-found' ? 'Court Parcel Missing' : 'Defendant Addr'}</span>` : ''}
