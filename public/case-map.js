@@ -12,6 +12,9 @@
     const LEAFLET_CSS_SRI = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
     const METERS_PER_MILE = 1609.344;
     const DEFAULT_RADIUS_MILES = 1;
+    // Drawn radius / area outline. Blue, because the map and the dots already use
+    // red, orange, tan and green.
+    const SHAPE_COLOR = '#1D4ED8';
 
     let leafletPromise = null;
     function loadLeaflet() {
@@ -285,8 +288,7 @@
             shape = next;
             if (shapeLayer) { shapeLayer.remove(); shapeLayer = null; }
             if (shape) {
-                const gold = cssColor('brand-gold');
-                const style = { color: gold, weight: 2, fillColor: gold, fillOpacity: 0.08, interactive: false };
+                const style = { color: SHAPE_COLOR, weight: 3, fillColor: SHAPE_COLOR, fillOpacity: 0.12, interactive: false };
                 shapeLayer = (shape.kind === 'radius'
                     ? L.circle(shape.center, { radius: shape.meters, ...style })
                     : L.polygon(shape.points, style)).addTo(map);
@@ -360,11 +362,10 @@
         function onPolygonClick(e) {
             if (drawMode !== 'polygon') return;
             if (!draft) {
-                const gold = cssColor('brand-gold');
                 draft = {
                     points: [],
-                    line: L.polyline([], { color: gold, weight: 2, interactive: false }).addTo(map),
-                    band: L.polyline([], { color: gold, weight: 1, dashArray: '4 4', interactive: false }).addTo(map)
+                    line: L.polyline([], { color: SHAPE_COLOR, weight: 3, interactive: false }).addTo(map),
+                    band: L.polyline([], { color: SHAPE_COLOR, weight: 2, dashArray: '5 5', interactive: false }).addTo(map)
                 };
             }
             const points = draft.points;
