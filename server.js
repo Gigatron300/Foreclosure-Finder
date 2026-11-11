@@ -14,6 +14,8 @@ const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
 const { normalizePostalCities } = require('./scrapers/montco-postal-audit');
 const montcoCoords = require('./scrapers/montco-coords');
+const { parseCSV: parseMontcoCourtCSV } = require('./scrapers/montco-courts');
+const { defendantKey } = require('./scrapers/defendant-key');
 const camdenCoords = require('./scrapers/camden-coords');
 const recorderParcelKey = montcoRecorder.parcelKey;
 const readRecorderCache = () => montcoRecorder.readCache();
@@ -862,6 +864,35 @@ function attachPayoffs(cases, payoffInputs, recorderCache = {}) {
   return cases;
 }
 
+// Closed cases from the uploaded court spreadsheet, grouped by defendant, so a card
+// can say the defendant has struggled before. Only OPEN cases become pipeline cases,
+// so these are otherwise invisible. Re-read only when a new spreadsheet is uploaded.
+let montcoClosedHistory = { mtimeMs: -1, byKey: new Map() };
+async function readMontcoClosedHistory() {
+  let stat;
+  try { stat = await fs.stat(CSV_FILE); } catch (e) { return new Map(); }
+  if (stat.mtimeMs === montcoClosedHistory.mtimeMs) return montcoClosedHistory.byKey;
+  const byKey = new Map();
+  try {
+    for (const row of await parseMontcoCourtCSV(CSV_FILE)) {
+      if (!/CLOSED/i.test(row.status || '')) continue;
+      const key = defendantKey(row.defendant);
+      if (!key) continue;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push({
+        caseNumber: row.caseNumber,
+        filed: row.commencedDate || '',
+        caseType: row.caseType || '',
+        status: String(row.status || '').replace(/^\d+\s*-\s*/, '').trim()
+      });
+    }
+  } catch (e) {
+    console.error('[montco] could not read court spreadsheet for defendant history:', e.message);
+  }
+  montcoClosedHistory = { mtimeMs: stat.mtimeMs, byKey };
+  return byKey;
+}
+
 app.get('/api/pipeline', checkAuth, async (req, res) => {
   try {
     const data = await fs.readFile(PIPELINE_DATA_FILE, 'utf8');
@@ -869,6 +900,7 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
     let cases = jsonData.cases;
     attachPayoffs(cases, await readPayoffInputs(), await readRecorderCache());
     attachMontcoAnnotations(cases, await readMontcoAnnotations());
+    for (const c of cases) c.defendantKey = defendantKey(c.defendant);
 
     if (req.query.grade) {
       const grades = req.query.grade.toUpperCase().split(',');
@@ -896,7 +928,12 @@ app.get('/api/pipeline', checkAuth, async (req, res) => {
       return 0;
     });
     
-    res.json({ lastUpdated: jsonData.lastUpdated, totalCases: cases.length, sources: jsonData.sources, statistics: jsonData.statistics, cases });
+    const closedHistory = await readMontcoClosedHistory();
+    const defendantHistory = {};
+    for (const c of cases) {
+      if (c.defendantKey && closedHistory.has(c.defendantKey)) defendantHistory[c.defendantKey] = closedHistory.get(c.defendantKey);
+    }
+    res.json({ lastUpdated: jsonData.lastUpdated, totalCases: cases.length, sources: jsonData.sources, statistics: jsonData.statistics, cases, defendantHistory });
   } catch (error) {
     if (error.code === 'ENOENT') {
       res.json({ lastUpdated: null, totalCases: 0, sources: {}, statistics: {}, cases: [], message: 'No pipeline data yet.' });

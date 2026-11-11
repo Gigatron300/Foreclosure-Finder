@@ -1280,7 +1280,7 @@
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
             <button class="btn btn-outline filter-warning" id="hideUnreliableFilter" onclick="toggleHideUnreliable()" title="Hide cases where the property is outside Montgomery County or the address was looked up via the defendant rather than a parcel">Hide Unreliable</button>
             <button class="btn btn-outline filter-danger" id="hideClosedFilter" onclick="toggleHideClosed()" title="Hide cases that read CLOSED on the court page today (were OPEN in the uploaded CSV)">Hide Closed</button>
-            <button class="btn btn-outline filter-gold" id="repeatDefendantFilter" onclick="toggleRepeatDefendants()" title="Show only properties whose defendant also has a case on another property, with each defendant's properties side by side">Repeat Defendants</button>
+            <button class="btn btn-outline filter-gold" id="repeatDefendantFilter" onclick="toggleRepeatDefendants()" title="Show only open properties whose defendant also has an open case on another property, with each defendant's properties side by side. Closed cases do not count.">Repeat Defendants</button>
             
             <select id="sortBy" onchange="loadData()" style="margin-left: auto;">
                 <option value="scoreDesc">Sort: Score (High -> Low)</option>
@@ -1557,21 +1557,9 @@
         let defendantFocus = null;     // defendant key whose properties are all being shown
 
         // ---- Same defendant on several properties ----------------------------
-        // Court captions spell one defendant several ways ("WEINTRAUB HERBERT
-        // FOUNDATION LLC THE" / "HERBERT WEINTRAUB FOUNDATION LLC"), so names are
-        // compared as a set of words, ignoring order, punctuation and filler words.
-        const DEFENDANT_NAME_FILLER = new Set(['THE', 'AND', 'LLC', 'INC', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'LTD', 'LP', 'LLP']);
-        function defendantKey(name) {
-            const words = String(name || '').toUpperCase()
-                .replace(/&/g, ' AND ')
-                .replace(/\bET\s*AL\b/g, ' ')
-                .replace(/[^A-Z0-9 ]+/g, ' ')
-                .split(/\s+/)
-                .filter(w => w && !DEFENDANT_NAME_FILLER.has(w));
-            // "UNKNOWN HEIRS..." captions are not one person.
-            if (!words.length || words.includes('UNKNOWN')) return '';
-            return [...new Set(words)].sort().join(' ');
-        }
+        // Each case arrives with a defendantKey (scrapers/defendant-key.js) that is the
+        // same across the court's caption spellings, and the response carries the
+        // defendant's CLOSED cases from the uploaded court spreadsheet.
 
         // One property = one parcel, or one street address when there is no parcel.
         function defendantPropertyKey(c) {
@@ -1581,47 +1569,101 @@
             return address ? `a:${address}|${String(c.propertyZip || '').slice(0, 5)}` : 'c:' + c.caseNumber;
         }
 
-        // Built from every case on the page (not just the filtered ones), so a badge
-        // always counts the defendant's full set of properties.
-        let montcoDefendantGroups = new Map();
-        let montcoDefendantGroupsFor = null;
-        function buildDefendantGroups(allCases) {
-            if (montcoDefendantGroupsFor === allCases) return;
-            const groups = new Map();
-            for (const c of allCases) {
-                c._defKey = defendantKey(c.defendant);
-                if (!c._defKey) continue;
-                let group = groups.get(c._defKey);
-                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.defendant, cases: [], properties: new Map() });
-                group.cases.push(c);
-                const pk = defendantPropertyKey(c);
-                if (!group.properties.has(pk)) group.properties.set(pk, []);
-                group.properties.get(pk).push(c);
-            }
-            montcoDefendantGroups = groups;
-            montcoDefendantGroupsFor = allCases;
+        function placeOf(c) {
+            return [c.propertyAddress || 'No address', c.propertyCity].filter(Boolean).join(', ');
         }
 
-        // The defendant group a card belongs to, when that defendant is on 2+ properties.
-        function repeatDefendantGroup(card) {
-            for (const m of (card._stackMembers || [card])) {
+        // Built from every case on the page (not just the filtered ones), so a badge
+        // always describes the defendant's full record.
+        //   activeProperties: properties with a case still open in court
+        //   pageProperties:   every property of theirs on this page (what a click shows)
+        //   closed:           closed cases, from this page (closed since upload) and
+        //                     from the court spreadsheet (closed before it)
+        let montcoDefendantGroups = new Map();
+        let montcoDefendantGroupsFor = null;
+        function buildDefendantGroups(data) {
+            if (montcoDefendantGroupsFor === data) return;
+            const groups = new Map();
+            const addTo = (map, key, c) => { if (!map.has(key)) map.set(key, []); map.get(key).push(c); };
+            const onPage = new Set();
+            for (const c of data.cases || []) {
+                onPage.add(c.caseNumber);
+                c._defKey = c.defendantKey || '';
+                if (!c._defKey) continue;
+                let group = groups.get(c._defKey);
+                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.defendant, activeProperties: new Map(), pageProperties: new Map(), closed: [] });
+                const pk = defendantPropertyKey(c);
+                addTo(group.pageProperties, pk, c);
+                if (c.liveClosed) {
+                    group.closed.push({ caseNumber: c.caseNumber, filed: c.commencedDate || '', caseType: c.caseType || '', status: c.liveStatus || 'CLOSED', place: placeOf(c) });
+                } else {
+                    addTo(group.activeProperties, pk, c);
+                }
+            }
+            for (const [key, rows] of Object.entries(data.defendantHistory || {})) {
+                const group = groups.get(key);
+                if (!group) continue;
+                for (const r of rows) if (!onPage.has(r.caseNumber)) group.closed.push({ ...r, place: '' });
+            }
+            const filedTime = x => { const t = new Date(x.filed).getTime(); return Number.isFinite(t) ? t : 0; };
+            for (const group of groups.values()) group.closed.sort((a, b) => filedTime(b) - filedTime(a));
+            montcoDefendantGroups = groups;
+            montcoDefendantGroupsFor = data;
+        }
+
+        // What the badge on a card has to say, or null for no badge: the defendant is
+        // open on other properties, or has closed cases other than this card's own.
+        function defendantRecord(card) {
+            const members = card._stackMembers || [card];
+            const own = new Set(members.map(m => m.caseNumber));
+            for (const m of members) {
                 const group = m._defKey && montcoDefendantGroups.get(m._defKey);
-                if (group && group.properties.size > 1) return group;
+                if (!group) continue;
+                const closed = group.closed.filter(x => !own.has(x.caseNumber));
+                if (group.activeProperties.size > 1 || closed.length) return { group, closed };
             }
             return null;
         }
 
-        function repeatDefendantBadge(group) {
-            const n = group.properties.size;
-            const caseCount = group.cases.length;
-            const lines = [...group.properties.values()].map(members => {
-                const m = members[0];
-                const place = [m.propertyAddress || 'No address', m.propertyCity].filter(Boolean).join(', ');
-                return `${place} (${members.map(x => x.caseNumber).join(', ')})`;
-            });
-            const title = `${group.name}: ${caseCount} cases on ${n} properties. Click to show them all.\n`
-                + lines.slice(0, 15).join('\n') + (lines.length > 15 ? `\n...and ${lines.length - 15} more` : '');
-            return `<button type="button" class="repeat-flag" data-defendant="${escapeAttr(group.key)}" onclick="focusDefendant(this.dataset.defendant)" title="${escapeAttr(title)}"><span class="repeat-dot"></span>Defendant on ${n} properties</button>`;
+        // For the Repeat Defendants filter: an open card whose defendant has open
+        // cases on 2+ properties. Closed history alone does not count.
+        function repeatDefendantGroup(card) {
+            const members = card._stackMembers || [card];
+            if (!members.some(m => !m.liveClosed)) return null;
+            for (const m of members) {
+                const group = m._defKey && montcoDefendantGroups.get(m._defKey);
+                if (group && group.activeProperties.size > 1) return group;
+            }
+            return null;
+        }
+
+        function repeatDefendantBadge({ group, closed }) {
+            const open = group.activeProperties.size;
+            const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+            const label = open > 1
+                ? `Defendant on ${open} properties${closed.length ? ` · ${closed.length} closed` : ''}`
+                : `Defendant: ${plural(closed.length, 'closed case')}`;
+
+            const lines = [group.name];
+            if (open > 1) {
+                lines.push('', `Open cases on ${open} ${open === 1 ? 'property' : 'properties'}:`);
+                const props = [...group.activeProperties.values()];
+                for (const members of props.slice(0, 12)) lines.push(`  ${placeOf(members[0])} (${members.map(x => x.caseNumber).join(', ')})`);
+                if (props.length > 12) lines.push(`  ...and ${props.length - 12} more`);
+            }
+            if (closed.length) {
+                lines.push('', `Closed cases (${closed.length}):`);
+                for (const x of closed.slice(0, 12)) {
+                    lines.push('  ' + [x.caseNumber, x.filed ? 'filed ' + x.filed : '', x.caseType, x.status, x.place].filter(Boolean).join(' · '));
+                }
+                if (closed.length > 12) lines.push(`  ...and ${closed.length - 12} more`);
+            }
+            const clickable = group.pageProperties.size > 1;
+            if (clickable) lines.push('', 'Click to show their properties on this page.');
+            const title = escapeAttr(lines.join('\n'));
+            return clickable
+                ? `<button type="button" class="repeat-flag" data-defendant="${escapeAttr(group.key)}" onclick="focusDefendant(this.dataset.defendant)" title="${title}"><span class="repeat-dot"></span>${label}</button>`
+                : `<span class="repeat-flag" title="${title}"><span class="repeat-dot"></span>${label}</span>`;
         }
 
         function renderDefendantFocusBar(visibleCards) {
@@ -1633,8 +1675,10 @@
             for (const card of visibleCards) {
                 for (const m of (card._stackMembers || [card])) if (m._defKey === group.key) shown.add(defendantPropertyKey(m));
             }
-            const hidden = group.properties.size - shown.size;
-            bar.innerHTML = `<span>Every property for <strong>${escapeAttr(group.name)}</strong>: ${group.cases.length} cases on ${group.properties.size} properties</span>`
+            const hidden = group.pageProperties.size - shown.size;
+            const open = group.activeProperties.size;
+            bar.innerHTML = `<span>Every property for <strong>${escapeAttr(group.name)}</strong>: open on ${open} ${open === 1 ? 'property' : 'properties'}`
+                + (group.closed.length ? `, ${group.closed.length} closed ${group.closed.length === 1 ? 'case' : 'cases'} on record` : '') + '</span>'
                 + (hidden > 0 ? `<span class="focus-note">${hidden} hidden by the filters above</span>` : '')
                 + '<button type="button" onclick="clearDefendantFocus()">&#10005; Back to all properties</button>';
             bar.hidden = false;
@@ -2654,7 +2698,7 @@
                     if (!c._searchText) refreshMontcoCaseSearchIndex(c);
                 }
 
-                buildDefendantGroups(data.cases || []);
+                buildDefendantGroups(data);
                 if (defendantFocus && !montcoDefendantGroups.has(defendantFocus)) defendantFocus = null;
 
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
@@ -2758,8 +2802,8 @@
                 if (defendantFocus) {
                     visibleCases = visibleCases.filter(g => (g._stackMembers || [g]).some(m => m._defKey === defendantFocus));
                 } else if (repeatDefendantsOnly) {
-                    // Keep each defendant's properties side by side: biggest groups first,
-                    // and the chosen sort order within a group.
+                    // Open cards whose defendant is open on 2+ properties, each defendant's
+                    // side by side: biggest groups first, the chosen sort order within one.
                     const order = new Map();
                     visibleCases = visibleCases.filter(g => {
                         const group = repeatDefendantGroup(g);
@@ -2768,7 +2812,7 @@
                     });
                     visibleCases = visibleCases
                         .map((g, i) => ({ g, i, group: repeatDefendantGroup(g) }))
-                        .sort((a, b) => (b.group.properties.size - a.group.properties.size)
+                        .sort((a, b) => (b.group.activeProperties.size - a.group.activeProperties.size)
                             || (order.get(a.group.key) - order.get(b.group.key)) || (a.i - b.i))
                         .map(x => x.g);
                 }
@@ -2826,7 +2870,7 @@
             const state = c.propertyState || 'PA';
             const zip = c.propertyZip || '';
             const location = [city, state, zip].filter(Boolean).join(', ');
-            const defendantGroup = repeatDefendantGroup(c);
+            const defendantInfo = defendantRecord(c);
             
             // Build Street View URL
             const fullAddress = `${address}, ${city}, ${state} ${zip}`;
@@ -2932,7 +2976,7 @@
                             ${closedBadge(c)}
                             ${c.payoff && c.payoff.facts && c.payoff.facts.lienListFiled ? `<span class="address-warning-flag lien-list" title="${escapeAttr(`A Rule 3129 affidavit was filed${c.payoff.facts.lienListDate ? ' on ' + c.payoff.facts.lienListDate : ''}. It lists every lien holder of record, the easiest way to see everything that must be paid off.`)}"><span class="address-warning-dot"></span>3129 on file</span>` : ''}
                             ${c._onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Montgomery County Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
-                            ${defendantGroup ? repeatDefendantBadge(defendantGroup) : ''}
+                            ${defendantInfo ? repeatDefendantBadge(defendantInfo) : ''}
                             ${String(c.parcelType || '').toUpperCase() === 'MOBILE HOME' ? `<span class="address-warning-flag mobile-home" title="Montgomery County classifies this tax parcel as a mobile home"><span class="address-warning-dot"></span>Mobile Home</span>` : ''}
                             ${c.inMontgomeryCounty === false ? `<span class="address-warning-flag out-of-county" title="Resolved address is not in Montgomery County, PA — the property linkage is likely wrong"><span class="address-warning-dot"></span>Outside MontCo</span>` : ''}
                             ${(c.addressSource === 'defendant' || c.addressSource === 'defendant-fallback') ? `<span class="address-warning-flag defendant-source" title="${escapeAttr(defendantAddrTooltip(c))}"><span class="address-warning-dot"></span>${c.parcelValidationStatus === 'not-found' ? 'Court Parcel Missing' : 'Defendant Addr'}</span>` : ''}
