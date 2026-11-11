@@ -2390,6 +2390,9 @@
 
         // The map's view or drawn shape changed, or the panel opened or closed.
         function onMontcoMapChange() {
+            // A closed map has no say over the cards at all: no view or shape filtering
+            // (applyMontcoMap), and no card held at the front from a dot click.
+            if (!montcoMap.isOpen()) montcoPinnedCase = null;
             if (!montcoDataCache) return;
             // While a search is overriding the map the cards do not depend on it, so
             // only the dots and the summary need refreshing.
