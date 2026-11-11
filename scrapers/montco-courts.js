@@ -4,7 +4,9 @@ const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const { matchParcelByAddress, applyParcelMatch, parseMortgageBookPage } = require('./montco-parcel-match');
+const {
+  matchParcelByAddress, applyParcelMatch, parseMortgageBookPage, normalizeMunicipalityCity
+} = require('./montco-parcel-match');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -426,7 +428,7 @@ async function lookupParcelAddress(parcelRaw, options = {}) {
         if (f) {
           const muni = (f.Muni_Name || '').trim();
           // Strip municipal suffix for the city display ("Pottstown Borough" -> "Pottstown")
-          let city = muni.replace(/\s+(borough|township|city|town)\s*$/i, '').trim();
+          let city = normalizeMunicipalityCity(muni);
           let zip = (f.LOC_ZIP1_Z || '').trim();
           let street = buildPropertyLocationAddress(f);
 
@@ -1406,7 +1408,12 @@ async function scrapeMontgomeryCourts(options = {}) {
         if (courtParcelNotFound) c.parcelValidationStatus = 'not-found';
         if ((!courtParcelNumber || courtParcelNotFound) && c.propertyAddress) {
           try {
-            const match = await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant });
+            const match = await matchParcelByAddress({
+              street: c.propertyAddress,
+              city: c.propertyCity,
+              zip: c.propertyZip,
+              defendant: c.defendant
+            });
             if (!courtParcelNumber) {
               applyParcelMatch(c, match);
             } else if (match && match.confidence === 'owner' && String(match.parcel).replace(/\D/g, '') !== courtParcelDigits) {

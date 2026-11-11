@@ -18,7 +18,9 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
-const { lookupParcelById, parcelMatchesCase, applyParcelMatch } = require('./montco-parcel-match');
+const {
+  lookupParcelById, parcelMatchesCase, applyParcelMatch, repairHybridLocation
+} = require('./montco-parcel-match');
 
 const BASE = 'https://rodviewer.montcopa.org/countyweb';
 const LOGIN_URL = `${BASE}/loginDisplay.action?countyname=Montgomery`;
@@ -357,15 +359,17 @@ async function confirmedParcelCandidates(c, parcelIds, gisCache,
   return confirmed;
 }
 
-function applyRecorderParcelResolution(c, resolved, source, details = {}) {
+async function applyRecorderParcelResolution(c, resolved, source, details = {}) {
   const originalParcel = c.courtParcelNumber || c.parcelNumber || '';
   const caseZip = String(c.propertyZip || '').trim().slice(0, 5);
   if (originalParcel && !c.courtParcelNumber) c.courtParcelNumber = originalParcel;
+  const locationAudit = await repairHybridLocation(c, resolved.match);
+  resolved.match = locationAudit.match;
   applyParcelMatch(c, resolved.match);
   // A court mailing ZIP and the parcel layer's location ZIP can disagree even when
   // the parcel is otherwise confirmed. Preserve the case ZIP for display and retain
   // both values in the correction audit.
-  if (!resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
+  if (!resolved.match.locationCorrection && !resolved.evidence.zipMatch && caseZip) c.propertyZip = caseZip;
   c.parcelValidationStatus = originalParcel ? 'corrected' : 'resolved';
   const sourceLabel = source === 'recorder-book-page'
     ? `Recorder mortgage Bk ${details.book} / Pg ${details.page}`
@@ -410,7 +414,7 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
       ? await confirmedParcelCandidates(c, parcelIds, gisCache, { requireAddress: false })
       : [];
     if (confirmed.length === 1) {
-      applyRecorderParcelResolution(c, confirmed[0], 'recorder-book-page', {
+      await applyRecorderParcelResolution(c, confirmed[0], 'recorder-book-page', {
         book: c.mortgageBook, page: c.mortgagePage
       });
       return true;
@@ -433,7 +437,7 @@ async function resolveCaseParcel(c, runSearch, gisCache) {
       requireOwner: false
     });
     if (confirmed.length === 1) {
-      applyRecorderParcelResolution(c, confirmed[0], 'recorder-name', { name });
+      await applyRecorderParcelResolution(c, confirmed[0], 'recorder-name', { name });
       return true;
     }
   }

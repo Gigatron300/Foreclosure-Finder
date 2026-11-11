@@ -6,7 +6,9 @@
 // parcel layer has the municipality ("Towamencin Township").
 
 const PARCEL_API_BASE = 'https://mapservices.pasda.psu.edu/server/rest/services/pasda/MontgomeryCounty/MapServer/14/query';
-const OUT_FIELDS = 'PARCEL,PARCELTYPE,OWN1,OWN2,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,Muni_Name';
+const OUT_FIELDS = 'PARCEL,PARCELTYPE,OWN1,OWN2,LOC_NO,LOC_DIR,LOC_STR,LOC_SUF,LOC_SUF2,LOC_UNITDE,LOC_UNITNO,LOC_ZIP1_Z,Muni_Name,ADDR1,ADDR3';
+const CENSUS_GEOCODER = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress';
+const censusLocationCache = new Map();
 
 const DIRECTIONS = { NORTH: 'N', SOUTH: 'S', EAST: 'E', WEST: 'W', N: 'N', S: 'S', E: 'E', W: 'W', NE: 'NE', NW: 'NW', SE: 'SE', SW: 'SW' };
 const SUFFIXES = new Set([
@@ -73,18 +75,142 @@ function locationAddress(a) {
     .map(x => (x == null ? '' : String(x)).trim()).filter(Boolean).join(' ');
 }
 
+function normalizeMunicipalityCity(value) {
+  return String(value || '')
+    .replace(/^Municipality of\s+/i, '')
+    .replace(/\s+(borough|township|city|town)\s*$/i, '')
+    .trim();
+}
+
+function parseMailingLocality(value) {
+  const m = String(value || '').trim().match(/^(.+?)\s+PA\s+(\d{5})(?:-\d{4})?$/i);
+  return m ? { city: m[1].trim(), zip: m[2] } : { city: '', zip: '' };
+}
+
+function sameText(a, b) {
+  return String(a || '').toUpperCase().replace(/[^A-Z0-9]/g, '') ===
+    String(b || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function sameStreet(a, b) {
+  const left = parseStreet(a);
+  const right = parseStreet(b);
+  return !!(left && right && left.number === right.number && left.name === right.name);
+}
+
 function parcelMatchFromRow(row) {
   if (!row) return null;
   const muni = (row.Muni_Name || '').trim();
+  const ownerMailing = parseMailingLocality(row.ADDR3);
   return {
     parcel: row.PARCEL,
     confidence: 'owner',
     street: locationAddress(row),
-    city: muni.replace(/\s+(borough|township|city|town)\s*$/i, '').replace(/^Municipality of\s+/i, '').trim(),
+    city: normalizeMunicipalityCity(muni),
     zip: String(row.LOC_ZIP1_Z || '').trim().slice(0, 5),
     owner: [row.OWN1, row.OWN2].map(x => (x || '').trim()).filter(Boolean).join(' / '),
     municipality: muni,
-    parcelType: (row.PARCELTYPE || '').trim()
+    parcelType: (row.PARCELTYPE || '').trim(),
+    ownerMailingStreet: String(row.ADDR1 || '').trim(),
+    ownerMailingCity: ownerMailing.city,
+    ownerMailingZip: ownerMailing.zip
+  };
+}
+
+function hybridLocationLooksContaminated(c, match) {
+  if (!c || !match || !match.ownerMailingStreet || !match.ownerMailingCity) return false;
+  if (!sameStreet(c.propertyAddress, match.street)) return false;
+  if (sameStreet(match.street, match.ownerMailingStreet)) return false;
+
+  const caseCity = String(c.propertyCity || '').trim();
+  const caseZip = String(c.propertyZip || '').trim().slice(0, 5);
+  const mailingCityMatches = !!caseCity && sameText(caseCity, match.ownerMailingCity);
+  const mailingZipMatches = !!caseZip && caseZip === match.ownerMailingZip;
+
+  // Requiring both parts avoids replacing legitimate postal towns that differ
+  // from their legal municipality (for example Lansdale / Towamencin Township).
+  return mailingCityMatches && mailingZipMatches;
+}
+
+async function censusPropertyLocation(street, municipality) {
+  const city = normalizeMunicipalityCity(municipality);
+  const parsedStreet = parseStreet(street);
+  if (!parsedStreet || !city) return null;
+  const key = `${parsedStreet.number}|${parsedStreet.name}|${city.toUpperCase()}`;
+  if (censusLocationCache.has(key)) return censusLocationCache.get(key);
+
+  let location = null;
+  try {
+    const params = new URLSearchParams({
+      address: `${street}, ${city}, PA`,
+      benchmark: 'Public_AR_Current',
+      format: 'json'
+    });
+    const response = await fetch(`${CENSUS_GEOCODER}?${params}`, { signal: AbortSignal.timeout(12000) });
+    if (response.ok) {
+      const data = await response.json();
+      const matches = (data?.result?.addressMatches || []).filter(item => {
+        const candidateStreet = String(item.matchedAddress || '').split(',')[0];
+        return sameStreet(street, candidateStreet);
+      });
+      if (matches.length === 1) {
+        const item = matches[0];
+        location = {
+          city: String(item.addressComponents?.city || city).trim(),
+          zip: String(item.addressComponents?.zip || '').trim().slice(0, 5),
+          matchedAddress: String(item.matchedAddress || '').trim(),
+          source: 'US Census Geocoder'
+        };
+      }
+    }
+  } catch (e) {
+    location = null;
+  }
+  censusLocationCache.set(key, location);
+  return location;
+}
+
+async function repairHybridLocation(c, match) {
+  if (!hybridLocationLooksContaminated(c, match)) {
+    return { match, suspicious: false, repaired: false };
+  }
+
+  const verified = await censusPropertyLocation(match.street, match.municipality || match.city);
+  if (!verified || !verified.zip) {
+    return {
+      match,
+      suspicious: true,
+      repaired: false,
+      reason: 'Property locality matched the owner mailing address, but Census could not verify a replacement ZIP'
+    };
+  }
+
+  const currentCity = String(c.propertyCity || '').trim();
+  const currentZip = String(c.propertyZip || '').trim().slice(0, 5);
+  if (sameText(currentCity, verified.city) && currentZip === verified.zip) {
+    // The owner happens to receive mail in the same postal locality as the
+    // property. Nothing is contaminated, even though the streets differ.
+    return { match, suspicious: false, repaired: false };
+  }
+
+  return {
+    suspicious: true,
+    repaired: true,
+    match: {
+      ...match,
+      city: verified.city || normalizeMunicipalityCity(match.municipality),
+      zip: verified.zip,
+      locationCorrection: {
+        originalCity: currentCity,
+        originalZip: currentZip,
+        correctedCity: verified.city,
+        correctedZip: verified.zip,
+        matchedAddress: verified.matchedAddress,
+        reason: 'Displayed locality matched the parcel owner mailing address instead of the property location',
+        source: verified.source,
+        correctedAt: new Date().toISOString()
+      }
+    }
   };
 }
 
@@ -136,7 +262,7 @@ function parcelMatchesCase(match, { street, zip, defendant } = {}) {
  *   null      — no single parcel at that address.
  * Throws on network/API errors so callers can tell "no match" from "couldn't check".
  */
-async function matchParcelByAddress({ street, zip, defendant }) {
+async function matchParcelByAddress({ street, city, zip, defendant }) {
   const parsed = parseStreet(street);
   if (!parsed) return null;
   const zip5 = String(zip || '').slice(0, 5);
@@ -175,7 +301,11 @@ async function matchParcelByAddress({ street, zip, defendant }) {
   const match = parcelMatchFromRow(pick);
   match.confidence = confidence;
   if (!match.zip) match.zip = zip5;
-  return match;
+  return (await repairHybridLocation({
+    propertyAddress: street,
+    propertyCity: city,
+    propertyZip: zip
+  }, match)).match;
 }
 
 /**
@@ -213,11 +343,12 @@ function applyParcelMatch(c, match) {
     c.propertyAddress = match.street;
     // Same house as the defendant address, so keep its postal town ("LANSDALE"):
     // Zillow and Maps search better on it than on the township name.
-    c.propertyCity = c.propertyCity || match.city;
+    c.propertyCity = match.locationCorrection ? match.city : (c.propertyCity || match.city);
     c.propertyState = 'PA';
-    c.propertyZip = match.zip || c.propertyZip;
+    c.propertyZip = match.locationCorrection ? match.zip : (match.zip || c.propertyZip);
     c.inMontgomeryCounty = true;
     c.addressSource = 'parcel-match';
+    if (match.locationCorrection) c.addressCorrection = match.locationCorrection;
   }
   return match.confidence;
 }
@@ -230,5 +361,6 @@ function parseMortgageBookPage(remarks) {
 
 module.exports = {
   matchParcelByAddress, lookupParcelById, parcelMatchesCase, applyParcelMatch,
+  repairHybridLocation, hybridLocationLooksContaminated, normalizeMunicipalityCity,
   parseStreet, surnamesFrom, parseMortgageBookPage
 };

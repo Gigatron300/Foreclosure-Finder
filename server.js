@@ -7,7 +7,9 @@ const crypto = require('crypto');
 const { runScraper, CONFIG } = require('./scraper');
 const { runPipelineScraper, OUTPUT_FILE: PIPELINE_FILE } = require('./pipeline-scraper');
 const { buildUpdatedMontcoWorkbook } = require('./scrapers/montco-excel-export');
-const { matchParcelByAddress, applyParcelMatch } = require('./scrapers/montco-parcel-match');
+const {
+  matchParcelByAddress, applyParcelMatch, lookupParcelById, repairHybridLocation
+} = require('./scrapers/montco-parcel-match');
 const { estimatePayoff, isClosedCase } = require('./scrapers/payoff-estimate');
 const montcoRecorder = require('./scrapers/montco-recorder');
 const recorderParcelKey = montcoRecorder.parcelKey;
@@ -1240,8 +1242,8 @@ app.delete('/api/montco/session', checkAuth, async (req, res) => {
   }
 });
 
-// Find parcels for cases with no parcel number (mortgage foreclosures) by matching the
-// defendant address on the county parcel layer. Runs over already-scraped cases; no court scrape.
+// Find parcels for cases with no parcel number and audit earlier parcel matches for
+// property-location / owner-mailing-address contamination. Uses stored cases only.
 let isParcelMatchInProgress = false;
 let lastParcelMatchStatus = null;
 
@@ -1251,6 +1253,9 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
   }
   if (isPipelineScrapingInProgress) {
     return res.status(429).json({ error: 'A scrape is running; try again when it finishes.' });
+  }
+  if (recorderRefresh.running) {
+    return res.status(429).json({ error: 'Recorder refresh is running; try again when it finishes.' });
   }
 
   let pipeline;
@@ -1269,37 +1274,79 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
   );
 
   if (targets.length === 0) {
-    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, errors: 0, completed: new Date().toISOString() };
-    return res.json({ done: true, message: 'No cases without a parcel number to match.', status: lastParcelMatchStatus });
+    lastParcelMatchStatus = { status: 'completed', total: 0, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, suspicious: 0, repaired: 0, errors: 0, completed: new Date().toISOString() };
+    return res.json({ done: true, message: 'No mortgage parcel matches to find or audit.', status: lastParcelMatchStatus });
   }
 
   isParcelMatchInProgress = true;
   lastParcelMatchStatus = {
     status: 'running', started: new Date().toISOString(),
-    total: targets.length, processed: 0, matched: 0, addressOnly: 0, unmatched: 0, errors: 0
+    total: targets.length, processed: 0, matched: 0, addressOnly: 0, unmatched: 0,
+    suspicious: 0, repaired: 0, errors: 0
   };
-  res.json({ done: false, message: `Matching ${targets.length} cases`, status: lastParcelMatchStatus });
+  res.json({ done: false, message: `Matching and auditing ${targets.length} cases`, status: lastParcelMatchStatus });
 
   (async () => {
     try {
       const CONCURRENCY = 5;
+      const saveCheckpoint = async () => {
+        pipeline.lastUpdated = new Date().toISOString();
+        const tmp = PIPELINE_DATA_FILE + '.parcel-match.tmp';
+        await fs.writeFile(tmp, JSON.stringify(pipeline, null, 2));
+        await fs.rename(tmp, PIPELINE_DATA_FILE);
+      };
+      const countyParcelCache = new Map();
+      const countyMatchFor = (parcel) => {
+        const key = String(parcel || '').replace(/\D/g, '');
+        if (!countyParcelCache.has(key)) countyParcelCache.set(key, lookupParcelById(parcel));
+        return countyParcelCache.get(key);
+      };
+      let pendingChanges = 0;
       for (let i = 0; i < targets.length; i += CONCURRENCY) {
+        let chunkChanges = 0;
+        let chunkRepaired = false;
         await Promise.all(targets.slice(i, i + CONCURRENCY).map(async (c) => {
           // Owner-confirmed cases are settled. Don't look them up again: their address is now the
-          // parcel layer's own spelling ("22 SAW MILL RUN CONDO 22"), which may not parse back
-          // into the same lookup, and a miss would mislabel a confirmed match as "no match".
+          // parcel layer's own spelling. Audit them directly by parcel ID so a stored owner-mailing
+          // city/ZIP can be repaired without trying to parse or rematch that spelling.
           if (c.addressSource === 'parcel-match') {
-            c.parcelMatchStatus = 'owner';
-            lastParcelMatchStatus.matched++;
+            try {
+              const countyMatch = await countyMatchFor(c.parcelNumber);
+              if (countyMatch) {
+                const audit = await repairHybridLocation(c, countyMatch);
+                if (audit.suspicious) lastParcelMatchStatus.suspicious++;
+                if (audit.repaired) {
+                  applyParcelMatch(c, audit.match);
+                  lastParcelMatchStatus.repaired++;
+                  chunkChanges++;
+                  chunkRepaired = true;
+                }
+              }
+              c.parcelMatchStatus = 'owner';
+              lastParcelMatchStatus.matched++;
+            } catch (e) {
+              // Preserve the earlier confirmed parcel and address if the audit service is unavailable.
+              lastParcelMatchStatus.errors++;
+            }
             lastParcelMatchStatus.processed++;
             return;
           }
           try {
-            const match = await matchParcelByAddress({ street: c.propertyAddress, zip: c.propertyZip, defendant: c.defendant });
+            const match = await matchParcelByAddress({
+              street: c.propertyAddress,
+              city: c.propertyCity,
+              zip: c.propertyZip,
+              defendant: c.defendant
+            });
             const applied = applyParcelMatch(c, match);
+            if (match?.locationCorrection) {
+              lastParcelMatchStatus.suspicious++;
+              lastParcelMatchStatus.repaired++;
+            }
             if (applied === 'owner') lastParcelMatchStatus.matched++;
             else if (applied === 'address') lastParcelMatchStatus.addressOnly++;
             else lastParcelMatchStatus.unmatched++;
+            chunkChanges++;
           } catch (e) {
             // Leave any earlier match in place; only the status says this check failed.
             c.parcelMatchStatus = 'error';
@@ -1307,15 +1354,21 @@ app.post('/api/pipeline/match-parcels', checkAuth, async (req, res) => {
           }
           lastParcelMatchStatus.processed++;
         }));
+        // A repair is durable as soon as its small batch completes, so a later
+        // service restart cannot discard the entire audit.
+        pendingChanges += chunkChanges;
+        if (chunkRepaired || pendingChanges >= 25) {
+          await saveCheckpoint();
+          pendingChanges = 0;
+        }
       }
 
-      pipeline.lastUpdated = new Date().toISOString();
-      await fs.writeFile(PIPELINE_DATA_FILE, JSON.stringify(pipeline, null, 2));
+      await saveCheckpoint();
 
       lastParcelMatchStatus.status = 'completed';
       lastParcelMatchStatus.completed = new Date().toISOString();
       const s = lastParcelMatchStatus;
-      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.unmatched} no match, ${s.errors} errors`);
+      console.log(`[match-parcels] ✓ ${s.total} cases: ${s.matched} owner-confirmed, ${s.addressOnly} address-only, ${s.repaired} addresses repaired, ${s.unmatched} no match, ${s.errors} errors`);
     } catch (error) {
       lastParcelMatchStatus.status = 'error';
       lastParcelMatchStatus.error = error.message;

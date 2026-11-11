@@ -1264,7 +1264,7 @@
             <button class="btn btn-outline filter-danger" onclick="stopScrape()" id="stopScrapeBtn" style="display:none;" title="Finish the cases in progress, save progress, and stop. The next Process All picks up where this left off.">Stop</button>
             <button class="btn btn-outline filter-danger owner-only" onclick="toggleClearLock()" id="clearLockBtn" title="Unlock Clear Pipeline" style="padding: 0.5rem 0.75rem;">🔒</button>
             <button class="btn btn-outline filter-danger owner-only" onclick="clearPipelineData()" id="clearBtn" disabled style="opacity: 0.5; cursor: not-allowed;">Clear Pipeline</button>
-            <button class="btn btn-outline owner-only" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="For cases with no parcel number (mortgage foreclosures), look up the defendant's address on the county parcel map. If the parcel's owner is the defendant, the card switches to that parcel. Uses cases already scraped -- no court scrape.">Find Mortgage Parcels</button>
+            <button class="btn btn-outline owner-only" onclick="matchMortgageParcels()" id="matchParcelsBtn" title="Find parcels for mortgage cases with no parcel number, then audit earlier matches for property addresses accidentally combined with an owner's mailing town or ZIP. Uses stored cases, county parcel data, and Census address verification -- no court scrape.">Find / Repair Parcels</button>
             <button class="btn btn-outline owner-only" onclick="refreshRecorder()" id="recorderBtn" title="Look up every pipeline parcel with an open case at the Recorder of Deeds (mortgages, satisfactions, deeds) for the payoff estimate. Runs automatically after each Process All; parcels checked in the last 2 weeks are skipped. Click again while running to stop.">Pull Recorder Data</button>
             <button class="btn btn-outline" onclick="exportExcel()" title="Download the uploaded court data as Excel with resolved parcels and newly closed statuses applied">Export Updated Excel</button>
             <button class="btn btn-outline filter-gold" id="sweetSpotFilter" onclick="toggleSweetSpot()">Sweet Spot Only</button>
@@ -3327,12 +3327,14 @@
                     const statusResp = await fetch('/api/pipeline/match-parcels/status', { headers: { 'X-Auth-Token': authToken } });
                     const statusResult = await statusResp.json();
                     const s = statusResult.status;
-                    if (s) btn.innerHTML = `Matching ${s.processed || 0}/${total}...`;
+                    if (s) btn.innerHTML = `Matching / auditing ${s.processed || 0}/${total}...`;
                     if (!statusResult.inProgress) {
                         if (s && s.status === 'completed') {
-                            alert(`Checked ${total} case(s) without a parcel number:\n` +
+                            alert(`Checked ${total} mortgage parcel case(s):\n` +
                                 `  Parcel matched (owner is the defendant): ${s.matched}\n` +
                                 `  Address is a parcel, different owner: ${s.addressOnly}\n` +
+                                `  Suspicious owner-mailing localities: ${s.suspicious || 0}\n` +
+                                `  Property addresses repaired: ${s.repaired || 0}\n` +
                                 `  No parcel at that address: ${s.unmatched}` +
                                 (s.errors ? `\n  Couldn't check (parcel map error): ${s.errors}` : ''));
                             await loadData(true);
