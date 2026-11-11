@@ -584,14 +584,17 @@
         }
         .filter-dropdown-option:hover { background: var(--surface-3); }
         .filter-dropdown-option input { accent-color: var(--brand-gold); }
-        #repeatDefendantFilterButton { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #repeatDefendantFilterButton.is-active { border-color: var(--brand-gold); color: var(--brand-gold-dark); font-weight: 600; }
-        .repeat-defendant-panel { width: 380px; max-height: 440px; }
-        .repeat-defendant-panel .filter-dropdown-options { max-height: 360px; }
-        .repeat-defendant-panel .filter-dropdown-option span:first-of-type { flex: 1; min-width: 0; }
-        .repeat-defendant-panel .opt-count { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
-        .repeat-defendant-panel .opt-divider { border-top: 1px solid var(--border); margin: 4px 0; }
-        .filter-dropdown-search { width: 100%; font: inherit; font-size: 0.8rem; padding: 5px 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); }
+        .repeat-panel-wrap { max-height: 330px; overflow-y: auto; }
+        .repeat-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .repeat-table th { position: sticky; top: 0; background: var(--surface-2); text-align: left; padding: 8px 20px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+        .repeat-table td { padding: 8px 20px; border-bottom: 1px solid var(--border); color: var(--ink); }
+        .repeat-table th.num, .repeat-table td.num { text-align: right; width: 1%; white-space: nowrap; }
+        .repeat-table td.rank { width: 1%; color: var(--muted); }
+        .repeat-table tbody tr { cursor: pointer; }
+        .repeat-table tbody tr:hover { background: var(--surface-3); }
+        .repeat-table tbody tr.is-active { background: var(--brand-gold-tint); font-weight: 600; }
+        .repeat-panel-note { padding: 12px 20px; color: var(--muted); font-size: 0.8rem; }
+        .repeat-panel-search { font: inherit; font-size: 0.78rem; padding: 5px 8px; width: 220px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); }
         .filter-dropdown-empty {
             padding: 12px;
             color: var(--muted);
@@ -1343,18 +1346,6 @@
                 </div>
             </div>
 
-            <div class="filter-dropdown-group" style="min-width: 190px;">
-                <button type="button" id="repeatDefendantFilterButton" class="filter-dropdown-button" onclick="renderRepeatDefendantOptions(); toggleFilterDropdown('repeatDefendantFilterDropdown', event)" title="Defendants with more than one case, open or closed. Pick one to see all of their properties, or show every repeat defendant at once.">All defendants</button>
-                <div id="repeatDefendantFilterDropdown" class="filter-dropdown-panel repeat-defendant-panel">
-                    <div class="filter-dropdown-actions">
-                        <input type="search" id="repeatDefendantSearch" class="filter-dropdown-search" placeholder="Find a defendant..." oninput="renderRepeatDefendantOptions()" autocomplete="off">
-                    </div>
-                    <div id="repeatDefendantOptions" class="filter-dropdown-options">
-                        <div class="filter-dropdown-empty">Loading...</div>
-                    </div>
-                </div>
-            </div>
-
             <div class="case-search-group">
                 <input type="search" id="caseSearch" class="case-search" placeholder="Search address, name, case, parcel, note, tag..."
                     oninput="onCaseSearchInput()" autocomplete="off">
@@ -1362,6 +1353,23 @@
         </div>
 
         <!-- Collapsible map (case-map.js). Panning, zooming, or drawing a radius or area filters the cards; a search overrides it. -->
+        <!-- Repeat defendants: a ranked list of defendants with open cases on 2+ properties. -->
+        <div class="case-map-panel" id="repeatPanel">
+            <button type="button" class="case-map-header" onclick="toggleRepeatPanel()" aria-expanded="false">
+                <span class="case-map-title">Repeat Defendants</span>
+                <span class="case-map-summary" id="repeatPanelSummary"></span>
+                <span class="case-map-arrow">&#9660;</span>
+            </button>
+            <div class="case-map-body">
+                <div class="case-map-toolbar">
+                    <input type="search" id="repeatPanelSearch" class="repeat-panel-search" placeholder="Find a defendant..." oninput="renderRepeatPanel()" autocomplete="off">
+                    <button type="button" class="case-map-btn" id="repeatPanelAllBtn" onclick="toggleAllRepeatDefendants()" title="Show the properties of every defendant in this list, each defendant's side by side">Show all of their properties</button>
+                    <span style="color: var(--muted);">Click a defendant to see their properties, on the cards and on the map.</span>
+                </div>
+                <div class="repeat-panel-wrap" id="repeatPanelRows"></div>
+            </div>
+        </div>
+
         <div id="montcoMapMount"></div>
 
         <div class="results-header">
@@ -1652,73 +1660,99 @@
             return null;
         }
 
-        // A repeat defendant has 2+ cases in all, open or closed (Hide Closed can drop
-        // the closed cards). Returns the card's repeat-defendant group, or null.
+        // A repeat defendant, for the panel and its "show all" view: open cases on two
+        // or more properties. Closed cases are shown alongside but do not qualify
+        // anyone on their own. Returns the card's repeat-defendant group, or null.
         function repeatDefendantGroup(card) {
             for (const m of (card._stackMembers || [card])) {
                 const group = m._defKey && montcoDefendantGroups.get(m._defKey);
-                if (group && group.totalCases > 1) return group;
+                if (group && group.activeProperties.size > 1) return group;
             }
             return null;
         }
 
-        function repeatDefendantCounts(group) {
-            return group.closed.length ? `(${group.openCases} open, ${group.closed.length} closed)` : `(${group.openCases} open)`;
+        // ---- Repeat Defendants panel ------------------------------------------
+        const REPEAT_PANEL_KEY = 'montcoRepeatPanel:open';
+        let repeatPanelListFor = null;
+        let repeatPanelList = [];
+
+        function repeatPanelIsOpen() {
+            const panel = document.getElementById('repeatPanel');
+            return !!panel && panel.classList.contains('open');
         }
 
-        // The dropdown: off, every repeat defendant, or one defendant. Rebuilt only
-        // when the data changes, so a half-typed search in it survives a reload.
-        let repeatDefendantListFor = null;
-        let repeatDefendantList = [];
-        function populateRepeatDefendantFilter() {
-            if (repeatDefendantListFor !== montcoDefendantGroups) {
-                repeatDefendantListFor = montcoDefendantGroups;
-                repeatDefendantList = [...montcoDefendantGroups.values()]
-                    .filter(g => g.totalCases > 1)
-                    .sort((a, b) => (b.totalCases - a.totalCases) || (b.openCases - a.openCases) || a.name.localeCompare(b.name));
+        function toggleRepeatPanel(force) {
+            const panel = document.getElementById('repeatPanel');
+            if (!panel) return;
+            const open = typeof force === 'boolean' ? force : !panel.classList.contains('open');
+            panel.classList.toggle('open', open);
+            panel.querySelector('.case-map-header').setAttribute('aria-expanded', String(open));
+            try { localStorage.setItem(REPEAT_PANEL_KEY, open ? '1' : '0'); } catch (e) {}
+            if (open) renderRepeatPanel();
+        }
+
+        // Called on every refresh: rebuild the ranking only when the data changed.
+        function updateRepeatPanel() {
+            if (repeatPanelListFor !== montcoDefendantGroups) {
+                repeatPanelListFor = montcoDefendantGroups;
+                repeatPanelList = [...montcoDefendantGroups.values()]
+                    .filter(g => g.activeProperties.size > 1)
+                    .sort((a, b) => (b.activeProperties.size - a.activeProperties.size) || (b.openCases - a.openCases)
+                        || (b.closed.length - a.closed.length) || a.name.localeCompare(b.name));
             }
-            const panel = document.getElementById('repeatDefendantFilterDropdown');
-            if (panel && panel.classList.contains('open')) renderRepeatDefendantOptions();
-            const button = document.getElementById('repeatDefendantFilterButton');
-            if (!button) return;
-            const focused = defendantFocus && montcoDefendantGroups.get(defendantFocus);
-            button.textContent = focused ? focused.name : repeatDefendantsOnly ? 'Every repeat defendant' : 'All defendants';
-            button.classList.toggle('is-active', !!focused || repeatDefendantsOnly);
+            const summary = document.getElementById('repeatPanelSummary');
+            if (summary) {
+                const focused = defendantFocus && montcoDefendantGroups.get(defendantFocus);
+                summary.textContent = `${repeatPanelList.length} ${repeatPanelList.length === 1 ? 'defendant has' : 'defendants have'} open cases on 2 or more properties`
+                    + (focused ? ` \u00b7 showing ${focused.name}` : repeatDefendantsOnly ? ' \u00b7 showing all of them' : '');
+            }
+            const allBtn = document.getElementById('repeatPanelAllBtn');
+            if (allBtn) {
+                allBtn.classList.toggle('is-active', repeatDefendantsOnly);
+                allBtn.textContent = repeatDefendantsOnly ? 'Showing all of their properties (click to stop)' : 'Show all of their properties';
+            }
+            if (repeatPanelIsOpen()) renderRepeatPanel();
         }
 
-        function renderRepeatDefendantOptions() {
-            const box = document.getElementById('repeatDefendantOptions');
+        function renderRepeatPanel() {
+            const box = document.getElementById('repeatPanelRows');
             if (!box) return;
-            const query = normalizeMontcoSearchText((document.getElementById('repeatDefendantSearch') || {}).value || '');
-            const current = defendantFocus || (repeatDefendantsOnly ? '__all__' : '');
-            const row = (value, name, count) => `<label class="filter-dropdown-option"><input type="radio" name="repeatDefendantOption" value="${escapeAttr(value)}"${value === current ? ' checked' : ''} onchange="selectRepeatDefendant(this.value)"><span>${escapeAttr(name)}</span>${count ? `<span class="opt-count">${count}</span>` : ''}</label>`;
-            const matches = repeatDefendantList.filter(g => !query || normalizeMontcoSearchText(g.name).includes(query));
-            let html = '';
-            if (!query) {
-                html += row('', 'All defendants', '');
-                html += row('__all__', 'Every repeat defendant', `${repeatDefendantList.length}`);
-                html += '<div class="opt-divider"></div>';
-            }
-            // A long list is slow to build and no use to scroll: show the top of it and
-            // let the search box reach the rest.
-            const LIMIT = 100;
-            html += matches.slice(0, LIMIT).map(g => row(g.key, g.name, repeatDefendantCounts(g))).join('');
-            if (matches.length > LIMIT) html += `<div class="filter-dropdown-empty">${matches.length - LIMIT} more. Type a name above to find them.</div>`;
-            if (!matches.length) html += `<div class="filter-dropdown-empty">${repeatDefendantList.length ? 'No repeat defendant matches that.' : 'No repeat defendants.'}</div>`;
-            box.innerHTML = html;
-        }
-
-        function selectRepeatDefendant(value) {
-            closeAllFilterDropdowns();
-            if (value && value !== '__all__') {
-                repeatDefendantsOnly = false;
-                focusDefendant(value);
+            const query = normalizeMontcoSearchText((document.getElementById('repeatPanelSearch') || {}).value || '');
+            const matches = repeatPanelList.filter(g => !query || normalizeMontcoSearchText(g.name).includes(query));
+            if (!matches.length) {
+                box.innerHTML = `<div class="repeat-panel-note">${repeatPanelList.length ? 'No defendant in this list matches that.' : 'No defendant has open cases on more than one property.'}</div>`;
                 return;
             }
+            const LIMIT = 200;
+            const rank = new Map(repeatPanelList.map((g, i) => [g.key, i + 1]));
+            const rows = matches.slice(0, LIMIT).map(g => `<tr class="${g.key === defendantFocus ? 'is-active' : ''}" data-defendant="${escapeAttr(g.key)}" onclick="selectRepeatDefendant(this.dataset.defendant)" title="${g.key === defendantFocus ? 'Click to go back to all properties' : 'Click to show their properties'}">
+                    <td class="rank">${rank.get(g.key)}</td>
+                    <td>${escapeAttr(g.name)}</td>
+                    <td class="num">${g.activeProperties.size}</td>
+                    <td class="num">${g.openCases}</td>
+                    <td class="num">${g.closed.length || '-'}</td>
+                </tr>`).join('');
+            box.innerHTML = `<table class="repeat-table">
+                    <thead><tr><th>#</th><th>Defendant</th><th class="num">Properties with an open case</th><th class="num">Open cases</th><th class="num">Closed cases</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`
+                + (matches.length > LIMIT ? `<div class="repeat-panel-note">${matches.length - LIMIT} more. Type a name above to find them.</div>` : '');
+        }
+
+        // Click a row to see that defendant; click it again to go back.
+        function selectRepeatDefendant(key) {
+            if (defendantFocus === key) { clearDefendantFocus(); return; }
+            repeatDefendantsOnly = false;
+            focusDefendant(key);
+        }
+
+        function toggleAllRepeatDefendants() {
             defendantFocus = null;
-            repeatDefendantsOnly = value === '__all__';
+            repeatDefendantsOnly = !repeatDefendantsOnly;
             loadData();
         }
+
+        try { if (localStorage.getItem(REPEAT_PANEL_KEY) === '1') document.getElementById('repeatPanel').classList.add('open'); } catch (e) {}
 
         function repeatDefendantBadge({ group, closed }) {
             const open = group.activeProperties.size;
@@ -1775,8 +1809,9 @@
             const search = document.getElementById('caseSearch');
             if (search) search.value = '';
             loadData().then(() => {
-                const header = document.querySelector('.results-header');
-                if (header) header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                // With the map open, land on it: it now shows just their properties.
+                const target = montcoMap.isOpen() ? document.getElementById('montcoMapMount') : document.querySelector('.results-header');
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
         }
 
@@ -2579,6 +2614,7 @@
         let montcoCoordsStatus = null;
         let montcoCoordsTimer = null;
         let montcoMapSource = [];   // cards after every filter except the map
+        let montcoMapFramedDefendant = null;   // defendant the map was last zoomed to
         let montcoSearchOverridesMap = false;   // a search is active, so the map does not narrow the cards
 
         // Dots are coloured by case type. A parcel with both kinds shows as a mortgage.
@@ -2586,7 +2622,8 @@
         // or a sheriff's deed is on record (already sold at sheriff sale).
         const MAP_COLORS = { mortgage: '#F28C28', lien: '#D62828', inactive: 'muted' };
         // A tag the user put on a property outranks its case type on the map.
-        const MAP_TAG_COLORS = [['PURSUE', '#16A34A'], ['PASS', '#7F1D1D'], ['VISITED', '#2563EB']];
+        // First match wins: a visited property shows as visited whatever else it is tagged.
+        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', '#7F1D1D']];
         function mapTagColor(tags) {
             const set = new Set((tags || []).map(t => String(t).toUpperCase()));
             const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));
@@ -2600,9 +2637,9 @@
                 { color: MAP_COLORS.mortgage, label: 'Mortgage' },
                 { color: MAP_COLORS.lien, label: 'Lien' },
                 { color: MAP_COLORS.inactive, label: 'Closed, sold at sheriff sale, or other' },
-                { color: MAP_TAG_COLORS[2][1], label: 'Visited' },
-                { color: MAP_TAG_COLORS[0][1], label: 'Pursue' },
-                { color: MAP_TAG_COLORS[1][1], label: 'Pass' }
+                { color: MAP_TAG_COLORS[0][1], label: 'Visited' },
+                { color: MAP_TAG_COLORS[1][1], label: 'Pursue' },
+                { color: MAP_TAG_COLORS[2][1], label: 'Pass' }
             ],
             onChange: onMontcoMapChange,
             onSelect: pinCardForCase
@@ -2662,6 +2699,12 @@
                 else unlocated++;
             }
             montcoMap.setItems(items);
+            // The dots are now just the selected defendant's properties: frame them,
+            // even if the map had been moved somewhere else.
+            if (defendantFocus !== montcoMapFramedDefendant) {
+                montcoMapFramedDefendant = defendantFocus;
+                if (defendantFocus) montcoMap.fit();
+            }
 
             const filter = montcoSearchOverridesMap ? null : montcoMap.getFilter();
             const shown = filter ? groups.filter(g => g._ll && filter(g._ll[0], g._ll[1])) : groups;
@@ -2834,7 +2877,7 @@
 
                 buildDefendantGroups(data);
                 if (defendantFocus && !montcoDefendantGroups.has(defendantFocus)) defendantFocus = null;
-                populateRepeatDefendantFilter();
+                updateRepeatPanel();
 
                 // Populate the city multi-select from the unfiltered data so options stay stable across filtering
                 populateCityFilter(cases, selectedCities);
@@ -2947,7 +2990,7 @@
                     });
                     visibleCases = visibleCases
                         .map((g, i) => ({ g, i, group: repeatDefendantGroup(g) }))
-                        .sort((a, b) => (b.group.totalCases - a.group.totalCases)
+                        .sort((a, b) => (b.group.activeProperties.size - a.group.activeProperties.size)
                             || (order.get(a.group.key) - order.get(b.group.key)) || (a.i - b.i))
                         .map(x => x.g);
                 }

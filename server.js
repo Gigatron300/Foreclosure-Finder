@@ -15,7 +15,7 @@ const montcoRecorder = require('./scrapers/montco-recorder');
 const { normalizePostalCities } = require('./scrapers/montco-postal-audit');
 const montcoCoords = require('./scrapers/montco-coords');
 const { parseCSV: parseMontcoCourtCSV } = require('./scrapers/montco-courts');
-const { defendantKey } = require('./scrapers/defendant-key');
+const { defendantKey, ownerDefendantKey } = require('./scrapers/defendant-key');
 const camdenCoords = require('./scrapers/camden-coords');
 const recorderParcelKey = montcoRecorder.parcelKey;
 const readRecorderCache = () => montcoRecorder.readCache();
@@ -1842,6 +1842,7 @@ app.get('/api/camden', checkAuth, async (req, res) => {
         : (ann.userTag ? [ann.userTag] : (c.userTag ? [c.userTag] : []));
       return {
         ...scored,
+        defendantKey: ownerDefendantKey(c.primaryDefendant),
         userTags,
         userNotes: ann.userNotes ?? c.userNotes ?? '',
         scoreHistory: ann.scoreHistory ?? c.scoreHistory ?? []

@@ -405,6 +405,23 @@
         .property-card.map-pinned { outline: 3px solid var(--brand-gold); outline-offset: 2px; }
         .map-pin-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--brand-gold); color: var(--on-gold); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
         .map-pin-bar button { background: none; border: 0; color: inherit; font-size: 0.9rem; cursor: pointer; padding: 0 2px; }
+        button.repeat-flag { font-family: inherit; line-height: inherit; cursor: pointer; }
+        button.repeat-flag:hover { border-color: var(--brand-gold); }
+        .defendant-focus-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: -0.5rem 0 1.25rem; padding: 10px 16px; background: var(--brand-gold-tint); border: 1px solid color-mix(in srgb, var(--brand-gold) 45%, transparent); color: var(--ink); font-size: 0.85rem; }
+        .defendant-focus-bar[hidden] { display: none; }
+        .defendant-focus-bar .focus-note { color: var(--muted); }
+        .defendant-focus-bar button { margin-left: auto; font: inherit; font-size: 0.78rem; padding: 4px 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--border-strong); cursor: pointer; }
+        .repeat-panel-wrap { max-height: 330px; overflow-y: auto; }
+        .repeat-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .repeat-table th { position: sticky; top: 0; background: var(--surface-2); text-align: left; padding: 8px 20px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+        .repeat-table td { padding: 8px 20px; border-bottom: 1px solid var(--border); color: var(--ink); }
+        .repeat-table th.num, .repeat-table td.num { text-align: right; width: 1%; white-space: nowrap; }
+        .repeat-table td.rank { width: 1%; color: var(--muted); }
+        .repeat-table tbody tr { cursor: pointer; }
+        .repeat-table tbody tr:hover { background: var(--surface-3); }
+        .repeat-table tbody tr.is-active { background: var(--brand-gold-tint); font-weight: 600; }
+        .repeat-panel-note { padding: 12px 20px; color: var(--muted); font-size: 0.8rem; }
+        .repeat-panel-search { font: inherit; font-size: 0.78rem; padding: 5px 8px; width: 220px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); }
         .results-header h2 { font-family: var(--serif); font-size: 1.7rem; font-weight: 600; color: var(--ink); }
         .case-count { color: var(--muted); font-family: 'Montserrat', sans-serif; font-size: 1rem; font-weight: 500; }
 
@@ -1150,11 +1167,29 @@
             </div>
 
             <!-- Collapsible map (case-map.js). Panning, zooming, or drawing a radius or area filters the cards; a search overrides it. -->
+            <!-- Repeat defendants: a ranked list of defendants with open cases on 2+ properties. -->
+            <div class="case-map-panel" id="repeatPanel">
+                <button type="button" class="case-map-header" onclick="toggleRepeatPanel()" aria-expanded="false">
+                    <span class="case-map-title">Repeat Defendants</span>
+                    <span class="case-map-summary" id="repeatPanelSummary"></span>
+                    <span class="case-map-arrow">&#9660;</span>
+                </button>
+                <div class="case-map-body">
+                    <div class="case-map-toolbar">
+                        <input type="search" id="repeatPanelSearch" class="repeat-panel-search" placeholder="Find a defendant..." oninput="renderRepeatPanel()" autocomplete="off">
+                        <button type="button" class="case-map-btn" id="repeatPanelAllBtn" onclick="toggleAllRepeatDefendants()" title="Show the cases of every defendant in this list, each defendant's side by side">Show all of their properties</button>
+                        <span style="color: var(--muted);">Click a defendant to see their properties, on the cards and on the map.</span>
+                    </div>
+                    <div class="repeat-panel-wrap" id="repeatPanelRows"></div>
+                </div>
+            </div>
+
             <div id="camdenMapMount"></div>
 
             <div class="results-header">
                 <h2>Cases <span class="case-count" id="caseCount">(0)</span></h2>
             </div>
+            <div class="defendant-focus-bar" id="defendantFocusBar" hidden></div>
 
             <datalist id="tagSuggestions">
                 <option value="TRACK">
@@ -1812,6 +1847,208 @@
             };
         }
 
+        // ---- Same defendant on several properties ----------------------------
+        // Each case arrives with a defendantKey that is the same across name spellings
+        // and blank for lienholders (the State, agencies, lenders) named as defendant.
+        let repeatDefendantsOnly = false;
+        let defendantFocus = null;       // defendant key whose cases are all being shown
+        let camdenMapFramedDefendant = null;
+
+        const escAttr = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const normText = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+        const caseIsClosed = c => String(c.courtStatus || '').toUpperCase() === 'CLOSED';
+        const placeOf = c => [c.propertyAddress || 'Address pending', c.uspsTown || c.town].filter(Boolean).join(', ');
+
+        // One property = one street address in a town, or one block and lot.
+        function defendantPropertyKey(c) {
+            const address = normText(c.propertyAddress);
+            if (address) return `a:${address}|${normText(c.town)}`;
+            return c.block && c.lot ? `b:${normText(c.town)}|${c.block}|${c.lot}` : 'c:' + c.instrumentNumber;
+        }
+
+        // Built from every case (not just the filtered ones), so a badge always
+        // describes the defendant's full record.
+        //   activeProperties: properties with a case not CLOSED in court
+        //   pageProperties:   every property of theirs (what a click shows)
+        //   closed:           their CLOSED cases
+        let camdenDefendantGroups = new Map();
+        let camdenDefendantGroupsFor = null;
+        function buildDefendantGroups(data) {
+            if (camdenDefendantGroupsFor === data) return;
+            const groups = new Map();
+            const addTo = (map, key, c) => { if (!map.has(key)) map.set(key, []); map.get(key).push(c); };
+            for (const c of data.cases || []) {
+                c._defKey = c.defendantKey || '';
+                if (!c._defKey) continue;
+                let group = groups.get(c._defKey);
+                if (!group) groups.set(c._defKey, group = { key: c._defKey, name: c.primaryDefendant, activeProperties: new Map(), pageProperties: new Map(), closed: [], openCases: 0 });
+                const pk = defendantPropertyKey(c);
+                addTo(group.pageProperties, pk, c);
+                if (caseIsClosed(c)) group.closed.push(c);
+                else { addTo(group.activeProperties, pk, c); group.openCases++; }
+            }
+            for (const group of groups.values()) group.closed.sort((a, b) => (a.daysSinceFiling || 0) - (b.daysSinceFiling || 0));
+            camdenDefendantGroups = groups;
+            camdenDefendantGroupsFor = data;
+        }
+
+        // What the badge on a card has to say, or null for no badge: the defendant is
+        // open on other properties, or has closed cases other than this one.
+        function defendantRecord(c) {
+            const group = c._defKey && camdenDefendantGroups.get(c._defKey);
+            if (!group) return null;
+            const closed = group.closed.filter(x => x !== c);
+            return (group.activeProperties.size > 1 || closed.length) ? { group, closed } : null;
+        }
+
+        // A repeat defendant, for the panel and its "show all" view: open cases on two
+        // or more properties. Closed cases are shown alongside but qualify no one.
+        function repeatDefendantGroup(c) {
+            const group = c._defKey && camdenDefendantGroups.get(c._defKey);
+            return group && group.activeProperties.size > 1 ? group : null;
+        }
+
+        function repeatDefendantBadge({ group, closed }) {
+            const open = group.activeProperties.size;
+            const label = open > 1
+                ? `Defendant on ${open} properties${closed.length ? ` \u00b7 ${closed.length} closed` : ''}`
+                : `Defendant: ${closed.length} closed ${closed.length === 1 ? 'case' : 'cases'}`;
+            const lines = [group.name];
+            if (open > 1) {
+                lines.push('', `Open cases on ${open} properties:`);
+                const props = [...group.activeProperties.values()];
+                for (const members of props.slice(0, 12)) lines.push(`  ${placeOf(members[0])} (${members.map(x => x.instrumentNumber).join(', ')})`);
+                if (props.length > 12) lines.push(`  ...and ${props.length - 12} more`);
+            }
+            if (closed.length) {
+                lines.push('', `Closed cases (${closed.length}):`);
+                for (const x of closed.slice(0, 12)) lines.push('  ' + [x.instrumentNumber, x.filingDate ? 'filed ' + x.filingDate : '', placeOf(x)].filter(Boolean).join(' \u00b7 '));
+                if (closed.length > 12) lines.push(`  ...and ${closed.length - 12} more`);
+            }
+            const clickable = group.pageProperties.size > 1 || (group.openCases + group.closed.length) > 1;
+            if (clickable) lines.push('', 'Click to show all of their cases.');
+            const title = escAttr(lines.join('\n'));
+            return clickable
+                ? `<button type="button" class="repeat-flag" data-defendant="${escAttr(group.key)}" onclick="focusDefendant(this.dataset.defendant)" title="${title}"><span class="repeat-dot"></span>${label}</button>`
+                : `<span class="repeat-flag" title="${title}"><span class="repeat-dot"></span>${label}</span>`;
+        }
+
+        function renderDefendantFocusBar(visibleCases) {
+            const bar = document.getElementById('defendantFocusBar');
+            if (!bar) return;
+            const group = defendantFocus && camdenDefendantGroups.get(defendantFocus);
+            if (!group) { bar.hidden = true; bar.innerHTML = ''; return; }
+            const total = group.openCases + group.closed.length;
+            const hidden = total - visibleCases.length;
+            const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+            bar.innerHTML = `<span>Every case for <strong>${escAttr(group.name)}</strong>: ${plural(group.openCases, 'open case', 'open cases')} on ${plural(group.activeProperties.size, 'property', 'properties')}`
+                + (group.closed.length ? `, ${plural(group.closed.length, 'closed case', 'closed cases')}` : '') + '</span>'
+                + (hidden > 0 ? `<span class="focus-note">${hidden} hidden by the filters above</span>` : '')
+                + '<button type="button" onclick="clearDefendantFocus()">&#10005; Back to all cases</button>';
+            bar.hidden = false;
+        }
+
+        function focusDefendant(key) {
+            defendantFocus = key;
+            repeatDefendantsOnly = false;
+            // The badge is often clicked from a search result; that search would hide
+            // the defendant's other cases.
+            const search = document.getElementById('caseSearch');
+            if (search) search.value = '';
+            loadData(false).then(() => {
+                // With the map open, land on it: it now shows just their properties.
+                const target = camdenMap.isOpen() ? document.getElementById('camdenMapMount') : document.querySelector('.results-header');
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
+        function clearDefendantFocus() {
+            defendantFocus = null;
+            loadData(false);
+        }
+
+        // ---- Repeat Defendants panel ------------------------------------------
+        const REPEAT_PANEL_KEY = 'camdenRepeatPanel:open';
+        let repeatPanelListFor = null;
+        let repeatPanelList = [];
+
+        function repeatPanelIsOpen() {
+            const panel = document.getElementById('repeatPanel');
+            return !!panel && panel.classList.contains('open');
+        }
+
+        function toggleRepeatPanel() {
+            const panel = document.getElementById('repeatPanel');
+            if (!panel) return;
+            const open = !panel.classList.contains('open');
+            panel.classList.toggle('open', open);
+            panel.querySelector('.case-map-header').setAttribute('aria-expanded', String(open));
+            try { localStorage.setItem(REPEAT_PANEL_KEY, open ? '1' : '0'); } catch (e) {}
+            if (open) renderRepeatPanel();
+        }
+
+        // Called on every refresh: rebuild the ranking only when the data changed.
+        function updateRepeatPanel() {
+            if (repeatPanelListFor !== camdenDefendantGroups) {
+                repeatPanelListFor = camdenDefendantGroups;
+                repeatPanelList = [...camdenDefendantGroups.values()]
+                    .filter(g => g.activeProperties.size > 1)
+                    .sort((a, b) => (b.activeProperties.size - a.activeProperties.size) || (b.openCases - a.openCases)
+                        || (b.closed.length - a.closed.length) || a.name.localeCompare(b.name));
+            }
+            const summary = document.getElementById('repeatPanelSummary');
+            if (summary) {
+                const focused = defendantFocus && camdenDefendantGroups.get(defendantFocus);
+                summary.textContent = `${repeatPanelList.length} ${repeatPanelList.length === 1 ? 'defendant has' : 'defendants have'} open cases on 2 or more properties`
+                    + (focused ? ` \u00b7 showing ${focused.name}` : repeatDefendantsOnly ? ' \u00b7 showing all of them' : '');
+            }
+            const allBtn = document.getElementById('repeatPanelAllBtn');
+            if (allBtn) {
+                allBtn.classList.toggle('is-active', repeatDefendantsOnly);
+                allBtn.textContent = repeatDefendantsOnly ? 'Showing all of their properties (click to stop)' : 'Show all of their properties';
+            }
+            if (repeatPanelIsOpen()) renderRepeatPanel();
+        }
+
+        function renderRepeatPanel() {
+            const box = document.getElementById('repeatPanelRows');
+            if (!box) return;
+            const query = normText((document.getElementById('repeatPanelSearch') || {}).value || '');
+            const matches = repeatPanelList.filter(g => !query || normText(g.name).includes(query));
+            if (!matches.length) {
+                box.innerHTML = `<div class="repeat-panel-note">${repeatPanelList.length ? 'No defendant in this list matches that.' : 'No defendant has open cases on more than one property.'}</div>`;
+                return;
+            }
+            const LIMIT = 200;
+            const rank = new Map(repeatPanelList.map((g, i) => [g.key, i + 1]));
+            const rows = matches.slice(0, LIMIT).map(g => `<tr class="${g.key === defendantFocus ? 'is-active' : ''}" data-defendant="${escAttr(g.key)}" onclick="selectRepeatDefendant(this.dataset.defendant)" title="${g.key === defendantFocus ? 'Click to go back to all cases' : 'Click to show their cases'}">
+                    <td class="rank">${rank.get(g.key)}</td>
+                    <td>${escAttr(g.name)}</td>
+                    <td class="num">${g.activeProperties.size}</td>
+                    <td class="num">${g.openCases}</td>
+                    <td class="num">${g.closed.length || '-'}</td>
+                </tr>`).join('');
+            box.innerHTML = `<table class="repeat-table">
+                    <thead><tr><th>#</th><th>Defendant</th><th class="num">Properties with an open case</th><th class="num">Open cases</th><th class="num">Closed cases</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>`
+                + (matches.length > LIMIT ? `<div class="repeat-panel-note">${matches.length - LIMIT} more. Type a name above to find them.</div>` : '');
+        }
+
+        // Click a row to see that defendant; click it again to go back.
+        function selectRepeatDefendant(key) {
+            if (defendantFocus === key) { clearDefendantFocus(); return; }
+            focusDefendant(key);
+        }
+
+        function toggleAllRepeatDefendants() {
+            defendantFocus = null;
+            repeatDefendantsOnly = !repeatDefendantsOnly;
+            loadData(false);
+        }
+
+        try { if (localStorage.getItem(REPEAT_PANEL_KEY) === '1') document.getElementById('repeatPanel').classList.add('open'); } catch (e) {}
+
         // ---- Map panel -------------------------------------------------------
         // Coordinates arrive separately from the cases (/api/camden/coords), keyed by
         // instrument number, and only once the map is first opened.
@@ -1827,7 +2064,8 @@
         const MAP_COLORS = { MORTGAGE: '#F28C28', TAX_LIEN: '#D62828', inactive: 'muted' };
         const mapCaseId = c => String(c.instrumentNumber || '').replace(/[^\w.\-]/g, '');
         // A tag the user put on a property outranks its case type on the map.
-        const MAP_TAG_COLORS = [['PURSUE', '#16A34A'], ['PASS', '#7F1D1D'], ['VISITED', '#2563EB']];
+        // First match wins: a visited property shows as visited whatever else it is tagged.
+        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', '#7F1D1D']];
         function mapTagColor(tags) {
             const set = new Set((tags || []).map(t => String(t).toUpperCase()));
             const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));
@@ -1841,9 +2079,9 @@
                 { color: MAP_COLORS.MORTGAGE, label: 'Mortgage' },
                 { color: MAP_COLORS.TAX_LIEN, label: 'Tax lien' },
                 { color: MAP_COLORS.inactive, label: 'Closed, sheriff sale run, or other' },
-                { color: MAP_TAG_COLORS[2][1], label: 'Visited' },
-                { color: MAP_TAG_COLORS[0][1], label: 'Pursue' },
-                { color: MAP_TAG_COLORS[1][1], label: 'Pass' }
+                { color: MAP_TAG_COLORS[0][1], label: 'Visited' },
+                { color: MAP_TAG_COLORS[1][1], label: 'Pursue' },
+                { color: MAP_TAG_COLORS[2][1], label: 'Pass' }
             ],
             onChange: onCamdenMapChange,
             onSelect: pinCardForCase
@@ -1888,6 +2126,12 @@
                 else unlocated++;
             }
             camdenMap.setItems(items);
+            // The dots are now just the selected defendant's properties: frame them,
+            // even if the map had been moved somewhere else.
+            if (defendantFocus !== camdenMapFramedDefendant) {
+                camdenMapFramedDefendant = defendantFocus;
+                if (defendantFocus) camdenMap.fit();
+            }
 
             const filter = camdenSearchOverridesMap ? null : camdenMap.getFilter();
             const shown = filter ? cases.filter(c => c._ll && filter(c._ll[0], c._ll[1])) : cases;
@@ -2060,6 +2304,13 @@
             let cases = applyCamdenMap(source);
             const mapFiltering = cases !== source;
             cases = sortCases(cases, document.getElementById('sortBy').value);
+            // "Show all": each defendant's cases side by side, biggest portfolios first.
+            if (repeatDefendantsOnly && !defendantFocus) {
+                const order = new Map();
+                for (const c of cases) if (!order.has(c._defKey)) order.set(c._defKey, order.size);
+                const size = c => (camdenDefendantGroups.get(c._defKey) || { activeProperties: new Map() }).activeProperties.size;
+                cases = cases.map((c, i) => ({ c, i })).sort((a, b) => (size(b.c) - size(a.c)) || (order.get(a.c._defKey) - order.get(b.c._defKey)) || (a.i - b.i)).map(x => x.c);
+            }
 
             document.getElementById('totalCases').textContent = cases.length;
             document.getElementById('mortgageCount').textContent = cases.filter(c => c.plaintiffType === 'MORTGAGE').length;
@@ -2164,6 +2415,9 @@
 
             try {
                 const data = await fetchCamdenData(forceRefresh);
+                buildDefendantGroups(data);
+                if (defendantFocus && !camdenDefendantGroups.has(defendantFocus)) defendantFocus = null;
+                updateRepeatPanel();
 
                 if (data.lastUpdated) {
                     document.getElementById('statusText').textContent = `Last updated: ${getTimeAgo(new Date(data.lastUpdated))}`;
@@ -2226,6 +2480,10 @@
                     });
                 }
 
+                if (defendantFocus) cases = cases.filter(c => c._defKey === defendantFocus);
+                else if (repeatDefendantsOnly) cases = cases.filter(c => repeatDefendantGroup(c));
+                renderDefendantFocusBar(cases);
+
                 if (searchTerms.length) {
                     cases = cases.filter(c => caseMatchesSearch(c, searchTerms));
                 }
@@ -2233,7 +2491,7 @@
                 // Map last: its dots are everything the filters above let through, and its
                 // view (or a radius / area drawn on it) then narrows the cards. A search
                 // overrides that: it finds a property wherever the map happens to be.
-                camdenSearchOverridesMap = searchTerms.length > 0;
+                camdenSearchOverridesMap = searchTerms.length > 0 || !!defendantFocus;
                 if (forceRefresh) camdenCoordsRequested = false;
                 // Stats that do not depend on the map
                 document.getElementById('openCount').textContent = allCases.filter(c => c.courtStatus === 'OPEN').length || '-';
@@ -2843,6 +3101,7 @@
                             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
                                 ${wippUrl ? `<a href="${wippUrl}" target="_blank" rel="noopener" class="wipp-link" title="Open the WIPP tax lookup for ${town}">WIPP</a>` : ''}
                                 ${onSheriffSale ? `<span class="sheriff-flag" title="This address appears in Sheriff Sales data"><span class="sheriff-dot"></span>On Sheriff Sale</span>` : ''}
+                                ${(() => { const info = defendantRecord(c); return info ? repeatDefendantBadge(info) : ''; })()}
                                 ${isRepeatAddress ? `<span class="repeat-flag" title="This address appears in ${repeatCount} cases"><span class="repeat-dot"></span>Repeat x${repeatCount}</span>` : ''}
                             </div>
                         </div>

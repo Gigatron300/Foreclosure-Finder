@@ -21,4 +21,13 @@ function defendantKey(name) {
   return [...new Set(words)].sort().join(' ');
 }
 
-module.exports = { defendantKey };
+// Camden's "primary defendant" is sometimes a lienholder named in the suit (the
+// State, a county agency, a lender) rather than the owner. Those would look like
+// repeat defendants on hundreds of properties, so they get no key.
+const INSTITUTION = /\b(STATE|COUNTY|UNITED STATES|NEW JERSEY|CITY OF|TOWNSHIP|BOROUGH|MUNICIPAL|AUTHORITY|AGENCY|DEPARTMENT|SECRETARY|COMMISSION|INTERNAL REVENUE|BANK|MORTGAGE|CREDIT UNION|FUNDING|FINANCE|FINANCIAL|LOAN|LENDING|HOUSING|INSURANCE|HOSPITAL|SERVICES|ASSOCIATION)\b/;
+function ownerDefendantKey(name) {
+  const upper = String(name || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ');
+  return INSTITUTION.test(upper) ? '' : defendantKey(name);
+}
+
+module.exports = { defendantKey, ownerDefendantKey };

@@ -511,6 +511,8 @@
             isOpen: () => open,
             /** True once the map exists, i.e. dots can be drawn and a filter can apply. */
             isReady: () => !!map,
+            /** Frame every plotted dot now, whether or not the user has moved the map. */
+            fit() { if (open && map) fitToItems(); },
             /** items: [{ id, lat, lng, color, title, subtitle, meta, onTop }] */
             setItems(next) {
                 items = next || [];
