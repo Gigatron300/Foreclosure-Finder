@@ -2104,7 +2104,8 @@
         const mapCaseId = c => String(c.instrumentNumber || '').replace(/[^\w.\-]/g, '');
         // A tag the user put on a property outranks its case type on the map.
         // First match wins: a visited property shows as visited whatever else it is tagged.
-        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', 'ink']];   // 'ink' = black, or near-white in the dark theme so it stays visible
+        // DOCS PULLED comes last: it marks the earliest stage, so any decision tag outranks it.
+        const MAP_TAG_COLORS = [['VISITED', '#2563EB'], ['PURSUE', '#16A34A'], ['PASS', 'ink'], ['DOCS PULLED', '#7C3AED']];   // 'ink' = black, or near-white in the dark theme so it stays visible
         function mapTagColor(tags) {
             const set = new Set((tags || []).map(t => String(t).toUpperCase()));
             const hit = MAP_TAG_COLORS.find(([tag]) => set.has(tag));
@@ -2120,7 +2121,8 @@
                 { color: MAP_COLORS.inactive, label: 'Closed, sheriff sale run, or other' },
                 { color: MAP_TAG_COLORS[0][1], label: 'Visited' },
                 { color: MAP_TAG_COLORS[1][1], label: 'Pursue' },
-                { color: MAP_TAG_COLORS[2][1], label: 'Pass' }
+                { color: MAP_TAG_COLORS[2][1], label: 'Pass' },
+                { color: MAP_TAG_COLORS[3][1], label: 'Docs pulled' }
             ],
             onChange: onCamdenMapChange,
             onSelect: pinCardForCase
@@ -3566,6 +3568,11 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
                 patchCachedCase(item.id, { courtDocs: result.courtDocs });
                 const slot = document.querySelector(`[data-docs-for="${item.id}"] [data-docs-marker]`);
                 if (slot) slot.innerHTML = courtDocsMarkerHtml(result.courtDocs);
+                // The server also adds the DOCS PULLED tag; show it on the card.
+                if (Array.isArray(result.userTags)) {
+                    applySavedEdit(item.id, { userTags: result.userTags });
+                    renderTagPills(item.id, result.userTags);
+                }
             } catch (e) { /* the files are saved either way; the marker shows after the next pull */ }
         }
 

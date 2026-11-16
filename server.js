@@ -1791,9 +1791,16 @@ app.post('/api/camden/court-docs', checkAuth, async (req, res) => {
       fileCount: Math.max(0, parseInt(fileCount, 10) || 0),
       property: String(property || '').slice(0, 160)
     };
-    annotations[instrumentNumber].courtDocs = courtDocs;
+    const ann = annotations[instrumentNumber];
+    ann.courtDocs = courtDocs;
+    // Tag the card too, so pulled cases can be filtered. The owner removes the tag by hand
+    // after a deep dive; a later pull puts it back.
+    const tags = Array.isArray(ann.userTags) ? [...ann.userTags] : (ann.userTag ? [ann.userTag] : []);
+    delete ann.userTag;
+    if (!tags.includes('DOCS PULLED')) tags.push('DOCS PULLED');
+    ann.userTags = tags;
     await writeAnnotations(annotations);
-    res.json({ success: true, courtDocs });
+    res.json({ success: true, courtDocs, userTags: tags });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
