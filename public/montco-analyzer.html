@@ -1,0 +1,1876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="/theme.js"></script>
+<script src="/nav-access.js"></script>
+<title>MontCo Analyzer | Blake Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: fixed input rail on the left, metrics board on the right; dense ledger styling, tabular numerals everywhere numbers align. */
+:root {
+  --bg: #f4f3ef;
+  --surface: #fcfcfb;
+  --surface-2: #f0efe9;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --hairline: #e1e0d9;
+  --accent: #2a78d6;
+  --accent-ink: #1c5cab;
+  --good: #006300;
+  --good-fill: #0ca30c;
+  --warn: #8a5a00;
+  --warn-fill: #fab219;
+  --crit: #b22222;
+  --crit-fill: #d03b3b;
+  --tint-pos: 42,120,214;   /* blue pole for profit shading */
+  --tint-neg: 227,73,72;    /* red pole for loss shading */
+  --radius: 10px;
+  --mono-nums: "tabular-nums";
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #232322;
+  --ink: #f0efec;
+  --ink-2: #c3c2b7;
+  --ink-3: #898781;
+  --hairline: #2c2c2a;
+  --accent: #3987e5;
+  --accent-ink: #86b6ef;
+  --good: #0ca30c;
+  --crit: #e66767;
+  --tint-pos: 57,135,229;
+  --tint-neg: 230,103,103;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header.app {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 20px; border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  position: sticky; top: 0; z-index: 30;
+}
+header.app h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+header.app .sub { color: var(--ink-3); font-size: 12px; }
+.tabs { margin-left: auto; display: flex; gap: 6px; }
+.tabbtn {
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--ink-2);
+  padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.tabbtn[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tabbtn:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.wrap { display: grid; grid-template-columns: 400px 1fr; gap: 18px; padding: 18px 20px 60px; max-width: 1480px; margin: 0 auto; }
+@media (max-width: 1020px) { .wrap { grid-template-columns: 1fr; } }
+
+/* ----- input rail ----- */
+.rail { display: flex; flex-direction: column; gap: 14px; }
+.card {
+  background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.card h2 {
+  margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--ink-3); font-weight: 700; display: flex; align-items: center; gap: 8px;
+}
+details.card summary { cursor: pointer; list-style: none; }
+details.card summary::-webkit-details-marker { display: none; }
+details.card summary h2 { margin: 0; }
+details.card summary h2::after { content: "+"; margin-left: auto; color: var(--ink-3); font-size: 15px; font-weight: 400; }
+details.card[open] summary h2::after { content: "\2212"; }
+details.card[open] summary { margin-bottom: 10px; display: block; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field.full { grid-column: 1 / -1; }
+.field label { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+.field .hint { font-size: 11px; color: var(--ink-3); }
+.in {
+  display: flex; align-items: center; border: 1px solid var(--hairline); border-radius: 8px;
+  background: var(--surface); overflow: hidden;
+}
+.in .pre, .in .post { padding: 0 8px; color: var(--ink-3); font-size: 12.5px; background: var(--surface-2); align-self: stretch; display: flex; align-items: center; border-right: 1px solid var(--hairline); }
+.in .post { border-right: 0; border-left: 1px solid var(--hairline); }
+.in input, .in select {
+  flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink);
+  padding: 8px 10px; font: inherit; font-variant-numeric: var(--mono-nums);
+}
+.in input:focus, .in select:focus { outline: none; }
+textarea {
+  width: 100%; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface);
+  color: var(--ink); padding: 8px 10px; font: inherit; resize: vertical; min-height: 54px;
+}
+.seg { display: flex; border: 1px solid var(--hairline); border-radius: 8px; overflow: hidden; }
+.seg button {
+  flex: 1; border: 0; background: var(--surface); color: var(--ink-2); padding: 7px 4px;
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; border-right: 1px solid var(--hairline);
+}
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.subtotal {
+  margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2);
+  display: flex; justify-content: space-between; font-weight: 700; font-variant-numeric: var(--mono-nums);
+}
+.subtotal .lbl { color: var(--ink-2); font-weight: 600; }
+.flag { font-size: 12px; margin-top: 6px; }
+.flag.bad { color: var(--crit); font-weight: 600; }
+.flag.ok { color: var(--good); font-weight: 600; }
+
+/* exit cards accent stripes */
+.card.exitA { border-top: 3px solid var(--accent); }
+.card.exitB { border-top: 3px solid #eb6834; }
+
+/* ----- results board ----- */
+.board { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.verdict {
+  border-radius: var(--radius); border: 1px solid var(--hairline); background: var(--surface);
+  padding: 16px 18px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 999px;
+  font-weight: 800; font-size: 13px; letter-spacing: 0.02em;
+}
+.chip.good { background: var(--good-fill); color: #fff; }
+.chip.warn { background: var(--warn-fill); color: #0b0b0b; }
+.chip.crit { background: var(--crit-fill); color: #fff; }
+.chip.neutral { background: var(--surface-2); color: var(--ink-2); }
+.verdict .why { color: var(--ink-2); font-size: 13.5px; flex: 1; min-width: 240px; }
+.verdict .why strong { color: var(--ink); }
+
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .duo { grid-template-columns: 1fr; } }
+.stratcard { position: relative; }
+.stratcard h3 { margin: 0 0 2px; font-size: 15px; }
+.stratcard .tagline { color: var(--ink-3); font-size: 12px; margin-bottom: 10px; }
+.stratcard.rec { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.recbadge {
+  position: absolute; top: -9px; right: 12px; background: var(--accent); color: #fff;
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 2px 9px; border-radius: 999px;
+}
+.bignum { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: var(--mono-nums); }
+.bignum.neg { color: var(--crit); }
+.bignum.pos { color: var(--good); }
+.statrows { display: flex; flex-direction: column; margin-top: 8px; }
+.statrows .r {
+  display: flex; justify-content: space-between; gap: 10px; padding: 5px 0;
+  border-top: 1px solid var(--hairline); font-variant-numeric: var(--mono-nums);
+}
+.statrows .r .k { color: var(--ink-2); }
+.statrows .r .v { font-weight: 700; }
+.statrows .r .v.neg { color: var(--crit); }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 12px 14px; }
+.tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 700; }
+.tile .v { font-size: 20px; font-weight: 800; margin-top: 3px; font-variant-numeric: var(--mono-nums); }
+.tile .s { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+
+table.ledger { width: 100%; border-collapse: collapse; font-variant-numeric: var(--mono-nums); }
+table.ledger th, table.ledger td { padding: 6px 8px; text-align: right; border-top: 1px solid var(--hairline); font-size: 13px; }
+table.ledger th:first-child, table.ledger td:first-child { text-align: left; }
+table.ledger thead th { border-top: 0; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+table.ledger .sec td { font-weight: 700; background: var(--surface-2); }
+table.ledger .tot td { font-weight: 800; border-top: 2px solid var(--ink-3); }
+.neg { color: var(--crit); }
+.pos { color: var(--good); }
+
+.senswrap { overflow-x: auto; }
+table.sens { border-collapse: collapse; font-variant-numeric: var(--mono-nums); min-width: 540px; width: 100%; }
+table.sens th, table.sens td { padding: 7px 10px; text-align: right; font-size: 13px; border: 1px solid var(--hairline); }
+table.sens th { color: var(--ink-2); font-weight: 600; background: var(--surface-2); }
+table.sens td.cur { outline: 2px solid var(--accent); outline-offset: -2px; }
+table.sens .cellsub { font-size: 11px; color: var(--ink-2); font-weight: 600; margin-top: 2px; white-space: nowrap; }
+table.sens .cellsub.bad { color: var(--crit); }
+.safeoffer { margin-top: 10px; padding: 11px 14px; border-radius: 8px; background: var(--surface-2); font-size: 13.5px; line-height: 1.5; }
+.safeoffer strong { font-variant-numeric: var(--mono-nums); }
+.safeoffer .lead { font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; font-size: 12px; display: block; margin-bottom: 2px; }
+.safeoffer.good { background: rgba(12,163,12,0.12); } .safeoffer.good .lead { color: var(--good); }
+.safeoffer.warn { background: rgba(250,178,25,0.16); } .safeoffer.warn .lead { color: var(--warn); }
+.safeoffer.crit { background: rgba(208,59,59,0.13); } .safeoffer.crit .lead { color: var(--crit); }
+
+.offerlist { display: flex; flex-direction: column; }
+.offerlist .r { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid var(--hairline); align-items: baseline; font-variant-numeric: var(--mono-nums); }
+.offerlist .r.hd { border-top: 0; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.offerlist .r .big { font-weight: 800; font-size: 15px; }
+@media (max-width: 560px) { .offerlist .r { grid-template-columns: 1.2fr 1fr 1fr; } .offerlist .r > :last-child { display: none; } }
+
+.btn {
+  border: 1px solid var(--hairline); background: var(--surface); color: var(--ink);
+  padding: 8px 14px; border-radius: 8px; font: inherit; font-weight: 700; cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { color: var(--crit); }
+.btn.sm { padding: 4px 10px; font-size: 12px; font-weight: 600; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.note { font-size: 12px; color: var(--ink-3); }
+
+/* deal log */
+.logtable-wrap { overflow-x: auto; }
+table.log { width: 100%; border-collapse: collapse; font-variant-numeric: var(--mono-nums); min-width: 980px; }
+table.log th, table.log td { padding: 8px 10px; border-top: 1px solid var(--hairline); text-align: right; font-size: 13px; white-space: nowrap; }
+table.log th:first-child, table.log td:first-child, table.log td:nth-child(2), table.log th:nth-child(2) { text-align: left; }
+table.log thead th { border-top: 0; color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--surface-2); color: var(--ink-2); }
+.pill.rec-A { background: rgba(var(--tint-pos),0.15); color: var(--accent-ink); }
+.pill.rec-B { background: rgba(235,104,52,0.15); color: #b44a1e; }
+:root[data-theme="dark"] .pill.rec-B { color: #f09a6e; }
+select.status { border: 1px solid var(--hairline); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12px; }
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50;
+}
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+.toast.show { opacity: 1; }
+.view { display: none; }
+.view.active { display: block; }
+.empty { padding: 30px; text-align: center; color: var(--ink-3); }
+.comprow { display: grid; grid-template-columns: 1.2fr 1fr 1.1fr auto; gap: 6px; align-items: center; }
+.comprow .in input { padding: 6px 8px; }
+.comprow .del, .actrow .del { border: 0; background: transparent; color: var(--crit); font-size: 16px; cursor: pointer; padding: 2px 6px; }
+.actrow { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--hairline); font-size: 13px; }
+.actrow:first-child { border-top: 0; }
+.actrow .when { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; }
+.actrow .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lastact { font-size: 11px; color: var(--ink-3); max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.daypill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--surface-2); color: var(--ink-2); }
+.daypill.hot { background: var(--crit-fill); color: #fff; }
+.daypill.soon { background: var(--warn-fill); color: #0b0b0b; }
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 60;
+  display: none; align-items: flex-start; justify-content: center; padding: 30px 16px; overflow-y: auto;
+}
+.modal-backdrop.open { display: flex; }
+.netsheet {
+  background: var(--surface); color: var(--ink); border-radius: 14px; max-width: 560px; width: 100%;
+  padding: 26px 28px; border: 1px solid var(--hairline);
+}
+.netsheet h2 { margin: 0 0 2px; font-size: 20px; letter-spacing: -0.01em; }
+.netsheet .addr { color: var(--ink-2); margin-bottom: 16px; }
+.netsheet .block { border: 1px solid var(--hairline); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.netsheet .block h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.netsheet .line { display: flex; justify-content: space-between; padding: 4px 0; font-variant-numeric: var(--mono-nums); }
+.netsheet .line.total { border-top: 2px solid var(--ink-3); margin-top: 6px; padding-top: 8px; font-weight: 800; }
+.netsheet .hero { text-align: center; padding: 16px; border-radius: 10px; background: rgba(var(--tint-pos),0.1); margin-bottom: 12px; }
+.netsheet .hero .amt { font-size: 34px; font-weight: 800; color: var(--accent-ink); font-variant-numeric: var(--mono-nums); }
+.netsheet .hero .cap { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+.netsheet ul { margin: 6px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+.netsheet ul li { margin: 3px 0; }
+
+/* ----- site shell: shared header, nav and login, matching the other pages ----- */
+:root {
+  --brand-gold: #C9943A; --brand-gold-hover: #B8842C; --brand-gold-dark: #8F6A22;
+  --serif: 'Cormorant Garamond', Georgia, serif;
+  --sans: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+:root[data-theme="dark"] { --brand-gold: #D4A24A; --brand-gold-hover: #E0B865; --brand-gold-dark: #E0B865; }
+.site-header { background: var(--surface); border-bottom: 2px solid var(--brand-gold); padding: 12px 0; font-family: var(--sans); }
+.header-inner {
+  display: grid; grid-template-columns: auto minmax(280px, 1fr) auto; align-items: center; gap: 16px;
+  max-width: 1480px; margin: 0 auto; padding: 0 20px;
+}
+.header-logo { height: 64px; width: auto; display: block; }
+.page-title { font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.15; text-align: center; color: var(--ink); }
+.nav-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px; }
+.nav-links a {
+  color: var(--ink-2); text-decoration: none; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.1em;
+  border-bottom: 2px solid transparent; padding: 7px 2px 5px; transition: color 0.25s, border-color 0.25s;
+}
+.nav-links a:hover { color: var(--brand-gold-dark); }
+.nav-links a.active { color: var(--brand-gold-dark); border-bottom-color: var(--brand-gold); font-weight: 600; }
+@media (max-width: 900px) {
+  .header-inner { grid-template-columns: 1fr; justify-items: center; gap: 8px; }
+  .header-logo { height: 44px; }
+  .page-title { font-size: 22px; }
+  .nav-links { justify-content: center; }
+}
+.login-overlay {
+  position: fixed; inset: 0; background: var(--bg); z-index: 1000;
+  display: flex; align-items: center; justify-content: center; font-family: var(--sans);
+}
+.login-box {
+  background: var(--surface); border: 1px solid var(--hairline); border-top: 3px solid var(--brand-gold);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.18); padding: 40px; border-radius: 8px; text-align: center; max-width: 400px; width: 90%;
+}
+.login-logo { width: 170px; height: auto; margin-bottom: 18px; }
+.login-box h2 { font-family: var(--serif); font-size: 30px; font-weight: 600; letter-spacing: 0.5px; margin: 0 0 6px; }
+.login-subtitle { color: var(--ink-3); margin: 0 0 24px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; }
+.login-box input {
+  width: 100%; padding: 15px; border-radius: 6px; border: 1px solid var(--hairline); background: var(--surface);
+  color: var(--ink); font-family: inherit; font-size: 16px; margin-bottom: 15px;
+}
+.login-box input:focus { outline: none; border-color: var(--brand-gold); }
+.login-box button {
+  width: 100%; padding: 15px; border-radius: 6px; border: none; background: var(--brand-gold); color: #232323;
+  font-family: inherit; font-size: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;
+}
+.login-box button:hover { background: var(--brand-gold-hover); }
+.login-error { color: var(--crit); margin-top: 10px; display: none; font-size: 13.5px; }
+</style>
+</head>
+<body>
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <img src="/images/blake-logo-stacked.png" alt="Blake Management" class="login-logo">
+    <h2>MontCo Analyzer</h2>
+    <p class="login-subtitle">Foreclosure Deal Analyzer</p>
+    <input type="password" id="passwordInput" placeholder="Password" onkeypress="if(event.key==='Enter')siteLogin()">
+    <button onclick="siteLogin()">Continue</button>
+    <div class="login-error" id="loginError">Invalid password</div>
+  </div>
+</div>
+
+<div id="mainContent" style="display:none;">
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-section">
+      <img src="/images/blake-logo-horizontal.png" alt="Blake Management" class="header-logo">
+    </div>
+    <div class="page-title">Montgomery County &mdash; Deal Analyzer</div>
+    <nav class="nav-links">
+      <a href="/" data-tab="sheriff">Sheriff Sales</a>
+      <a href="/pipeline.html" data-tab="montco">MontCo Pipeline</a>
+      <a href="/montco-track" data-tab="montco">MontCo Track</a>
+      <a href="/montco-analyzer.html" data-tab="montco" class="active">MontCo Analyzer</a>
+      <a href="/camden.html" data-tab="camden">Camden Pipeline</a>
+      <a href="/camden-track" data-tab="camden">Camden Track</a>
+    </nav>
+  </div>
+</header>
+<header class="app">
+  <div>
+    <h1>Foreclosure Deal Analyzer</h1>
+    <div class="sub">Payoff the debt, cash to the seller, flip the exit. Quick flip vs full reno, side by side.</div>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tabbtn" id="tab-analyzer" role="tab" aria-selected="true" aria-controls="view-analyzer">Analyzer</button>
+    <button class="tabbtn" id="tab-log" role="tab" aria-selected="false" aria-controls="view-log">Deal Log <span id="logCount"></span></button>
+  </div>
+</header>
+
+<div class="view active" id="view-analyzer" role="tabpanel">
+<div class="wrap">
+  <!-- ============ INPUT RAIL ============ -->
+  <div class="rail">
+
+    <div class="card">
+      <h2>Property</h2>
+      <div class="grid2">
+        <div class="field full">
+          <label for="address">Address</label>
+          <div class="in"><input id="address" type="text" placeholder="123 Main St, Bridgeport PA" autocomplete="off"></div>
+        </div>
+        <div class="field">
+          <label for="zip">Zip code</label>
+          <div class="in"><input id="zip" type="text" inputmode="numeric" maxlength="5" placeholder="19405"></div>
+          <div class="hint" id="zipHint">Sets the PA transfer tax rate</div>
+        </div>
+        <div class="field">
+          <label for="taxRate">Transfer tax rate (total)</label>
+          <div class="in"><input id="taxRate" type="text" inputmode="decimal" value="2"><span class="post">%</span></div>
+          <div class="hint">Auto from zip, editable</div>
+        </div>
+        <div class="field">
+          <label for="dealStatus">Status</label>
+          <div class="in"><select id="dealStatus">
+            <option>Modeling</option><option>Outreach</option><option>Negotiating</option><option>Offer made</option>
+            <option>Under contract</option><option>Owned / rehab</option><option>Listed</option><option>Sold</option><option>Dead</option>
+          </select></div>
+          <div class="hint">Modeling = just running numbers, no contact yet</div>
+        </div>
+        <div class="field">
+          <label for="leadSource">Lead source</label>
+          <div class="in"><select id="leadSource">
+            <option>Door note</option><option>Knocked door</option><option>Text</option><option>Scraper list</option><option>Referral</option><option>Other</option>
+          </select></div>
+        </div>
+        <div class="field">
+          <label for="sheriffDate">Sheriff sale date</label>
+          <div class="in"><input id="sheriffDate" type="date"></div>
+          <div class="hint" id="sheriffHint">If scheduled. Drives the countdown</div>
+        </div>
+        <div class="field">
+          <label for="followUpDate">Next follow-up</label>
+          <div class="in"><input id="followUpDate" type="date"></div>
+          <div class="hint" id="followHint">Shows in the deal log</div>
+        </div>
+        <div class="field full">
+          <label for="notes">Notes</label>
+          <textarea id="notes" placeholder="Condition, owner situation, timeline..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Debt and payoff</h2>
+      <div class="grid2">
+        <div class="field">
+          <label for="payoff">Foreclosure / mortgage payoff</label>
+          <div class="in"><span class="pre">$</span><input id="payoff" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="backTaxes">Back taxes</label>
+          <div class="in"><span class="pre">$</span><input id="backTaxes" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="muniLiens">Municipal liens</label>
+          <div class="in"><span class="pre">$</span><input id="muniLiens" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="otherLiens">Other liens / judgments</label>
+          <div class="in"><span class="pre">$</span><input id="otherLiens" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="perDiem">Payoff per-diem</label>
+          <div class="in"><span class="pre">$</span><input id="perDiem" type="text" inputmode="decimal" value="0"><span class="post">/day</span></div>
+          <div class="hint">From the payoff letter</div>
+        </div>
+        <div class="field">
+          <label for="daysToClose">Days to closing</label>
+          <div class="in"><input id="daysToClose" type="text" inputmode="numeric" value="30"><span class="post">days</span></div>
+        </div>
+        <div class="field full">
+          <label for="payoffBuffer">Other payoff fees (attorney, costs)</label>
+          <div class="in"><span class="pre">$</span><input id="payoffBuffer" type="text" inputmode="decimal" value="0"></div>
+        </div>
+      </div>
+      <div class="subtotal"><span class="lbl">Total debt to clear</span><span id="stDebt">$0</span></div>
+      <div class="hint" id="growthHint" style="margin-top:4px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Our offer and buy costs</h2>
+      <div class="grid2">
+        <div class="field full">
+          <label for="offer">Offer price</label>
+          <div class="in"><span class="pre">$</span><input id="offer" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field full">
+          <label>Transfer tax on purchase, we pay</label>
+          <div class="seg" id="buyShareSeg" data-group="buyShare">
+            <button type="button" data-val="1" aria-pressed="true">All of it</button>
+            <button type="button" data-val="0.5" aria-pressed="false">50 / 50 split</button>
+            <button type="button" data-val="0" aria-pressed="false">Seller pays</button>
+          </div>
+          <div class="hint">Distressed sellers usually cannot cover their half, so default is all</div>
+        </div>
+        <div class="field">
+          <label for="titleIns">Title insurance</label>
+          <div class="in"><span class="pre">$</span><input id="titleIns" type="text" inputmode="decimal" placeholder="auto"></div>
+          <div class="hint" id="titleHint">Auto from the PA (TIRBOP) rate card</div>
+        </div>
+        <div class="field">
+          <label for="titleClosing">Other closing costs</label>
+          <div class="in"><span class="pre">$</span><input id="titleClosing" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field full">
+          <label for="legal">Legal / recording / misc</label>
+          <div class="in"><span class="pre">$</span><input id="legal" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field full">
+          <label for="targetROI">Target cash-on-cash return</label>
+          <div class="in"><input id="targetROI" type="text" inputmode="decimal" value="20"><span class="post">%</span></div>
+          <div class="hint">Drives the suggested max offers and the bulletproof number</div>
+        </div>
+      </div>
+      <div class="subtotal"><span class="lbl">Cash to seller at closing</span><span id="stCashToSeller">$0</span></div>
+      <div class="flag" id="shortFlag"></div>
+    </div>
+
+    <div class="card exitA">
+      <h2>Exit A: quick flip (small repairs)</h2>
+      <div class="grid2">
+        <div class="field">
+          <label for="asIsValue">Resale value as-is</label>
+          <div class="in"><span class="pre">$</span><input id="asIsValue" type="text" inputmode="decimal" value="0"></div>
+          <div class="hint">What it sells for with only a cleanout and small repairs</div>
+        </div>
+        <div class="field">
+          <label for="lightRepairs">Small repair budget</label>
+          <div class="in"><span class="pre">$</span><input id="lightRepairs" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field full">
+          <label for="monthsA">Hold time</label>
+          <div class="in"><input id="monthsA" type="text" inputmode="decimal" value="4"><span class="post">months</span></div>
+          <div class="hint" id="yearsA">= 0.3 years</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card exitB">
+      <h2>Exit B: full renovation</h2>
+      <div class="grid2">
+        <div class="field">
+          <label for="arv">Resale value renovated (ARV)</label>
+          <div class="in"><span class="pre">$</span><input id="arv" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="reno">Renovation budget</label>
+          <div class="in"><span class="pre">$</span><input id="reno" type="text" inputmode="decimal" value="0"></div>
+        </div>
+        <div class="field">
+          <label for="contingency">Contingency</label>
+          <div class="in"><input id="contingency" type="text" inputmode="decimal" value="10"><span class="post">%</span></div>
+          <div class="hint">Applied to both repair budgets</div>
+        </div>
+        <div class="field">
+          <label for="monthsB">Hold time</label>
+          <div class="in"><input id="monthsB" type="text" inputmode="decimal" value="8"><span class="post">months</span></div>
+          <div class="hint" id="yearsB">= 0.7 years</div>
+        </div>
+      </div>
+    </div>
+
+    <details class="card" id="compsCard">
+      <summary><h2>Comps helper <span id="compCount"></span></h2></summary>
+      <div class="grid2">
+        <div class="field">
+          <label for="subjectSqft">Subject sqft</label>
+          <div class="in"><input id="subjectSqft" type="text" inputmode="numeric" value="0"><span class="post">sqft</span></div>
+        </div>
+        <div class="field" style="justify-content:flex-end;">
+          <button class="btn sm" type="button" id="addComp" style="align-self:flex-start; margin-top:18px;">+ Add comp</button>
+        </div>
+      </div>
+      <div id="compRows" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+      <div class="hint" id="compOut" style="margin-top:8px;"></div>
+      <div class="actions" style="margin-top:8px;">
+        <button class="btn sm" type="button" id="applyAsIs" style="display:none;">Use for as-is value</button>
+        <button class="btn sm" type="button" id="applyArv" style="display:none;">Use for ARV</button>
+      </div>
+    </details>
+
+    <div class="card">
+      <h2>Financing</h2>
+      <div class="field full">
+        <div class="seg" id="finSeg" data-group="finType">
+          <button type="button" data-val="cash" aria-pressed="true">All cash</button>
+          <button type="button" data-val="ploc" aria-pressed="false">Line of credit</button>
+          <button type="button" data-val="loan" aria-pressed="false">Hard money</button>
+        </div>
+      </div>
+      <div id="finFields" class="grid2" style="margin-top:10px; display:none;">
+        <div class="field">
+          <label for="finPurchPct">Purchase covered</label>
+          <div class="in"><input id="finPurchPct" type="text" inputmode="decimal" value="85"><span class="post">%</span></div>
+        </div>
+        <div class="field">
+          <label for="finRehabPct">Repairs covered</label>
+          <div class="in"><input id="finRehabPct" type="text" inputmode="decimal" value="100"><span class="post">%</span></div>
+        </div>
+        <div class="field">
+          <label for="intRate">Interest rate (annual)</label>
+          <div class="in"><input id="intRate" type="text" inputmode="decimal" value="11"><span class="post">%</span></div>
+          <div class="hint">Interest-only carry</div>
+        </div>
+        <div class="field" id="pointsField">
+          <label for="pointsPct">Points</label>
+          <div class="in"><input id="pointsPct" type="text" inputmode="decimal" value="2"><span class="post">%</span></div>
+        </div>
+        <div class="field full" id="lenderFeesField">
+          <label for="lenderFees">Other lender fees</label>
+          <div class="in"><span class="pre">$</span><input id="lenderFees" type="text" inputmode="decimal" value="0"></div>
+        </div>
+      </div>
+      <div class="hint" id="finHint" style="margin-top:6px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Monthly holding costs</h2>
+      <div class="grid2">
+        <div class="field">
+          <label for="moTaxes">Property taxes</label>
+          <div class="in"><span class="pre">$</span><input id="moTaxes" type="text" inputmode="decimal" value="0"><span class="post">/mo</span></div>
+        </div>
+        <div class="field">
+          <label for="moIns">Insurance</label>
+          <div class="in"><span class="pre">$</span><input id="moIns" type="text" inputmode="decimal" value="0"><span class="post">/mo</span></div>
+        </div>
+        <div class="field">
+          <label for="moUtil">Utilities</label>
+          <div class="in"><span class="pre">$</span><input id="moUtil" type="text" inputmode="decimal" value="0"><span class="post">/mo</span></div>
+        </div>
+        <div class="field">
+          <label for="moOther">Other</label>
+          <div class="in"><span class="pre">$</span><input id="moOther" type="text" inputmode="decimal" value="0"><span class="post">/mo</span></div>
+        </div>
+      </div>
+      <div class="subtotal"><span class="lbl">Total per month</span><span id="stMonthly">$0</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Sale costs (our exit)</h2>
+      <div class="grid2">
+        <div class="field">
+          <label for="commPct">Agent commission</label>
+          <div class="in"><input id="commPct" type="text" inputmode="decimal" value="5"><span class="post">%</span></div>
+        </div>
+        <div class="field">
+          <label for="concessionsPct">Seller concessions</label>
+          <div class="in"><input id="concessionsPct" type="text" inputmode="decimal" value="0"><span class="post">%</span></div>
+          <div class="hint">Of sale price</div>
+        </div>
+        <div class="field full">
+          <label>Transfer tax on sale, we pay</label>
+          <div class="seg" id="sellShareSeg" data-group="sellShare">
+            <button type="button" data-val="1" aria-pressed="false">All of it</button>
+            <button type="button" data-val="0.5" aria-pressed="true">50 / 50 split</button>
+            <button type="button" data-val="0" aria-pressed="false">Buyer pays</button>
+          </div>
+          <div class="hint">PA custom is a 50 / 50 split</div>
+        </div>
+        <div class="field full">
+          <label for="sellClosing">Seller closing costs / misc</label>
+          <div class="in"><span class="pre">$</span><input id="sellClosing" type="text" inputmode="decimal" value="0"></div>
+        </div>
+      </div>
+    </div>
+
+    <details class="card" id="activityCard">
+      <summary><h2>Activity <span id="actCount"></span></h2></summary>
+      <div style="display:flex; gap:8px;">
+        <div class="in" style="flex:1;"><input id="actInput" type="text" placeholder="Knocked, no answer. Texted. Spoke to owner..." autocomplete="off"></div>
+        <button class="btn sm" id="actAdd" type="button" style="align-self:center;">Add</button>
+      </div>
+      <div id="actList" style="margin-top:4px;"></div>
+      <div class="hint" id="actHint" style="margin-top:6px;"></div>
+    </details>
+
+    <div class="card">
+      <div class="actions">
+        <button class="btn primary" id="saveDeal">Save to deal log</button>
+        <button class="btn" id="netSheetBtn">Seller net sheet</button>
+        <button class="btn" id="copySummary">Copy summary</button>
+        <button class="btn" id="copySellerText">Copy seller text</button>
+        <button class="btn" id="newDeal">New / clear</button>
+      </div>
+      <div class="note" id="saveNote" style="margin-top:8px;"></div>
+    </div>
+
+  </div>
+
+  <!-- ============ RESULTS BOARD ============ -->
+  <div class="board">
+
+    <div class="verdict">
+      <span class="chip neutral" id="verdictChip">Enter numbers</span>
+      <div class="why" id="verdictWhy">Fill in the debt, your offer and at least one exit value to see the full picture.</div>
+    </div>
+
+    <div class="duo">
+      <div class="card stratcard" id="cardA">
+        <h3>Quick flip</h3>
+        <div class="tagline">Small repairs, sell as-is, recycle the cash</div>
+        <div class="bignum" id="aProfit">$0</div>
+        <div class="statrows" id="aRows"></div>
+      </div>
+      <div class="card stratcard" id="cardB">
+        <h3>Full renovation</h3>
+        <div class="tagline">Renovate to top of market, sell at ARV</div>
+        <div class="bignum" id="bProfit">$0</div>
+        <div class="statrows" id="bRows"></div>
+      </div>
+    </div>
+
+    <div class="card" id="marginalCard">
+      <h2>Is the renovation worth it?</h2>
+      <div class="tiles" id="marginalTiles"></div>
+      <div class="note" id="marginalNote" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Offer guidance</h2>
+      <div class="offerlist" id="offerList"></div>
+      <div class="note" style="margin-top:8px;">Cash to seller = suggested offer minus total debt. That is the number for the door conversation.</div>
+    </div>
+
+    <div class="card">
+      <h2>Full cost breakdown</h2>
+      <div style="overflow-x:auto;">
+      <table class="ledger" id="ledger">
+        <thead><tr><th>Line</th><th>Quick flip</th><th>Full reno</th></tr></thead>
+        <tbody id="ledgerBody"></tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="display:flex; align-items:center; gap:10px;">Sensitivity: net profit
+        <span class="seg" id="sensSeg" data-group="sensStrat" style="margin-left:auto; max-width:260px; flex:1;">
+          <button type="button" data-val="A" aria-pressed="true">Quick flip</button>
+          <button type="button" data-val="B" aria-pressed="false">Full reno</button>
+        </span>
+      </h2>
+      <div class="senswrap"><table class="sens" id="sensTable"></table></div>
+      <div class="safeoffer" id="safeOffer" style="display:none;"></div>
+      <div class="note" style="margin-top:8px;">Rows move the sale price, columns move the hold time. Each cell shows the net profit at your current offer, and under it the max offer that still hits your target return in that scenario. The outlined cell is your current assumption.</div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<!-- ============ DEAL LOG ============ -->
+<div class="view" id="view-log" role="tabpanel">
+  <div class="wrap" style="grid-template-columns: 1fr;">
+    <div class="card">
+      <h2 style="display:flex; align-items:center;">Deal log
+        <span style="margin-left:auto; display:flex; gap:10px;">
+          <button class="btn sm" id="importBtn">Import leads</button>
+          <button class="btn sm" id="copyCsv">Copy CSV</button>
+        </span>
+      </h2>
+      <div class="tiles" id="pipeStats" style="margin-bottom:12px;"></div>
+      <div class="note" id="storageNote" style="margin-bottom:10px;"></div>
+      <div class="logtable-wrap">
+        <table class="log">
+          <thead><tr>
+            <th>Address</th><th>Status</th><th>Sale date</th><th>Follow-up</th><th>Saved</th><th>Total debt</th><th>Offer</th>
+            <th>Best exit</th><th>Net profit</th><th>Cash ROI</th><th>Ann. ROI</th><th></th>
+          </tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="logEmpty">No deals saved yet. Run a deal in the Analyzer and hit Save.</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="netSheetModal" role="dialog" aria-modal="true" aria-label="Seller net sheet">
+  <div class="netsheet">
+    <h2>Your payoff, in plain numbers</h2>
+    <div class="addr" id="nsAddr"></div>
+    <div class="block">
+      <h3>What gets paid off in full at closing</h3>
+      <div id="nsDebtLines"></div>
+    </div>
+    <div class="hero">
+      <div class="cap">Cash to you at closing</div>
+      <div class="amt" id="nsCash">$0</div>
+      <div class="cap">No commission. No fees. No repairs. Sold as-is.</div>
+    </div>
+    <div class="block">
+      <h3>If it goes to sheriff sale instead</h3>
+      <ul id="nsSheriff"></ul>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="nsCopy">Copy as text</button>
+      <button class="btn" id="nsClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="importModal" role="dialog" aria-modal="true" aria-label="Import leads">
+  <div class="netsheet">
+    <h2>Import leads</h2>
+    <div class="note">One lead per line, pasted straight from a spreadsheet or CSV. Columns: Address, Zip, Payoff, Municipal liens, Other liens. Only the address is required. Each lead lands in the log as a Modeling deal.</div>
+    <textarea id="importText" style="min-height:150px; margin-top:10px; font-size:13px;" placeholder="414 Green St&#9;19405&#9;98,500&#9;12,000&#10;22 Coates St&#9;19405&#9;121,000"></textarea>
+    <div class="note" id="importPreview" style="margin-top:8px;"></div>
+    <div class="actions" style="margin-top:10px;">
+      <button class="btn primary" id="importDo">Import</button>
+      <button class="btn" id="importClose">Close</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- /mainContent -->
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ============================== helpers ============================== */
+const $ = (id) => document.getElementById(id);
+const num = (v) => {
+  const n = parseFloat(String(v).replace(/[$,%\s]/g, "").replace(/,/g, ""));
+  return isFinite(n) ? n : 0;
+};
+const fmt$ = (v, dec=0) => {
+  if (!isFinite(v)) return "n/a";
+  const sign = v < 0 ? "-" : "";
+  return sign + "$" + Math.abs(v).toLocaleString("en-US", {maximumFractionDigits: dec, minimumFractionDigits: dec});
+};
+const fmtPct = (v, dec=1) => isFinite(v) ? (v*100).toFixed(dec) + "%" : "n/a";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+/* ============================== state ============================== */
+const MONEY_IDS = ["payoff","backTaxes","muniLiens","otherLiens","payoffBuffer","perDiem","offer","titleClosing","legal",
+  "asIsValue","lightRepairs","arv","reno","lenderFees","moTaxes","moIns","moUtil","moOther","sellClosing"];
+const PCT_IDS = ["taxRate","contingency","finPurchPct","finRehabPct","intRate","pointsPct","commPct","concessionsPct","targetROI"];
+const NUM_IDS = ["monthsA","monthsB","daysToClose","subjectSqft"];
+const TEXT_IDS = ["address","zip","notes"];
+const DATE_IDS = ["sheriffDate","followUpDate"];
+const SEL_IDS = ["dealStatus","leadSource"];
+const DEFAULTS = { targetROI: 20, contingency: 10, commPct: 5, concessionsPct: 0,
+  taxRate: 2, intRate: 11, pointsPct: 2, finPurchPct: 85, finRehabPct: 100, monthsA: 4, monthsB: 8, daysToClose: 30 };
+
+const S = { buyShare: 1, sellShare: 0.5, finType: "cash", sensStrat: "A", comps: [], activity: [] };
+let currentDealId = null;
+
+function readInputs() {
+  const o = {};
+  MONEY_IDS.concat(PCT_IDS, NUM_IDS).forEach(id => o[id] = num($(id).value));
+  TEXT_IDS.concat(DATE_IDS).forEach(id => o[id] = $(id).value.trim());
+  SEL_IDS.forEach(id => o[id] = $(id).value);
+  o.buyShare = S.buyShare; o.sellShare = S.sellShare;
+  o.finType = S.finType; o.financed = S.finType !== "cash" ? 1 : 0;
+  o.comps = S.comps.slice();
+  o.activity = S.activity.slice();
+  const tRaw = $("titleIns").value.trim();
+  o.titleInsOverride = tRaw === "" ? null : num(tRaw);
+  o.monthsA = Math.max(0.5, o.monthsA || 0.5);
+  o.monthsB = Math.max(0.5, o.monthsB || 0.5);
+  return o;
+}
+
+/* PA (TIRBOP) all-inclusive sale rate estimate: $569 first $30k, then per $1,000 or fraction:
+   $7.41 to $45k, $6.27 to $100k, $5.50 to $250k, $4.00 to $500k, $3.50 above. Editable override in UI. */
+function titlePremium(price) {
+  if (!(price > 0)) return 0;
+  let p = 569;
+  if (price <= 30000) return p;
+  const tiers = [[30000,45000,7.41],[45000,100000,6.27],[100000,250000,5.50],[250000,500000,4.00],[500000,Infinity,3.50]];
+  for (const [lo, hi, rate] of tiers) {
+    if (price > lo) p += Math.ceil((Math.min(price, hi) - lo) / 1000) * rate;
+  }
+  return Math.round(p);
+}
+
+const STATUSES = ["Modeling","Outreach","Negotiating","Offer made","Under contract","Owned / rehab","Listed","Sold","Dead"];
+const LEGACY_STATUS = { "Prospect":"Modeling", "Contacted":"Outreach", "Closed":"Owned / rehab" };
+const normStatus = (s) => STATUSES.includes(s) ? s : (LEGACY_STATUS[s] || "Modeling");
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T12:00:00");
+  if (isNaN(d)) return null;
+  return Math.round((d - new Date()) / 86400000);
+}
+function dayPill(dateStr, hotDays, soonDays) {
+  const n = daysUntil(dateStr);
+  if (n == null) return "";
+  const cls = n <= hotDays ? "hot" : n <= soonDays ? "soon" : "";
+  const txt = n < 0 ? Math.abs(n) + "d overdue" : n + "d";
+  return `<span class="daypill ${cls}">${txt}</span>`;
+}
+
+/* transfer tax by zip (PA). Total combined state + local rate. */
+function taxRateForZip(zip) {
+  if (!/^\d{5}$/.test(zip)) return null;
+  if (/^191/.test(zip)) return { rate: 4.578, label: "Philadelphia: 4.578% total (3.578% city + 1% state)" };
+  if (/^15[12]/.test(zip)) return { rate: 5.0, label: "Pittsburgh: 5% total. Verify for the exact municipality" };
+  if (/^19[046]|^18\d|^17\d|^16\d|^15\d/.test(zip)) return { rate: 2.0, label: "PA standard: 2% total (1% state + 1% local). A few boroughs differ, verify if unsure" };
+  return { rate: 2.0, label: "Zip not recognized as PA. Defaulting 2%, set the rate manually" };
+}
+
+/* ============================== core math ============================== */
+/* One scenario = {sale, repairs, months}. Everything else shared from inputs. */
+function calcScenario(i, sc) {
+  const months = Math.max(0.5, sc.months);
+  const payoffGrowth = (i.perDiem || 0) * (i.daysToClose || 0);
+  const totalDebt = i.payoff + i.backTaxes + i.muniLiens + i.otherLiens + i.payoffBuffer + payoffGrowth;
+  const cashToSeller = i.offer - totalDebt;
+
+  const r = i.taxRate / 100;
+  const buyTT = i.offer * r * i.buyShare;
+  const titleIns = i.titleInsOverride != null ? i.titleInsOverride : titlePremium(i.offer);
+  const acquisition = i.offer + buyTT + titleIns + i.titleClosing + i.legal;
+
+  const repairsTotal = sc.repairs * (1 + i.contingency / 100);
+
+  let loan = 0, pointsAmt = 0, lenderFees = 0, interest = 0, moInterest = 0;
+  if (i.financed) {
+    loan = i.offer * (i.finPurchPct / 100) + repairsTotal * (i.finRehabPct / 100);
+    if (i.finType !== "ploc") { // line of credit: interest only, no points or lender fees
+      pointsAmt = loan * (i.pointsPct / 100);
+      lenderFees = i.lenderFees;
+    }
+    moInterest = loan * (i.intRate / 100) / 12;
+    interest = moInterest * months;
+  }
+  const finCost = pointsAmt + lenderFees + interest;
+
+  const monthly = i.moTaxes + i.moIns + i.moUtil + i.moOther;
+  const holding = monthly * months;
+
+  const sale = sc.sale;
+  const commission = sale * (i.commPct / 100);
+  const concessions = sale * (i.concessionsPct / 100);
+  const sellTT = sale * r * i.sellShare;
+  const sellCosts = commission + concessions + sellTT + i.sellClosing;
+
+  const allIn = acquisition + repairsTotal + holding + finCost;
+  const netProfit = sale - sellCosts - allIn;
+  const cashIn = Math.max(allIn - loan, 1); // cash actually out of pocket
+  const roi = netProfit / cashIn;
+  const annRoi = roi * (12 / months);
+  const margin = sale > 0 ? netProfit / sale : NaN;
+  const ppm = netProfit / months;
+  const denom = 1 - i.commPct / 100 - i.concessionsPct / 100 - r * i.sellShare;
+  const breakeven = denom > 0 ? (allIn + i.sellClosing) / denom : NaN;
+  const mao70 = 0.70 * sale - repairsTotal; // classic 70% rule max offer
+
+  return { months, payoffGrowth, totalDebt, cashToSeller, buyTT, titleIns, acquisition, repairsTotal, loan, pointsAmt,
+    lenderFees, interest, moInterest, finCost, monthly, holding, sale, commission, concessions,
+    sellTT, sellCosts, allIn, netProfit, cashIn, roi, annRoi, margin, ppm, breakeven, mao70 };
+}
+
+function scenarioInputs(i) {
+  return {
+    A: { sale: i.asIsValue, repairs: i.lightRepairs, months: i.monthsA, name: "Quick flip" },
+    B: { sale: i.arv, repairs: i.reno, months: i.monthsB, name: "Full reno" }
+  };
+}
+
+/* Solve max offer so that fn(metrics) >= 0 flips. Profit decreases as offer rises. */
+function solveOffer(i, sc, goalFn) {
+  let lo = 0, hi = Math.max(sc.sale * 1.5, 100000);
+  const at = (offer) => goalFn(calcScenario({ ...i, offer }, sc));
+  if (at(lo) < 0) return NaN; // even a free house misses the goal
+  for (let k = 0; k < 70; k++) {
+    const mid = (lo + hi) / 2;
+    if (at(mid) >= 0) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/* ============================== render ============================== */
+function statRow(k, v, negClass) {
+  return `<div class="r"><span class="k">${k}</span><span class="v${negClass ? " neg" : ""}">${v}</span></div>`;
+}
+
+function renderStrategyCard(prefix, m, active) {
+  const p = $(prefix + "Profit");
+  p.textContent = fmt$(m.netProfit);
+  p.className = "bignum " + (m.netProfit > 0 ? "pos" : m.netProfit < 0 ? "neg" : "");
+  const rows = [
+    statRow("Sale price", fmt$(m.sale)),
+    statRow("All-in cost", fmt$(m.allIn)),
+    statRow("Cash in the deal", fmt$(m.cashIn)),
+    statRow("Cash ROI", fmtPct(m.roi), m.roi < 0),
+    statRow("Annualized ROI (simple)", fmtPct(m.annRoi), m.annRoi < 0),
+    statRow("Profit per month", fmt$(m.ppm), m.ppm < 0),
+    statRow("Margin of sale price", fmtPct(m.margin), m.margin < 0),
+    statRow("Breakeven sale price", fmt$(m.breakeven)),
+    statRow("Hold", m.months + " mo (" + (m.months/12).toFixed(1) + " yr)")
+  ];
+  $(prefix + "Rows").innerHTML = rows.join("");
+}
+
+function ledgerRow(label, a, b, cls="") {
+  return `<tr class="${cls}"><td>${label}</td><td>${a}</td><td>${b}</td></tr>`;
+}
+
+function renderLedger(mA, mB, i) {
+  const f = fmt$;
+  const rows = [
+    ledgerRow("Buy side", "", "", "sec"),
+    ledgerRow("Offer price", f(i.offer), f(i.offer)),
+    ledgerRow("Transfer tax (our share, " + i.taxRate + "% x " + (i.buyShare*100) + "%)", f(mA.buyTT), f(mB.buyTT)),
+    ledgerRow("Title insurance" + (i.titleInsOverride != null ? " (manual)" : " (auto TIRBOP)"), f(mA.titleIns), f(mB.titleIns)),
+    ledgerRow("Other closing costs", f(i.titleClosing), f(i.titleClosing)),
+    ledgerRow("Legal / recording", f(i.legal), f(i.legal)),
+    ledgerRow("Repairs", "", "", "sec"),
+    ledgerRow("Repair / reno budget", f(i.lightRepairs), f(i.reno)),
+    ledgerRow("Contingency (" + i.contingency + "%)", f(mA.repairsTotal - i.lightRepairs), f(mB.repairsTotal - i.reno)),
+    ledgerRow("Carry", "", "", "sec"),
+    ledgerRow("Holding costs (" + f(mA.monthly) + "/mo)", f(mA.holding), f(mB.holding))
+  ];
+  if (i.financed) {
+    rows.push(ledgerRow(i.finType === "ploc" ? "Line of credit draw" : "Loan amount", f(mA.loan), f(mB.loan)));
+    if (i.finType !== "ploc") rows.push(ledgerRow("Points + lender fees", f(mA.pointsAmt + mA.lenderFees), f(mB.pointsAmt + mB.lenderFees)));
+    rows.push(ledgerRow("Interest carry (" + f(mA.moInterest) + "/mo vs " + f(mB.moInterest) + "/mo)", f(mA.interest), f(mB.interest)));
+  }
+  rows.push(
+    ledgerRow("All-in cost", f(mA.allIn), f(mB.allIn), "tot"),
+    ledgerRow("Sell side", "", "", "sec"),
+    ledgerRow("Sale price", f(mA.sale), f(mB.sale)),
+    ledgerRow("Commission (" + i.commPct + "%)", "-" + f(mA.commission), "-" + f(mB.commission)),
+    ledgerRow("Concessions (" + i.concessionsPct + "%)", "-" + f(mA.concessions), "-" + f(mB.concessions)),
+    ledgerRow("Transfer tax (our share)", "-" + f(mA.sellTT), "-" + f(mB.sellTT)),
+    ledgerRow("Seller closing / misc", "-" + f(i.sellClosing), "-" + f(i.sellClosing)),
+    `<tr class="tot"><td>Net profit</td><td class="${mA.netProfit<0?"neg":"pos"}">${f(mA.netProfit)}</td><td class="${mB.netProfit<0?"neg":"pos"}">${f(mB.netProfit)}</td></tr>`
+  );
+  $("ledgerBody").innerHTML = rows.join("");
+}
+
+function tile(k, v, s) {
+  return `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`;
+}
+
+function renderMarginal(mA, mB, validA, validB) {
+  const card = $("marginalCard");
+  if (!validA || !validB) {
+    $("marginalTiles").innerHTML = "";
+    $("marginalNote").textContent = validB
+      ? "Enter an as-is value in Exit A to compare the renovation against a quick flip."
+      : "Enter an ARV and reno budget in Exit B to compare against the quick flip.";
+    return;
+  }
+  const incrProfit = mB.netProfit - mA.netProfit;
+  const incrCash = mB.cashIn - mA.cashIn;
+  const incrMonths = Math.max(mB.months - mA.months, 0.5);
+  const incrAnn = incrCash > 0 ? (incrProfit / incrCash) * (12 / incrMonths) : NaN;
+  const valueAdd = mB.sale - mA.sale;
+  const renoAllIn = (mB.allIn - mA.allIn);
+  $("marginalTiles").innerHTML = [
+    tile("Value created by reno", fmt$(valueAdd), "ARV minus as-is value"),
+    tile("Extra cost of reno path", fmt$(renoAllIn), "Reno + extra carry + extra financing"),
+    tile("Extra profit from reno", fmt$(incrProfit), incrProfit >= 0 ? "Reno path earns more" : "Reno path earns less"),
+    tile("Return on the extra cash", isFinite(incrAnn) ? fmtPct(incrAnn) : "n/a", "Annualized, on the " + fmt$(Math.max(incrCash,0)) + " extra in, " + incrMonths.toFixed(1) + " extra months")
+  ].join("");
+  let note;
+  if (incrProfit <= 0) {
+    note = "The renovation does not add profit here. Quick flip and recycle the cash.";
+  } else if (isFinite(incrAnn) && incrAnn < mA.annRoi) {
+    note = "The reno adds " + fmt$(incrProfit) + " but the extra dollars earn " + fmtPct(incrAnn) +
+      " annualized, below the " + fmtPct(mA.annRoi) + " the quick flip already earns. Unless you cannot redeploy the cash into the next deal, the quick flip wins on velocity.";
+  } else {
+    note = "The reno adds " + fmt$(incrProfit) + " and the extra dollars earn " + fmtPct(incrAnn) +
+      " annualized, which beats the quick flip's " + fmtPct(mA.annRoi) + ". The renovation is pulling its weight.";
+  }
+  $("marginalNote").textContent = note;
+}
+
+function renderVerdict(mA, mB, validA, validB) {
+  const chip = $("verdictChip"), why = $("verdictWhy");
+  $("cardA").classList.remove("rec"); $("cardB").classList.remove("rec");
+  document.querySelectorAll(".recbadge").forEach(e => e.remove());
+  if (!validA && !validB) {
+    chip.className = "chip neutral"; chip.textContent = "Enter numbers";
+    why.innerHTML = "Fill in the debt, your offer and at least one exit value to see the full picture.";
+    return null;
+  }
+  const picks = [];
+  if (validA) picks.push({ key: "A", m: mA, name: "Quick flip" });
+  if (validB) picks.push({ key: "B", m: mB, name: "Full renovation" });
+  picks.sort((x, y) => (y.m.annRoi - x.m.annRoi));
+  let best = picks[0];
+  // If the slower path makes meaningfully more absolute profit (25%+ and $15k+), note the tradeoff but still rank by velocity.
+  const other = picks[1];
+  const m = best.m;
+  let cls, label;
+  if (m.netProfit <= 0) { cls = "crit"; label = "Loss. Renegotiate or pass"; }
+  else if (m.roi < 0.10 || (isFinite(m.margin) && m.margin < 0.08)) { cls = "warn"; label = "Thin deal"; }
+  else if (m.roi >= 0.25 && m.netProfit >= 30000) { cls = "good"; label = "Strong deal"; }
+  else { cls = "good"; label = "Solid deal"; }
+  chip.className = "chip " + cls;
+  chip.textContent = (cls === "crit" ? "✖ " : cls === "warn" ? "⚠ " : "✔ ") + label;
+
+  let w = `Best exit: <strong>${best.name}</strong> at ${fmt$(m.netProfit)} net, ${fmtPct(m.roi)} on cash, ${fmtPct(m.annRoi)} annualized over ${m.months} months.`;
+  if (other) {
+    if (other.m.netProfit > m.netProfit + 15000 && other.m.netProfit > m.netProfit * 1.25) {
+      w += ` Note: ${other.name} makes ${fmt$(other.m.netProfit - m.netProfit)} more in absolute profit, at ${fmtPct(other.m.annRoi)} annualized. If the cash has nowhere better to go, take the bigger check.`;
+    } else {
+      w += ` ${other.name}: ${fmt$(other.m.netProfit)} net at ${fmtPct(other.m.annRoi)} annualized.`;
+    }
+  }
+  if (m.cashToSeller < 0) {
+    w += ` <span style="color:var(--crit); font-weight:600;">Offer is below total debt by ${fmt$(Math.abs(m.cashToSeller))}: that is a short payoff and needs lender/lienholder consent.</span>`;
+  }
+  why.innerHTML = w;
+
+  const card = $("card" + best.key);
+  card.classList.add("rec");
+  const b = document.createElement("span"); b.className = "recbadge"; b.textContent = "Recommended";
+  card.appendChild(b);
+  return best.key;
+}
+
+function renderOffers(i, scs, mA, mB, validA, validB) {
+  const rows = [`<div class="r hd"><span>Basis</span><span>Max offer</span><span>Cash to seller</span><span>vs current</span></div>`];
+  const totalDebt = mA.totalDebt;
+  const add = (label, offer) => {
+    if (!isFinite(offer) || offer <= 0) {
+      rows.push(`<div class="r"><span>${label}</span><span class="big">n/a</span><span>-</span><span>-</span></div>`);
+      return;
+    }
+    const cts = offer - totalDebt;
+    const delta = offer - i.offer;
+    rows.push(`<div class="r"><span>${label}</span><span class="big">${fmt$(offer)}</span>` +
+      `<span class="${cts<0?"neg":""}">${fmt$(cts)}</span>` +
+      `<span class="${delta<0?"neg":"pos"}">${(delta>=0?"+":"") + fmt$(delta).replace("$-","-$")}</span></div>`);
+  };
+  if (validA) {
+    add("Quick flip, hit " + i.targetROI + "% cash-on-cash", solveOffer(i, scs.A, m => m.netProfit - (i.targetROI/100) * m.cashIn));
+  }
+  if (validB) {
+    add("Full reno, hit " + i.targetROI + "% cash-on-cash", solveOffer(i, scs.B, m => m.netProfit - (i.targetROI/100) * m.cashIn));
+    add("70% rule (0.70 x ARV - repairs)", mB.mao70);
+  }
+  if (rows.length === 1) rows.push(`<div class="r"><span class="k" style="color:var(--ink-3)">Enter exit values to get offer guidance</span><span></span><span></span><span></span></div>`);
+  $("offerList").innerHTML = rows.join("");
+}
+
+function renderSensitivity(i, scs) {
+  const key = S.sensStrat;
+  const sc = scs[key];
+  const tbl = $("sensTable");
+  if (!(sc.sale > 0)) {
+    tbl.innerHTML = `<tr><td style="border:0; color:var(--ink-3); text-align:left;">Enter a sale value for this exit first.</td></tr>`;
+    $("safeOffer").style.display = "none";
+    return;
+  }
+  const priceSteps = [-0.10, -0.05, -0.025, 0, 0.025, 0.05];
+  const mBase = Math.round(sc.months);
+  const monthCols = [...new Set([Math.max(1, mBase - 3), mBase, mBase + 3, mBase + 6])];
+  const roiGoal = (m) => m.netProfit - (i.targetROI / 100) * m.cashIn;
+  const grid = priceSteps.map(ps => monthCols.map(mc => {
+    const cell = { ...sc, sale: sc.sale * (1 + ps), months: mc };
+    return { profit: calcScenario(i, cell).netProfit, maxOffer: solveOffer(i, cell, roiGoal) };
+  }));
+  const maxAbs = Math.max(1, ...grid.flat().map(c => Math.abs(c.profit)));
+  let html = `<tr><th>Sale price \\ Hold</th>` + monthCols.map(mc => `<th>${mc} mo</th>`).join("") + `</tr>`;
+  priceSteps.forEach((ps, ri) => {
+    const price = sc.sale * (1 + ps);
+    html += `<tr><th>${fmt$(price)}${ps === 0 ? " (as entered)" : ` (${ps>0?"+":""}${(ps*100).toFixed(1)}%)`}</th>`;
+    monthCols.forEach((mc, ci) => {
+      const c = grid[ri][ci];
+      const a = Math.min(Math.abs(c.profit) / maxAbs, 1) * 0.5;
+      const bg = Math.abs(c.profit) < maxAbs * 0.02 ? "transparent"
+        : `rgba(var(${c.profit >= 0 ? "--tint-pos" : "--tint-neg"}),${a.toFixed(3)})`;
+      const cur = ps === 0 && mc === mBase ? " cur" : "";
+      const debt0 = calcScenario(i, sc).totalDebt;
+      let moTxt, moBad = false;
+      if (isFinite(c.maxOffer) && c.maxOffer > 0) {
+        const rounded = Math.floor(c.maxOffer / 500) * 500;
+        moBad = debt0 > 0 && rounded < debt0;
+        moTxt = "Max offer " + fmt$(rounded) + (moBad ? " (below debt)" : "");
+      } else { moTxt = "No offer hits target"; moBad = true; }
+      html += `<td class="${cur}" style="background:${bg}">${fmt$(c.profit)}<div class="cellsub${moBad ? " bad" : ""}">${moTxt}</div></td>`;
+    });
+    html += `</tr>`;
+  });
+  tbl.innerHTML = html;
+
+  /* Brutally honest read on whether any offer actually works */
+  const so = $("safeOffer");
+  const debt = calcScenario(i, sc).totalDebt;
+  const cells = grid.flat();
+  const offers = cells.map(c => c.maxOffer).filter(v => isFinite(v) && v > 0);
+  const allWork = offers.length === cells.length;
+  const safe = allWork ? Math.floor(Math.min(...offers) / 500) * 500 : null;
+  const baseCell = grid[priceSteps.indexOf(0)][monthCols.indexOf(mBase)];
+  const baseMax = isFinite(baseCell.maxOffer) && baseCell.maxOffer > 0 ? Math.floor(baseCell.maxOffer / 500) * 500 : null;
+  const MIN_SELLER_CASH = 5000;
+  const box = (cls, lead, body) => { so.className = "safeoffer " + cls; so.style.display = ""; so.innerHTML = `<span class="lead">${lead}</span>${body}`; };
+
+  if (debt <= 0) {
+    if (safe != null) box("good", "Safe offer", `<strong>${fmt$(safe)}</strong> hits your ${i.targetROI}% target even in the worst cell above.`);
+    else so.style.display = "none";
+  } else if (baseMax == null) {
+    box("crit", "Dead deal at this target", `No offer price hits your ${i.targetROI}% target even with your own assumptions. The debt and costs eat the whole spread. Pass, or the numbers have to change.`);
+  } else if (baseMax < debt) {
+    box("crit", "Dead deal", `Even if everything goes right, the most you could pay is <strong>${fmt$(baseMax)}</strong>, which is <strong>${fmt$(debt - baseMax)}</strong> below the ${fmt$(debt)} debt. The seller gets nothing and the lien holders do not get paid in full. No seller signs that without a short payoff. Pass or renegotiate the debt.`);
+  } else if (baseMax - debt < MIN_SELLER_CASH) {
+    box("crit", "Effectively dead", `Best case, your max offer of <strong>${fmt$(baseMax)}</strong> leaves the seller only <strong>${fmt$(baseMax - debt)}</strong> after the debt. Almost nobody hands over their house for that. Pass unless the seller just wants out.`);
+  } else if (safe == null || safe < debt) {
+    const worstLine = safe == null
+      ? `in the worst cells above no offer hits your target at all`
+      : `covering the worst case would mean offering <strong>${fmt$(safe)}</strong>, which is below the debt, and no seller takes that`;
+    box("warn", "Works on paper, no cushion", `At your own assumptions the max offer is <strong>${fmt$(baseMax)}</strong>, leaving the seller <strong>${fmt$(baseMax - debt)}</strong>. But ${worstLine}. If the sale price slips or the hold runs long, this deal misses your target. Only do it if you trust the exit number.`);
+  } else if (safe - debt < MIN_SELLER_CASH) {
+    box("warn", "Thin for the seller", `The bulletproof offer is <strong>${fmt$(safe)}</strong>, but that only leaves the seller <strong>${fmt$(safe - debt)}</strong>. That is a hard yes to get. You can go up to <strong>${fmt$(baseMax)}</strong> (seller nets ${fmt$(baseMax - debt)}) if you trust your base numbers, but the cushion shrinks with every dollar.`);
+  } else {
+    box("good", "Deal works", `Bulletproof offer: <strong>${fmt$(safe)}</strong>. Hits your ${i.targetROI}% target even in the worst cell above and still puts <strong>${fmt$(safe - debt)}</strong> in the seller's pocket after the ${fmt$(debt)} debt. Room to go up to <strong>${fmt$(baseMax)}</strong> at your base assumptions.`);
+  }
+}
+
+/* ============================== main update ============================== */
+function update() {
+  const i = readInputs();
+  const scs = scenarioInputs(i);
+  const mA = calcScenario(i, scs.A);
+  const mB = calcScenario(i, scs.B);
+  const validA = i.asIsValue > 0;
+  const validB = i.arv > 0;
+
+  $("stDebt").textContent = fmt$(mA.totalDebt);
+  $("stCashToSeller").textContent = fmt$(mA.cashToSeller);
+  $("stMonthly").textContent = fmt$(mA.monthly);
+  $("growthHint").textContent = mA.payoffGrowth > 0
+    ? "Includes " + fmt$(mA.payoffGrowth) + " of payoff growth (" + fmt$(i.perDiem) + "/day x " + i.daysToClose + " days)" : "";
+  $("titleHint").textContent = i.titleInsOverride != null
+    ? "Manual override. Clear the field to go back to auto"
+    : (i.offer > 0 ? "Auto: " + fmt$(titlePremium(i.offer)) + " on a " + fmt$(i.offer) + " purchase (TIRBOP sale rate)" : "Auto from the PA (TIRBOP) rate card");
+  const sd = daysUntil(i.sheriffDate);
+  $("sheriffHint").innerHTML = sd == null ? "If scheduled. Drives the countdown"
+    : (sd < 0 ? "Sale date passed " + Math.abs(sd) + " days ago" : "<strong>" + sd + " days to sale</strong>");
+  const fu = daysUntil(i.followUpDate);
+  $("followHint").textContent = fu == null ? "Shows in the deal log" : (fu < 0 ? Math.abs(fu) + " days overdue" : "In " + fu + " days");
+  renderComps(i);
+  const sf = $("shortFlag");
+  if (i.offer > 0 && mA.cashToSeller < 0) { sf.className = "flag bad"; sf.textContent = "Offer is " + fmt$(Math.abs(mA.cashToSeller)) + " short of the debt. Short payoff territory."; }
+  else if (i.offer > 0) { sf.className = "flag ok"; sf.textContent = "Seller walks away with " + fmt$(mA.cashToSeller) + " after everything is paid off."; }
+  else { sf.textContent = ""; }
+
+  $("yearsA").textContent = "= " + (i.monthsA/12).toFixed(1) + " years";
+  $("yearsB").textContent = "= " + (i.monthsB/12).toFixed(1) + " years";
+
+  renderStrategyCard("a", mA);
+  renderStrategyCard("b", mB);
+  renderVerdict(mA, mB, validA, validB);
+  if (sd != null) {
+    const col = sd <= 30 ? "var(--crit)" : sd <= 60 ? "var(--warn)" : "var(--ink-2)";
+    const txt = sd < 0 ? "Sheriff sale date has passed." : "Sheriff sale in " + sd + " days.";
+    $("verdictWhy").innerHTML += ` <span style="font-weight:700; color:${col}">${txt}</span>`;
+  }
+  renderMarginal(mA, mB, validA, validB);
+  renderOffers(i, scs, mA, mB, validA, validB);
+  renderLedger(mA, mB, i);
+  renderSensitivity(i, scs);
+}
+
+/* ============================== comps helper ============================== */
+function buildCompRows() {
+  $("compRows").innerHTML = S.comps.map((c, idx) => `
+    <div class="comprow">
+      <div class="in"><span class="pre">$</span><input data-idx="${idx}" data-k="price" type="text" inputmode="decimal" placeholder="Sold price" value="${c.price || ""}"></div>
+      <div class="in"><input data-idx="${idx}" data-k="sqft" type="text" inputmode="numeric" placeholder="Sqft" value="${c.sqft || ""}"></div>
+      <div class="in"><select data-idx="${idx}" data-k="cond">
+        <option value="asis"${c.cond !== "reno" ? " selected" : ""}>As-is</option>
+        <option value="reno"${c.cond === "reno" ? " selected" : ""}>Renovated</option>
+      </select></div>
+      <button class="del" data-del="${idx}" title="Remove comp" aria-label="Remove comp">&times;</button>
+    </div>`).join("");
+  $("compCount").textContent = S.comps.length ? "(" + S.comps.length + ")" : "";
+}
+function compStats(cond) {
+  const rows = S.comps.filter(c => c.cond === cond ? true : (cond === "asis" && c.cond !== "reno")).filter(c => num(c.price) > 0 && num(c.sqft) > 0);
+  if (!rows.length) return null;
+  const ppsf = rows.reduce((s, c) => s + num(c.price), 0) / rows.reduce((s, c) => s + num(c.sqft), 0);
+  return { ppsf, n: rows.length };
+}
+function renderComps(i) {
+  const a = compStats("asis"), b = compStats("reno");
+  const sq = i.subjectSqft;
+  let out = [];
+  if (a) out.push("As-is comps (" + a.n + "): " + fmt$(a.ppsf, 0) + "/sqft" + (sq > 0 ? ", suggests " + fmt$(Math.round(a.ppsf * sq / 1000) * 1000) : ""));
+  if (b) out.push("Renovated comps (" + b.n + "): " + fmt$(b.ppsf, 0) + "/sqft" + (sq > 0 ? ", suggests " + fmt$(Math.round(b.ppsf * sq / 1000) * 1000) : ""));
+  $("compOut").textContent = out.length ? out.join(". ") : (S.comps.length ? "Enter price and sqft on each comp" + (sq > 0 ? "" : ", plus the subject sqft") : "Add sold comps to back into your as-is value and ARV");
+  $("applyAsIs").style.display = a && sq > 0 ? "" : "none";
+  $("applyArv").style.display = b && sq > 0 ? "" : "none";
+}
+$("addComp").addEventListener("click", () => {
+  S.comps.push({ price: "", sqft: "", cond: S.comps.length && S.comps[S.comps.length-1].cond === "reno" ? "reno" : "asis" });
+  buildCompRows(); update();
+});
+$("compRows").addEventListener("input", (e) => {
+  const el = e.target.closest("[data-idx]"); if (!el) return;
+  S.comps[+el.dataset.idx][el.dataset.k] = el.value;
+  update();
+});
+$("compRows").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del]"); if (!del) return;
+  S.comps.splice(+del.dataset.del, 1);
+  buildCompRows(); update();
+});
+$("applyAsIs").addEventListener("click", () => {
+  const i = readInputs(); const a = compStats("asis");
+  if (a && i.subjectSqft > 0) { $("asIsValue").value = (Math.round(a.ppsf * i.subjectSqft / 1000) * 1000).toLocaleString("en-US"); update(); toast("As-is value set from comps"); }
+});
+$("applyArv").addEventListener("click", () => {
+  const i = readInputs(); const b = compStats("reno");
+  if (b && i.subjectSqft > 0) { $("arv").value = (Math.round(b.ppsf * i.subjectSqft / 1000) * 1000).toLocaleString("en-US"); update(); toast("ARV set from comps"); }
+});
+
+/* ============================== activity log ============================== */
+function renderActivity() {
+  $("actList").innerHTML = S.activity.map((a, idx) => {
+    const d = new Date(a.t);
+    const when = d.toLocaleDateString("en-US", {month:"short", day:"numeric"}) + " " +
+      d.toLocaleTimeString("en-US", {hour:"numeric", minute:"2-digit"});
+    return `<div class="actrow"><span class="when">${when}</span><span class="txt">${esc(a.txt)}</span><button class="del" data-adel="${idx}" aria-label="Remove entry">&times;</button></div>`;
+  }).join("");
+  $("actHint").textContent = S.activity.length ? "" : "Contact history saves with the deal and shows in the log";
+  $("actCount").textContent = S.activity.length ? "(" + S.activity.length + ")" : "";
+}
+function addActivity() {
+  const txt = $("actInput").value.trim();
+  if (!txt) return;
+  S.activity.unshift({ t: Date.now(), txt });
+  $("actInput").value = "";
+  renderActivity();
+  if (currentDealId) { persistDeal(currentDealId, dealFromState()); toast("Logged and saved"); }
+  else toast("Logged. Save the deal to keep it");
+}
+$("actAdd").addEventListener("click", addActivity);
+$("actInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addActivity(); } });
+$("actList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-adel]"); if (!b) return;
+  S.activity.splice(+b.dataset.adel, 1);
+  renderActivity();
+  if (currentDealId) persistDeal(currentDealId, dealFromState());
+});
+
+/* ============================== copy deal summary ============================== */
+$("copySummary").addEventListener("click", () => {
+  const i = readInputs();
+  const scs = scenarioInputs(i);
+  const mA = calcScenario(i, scs.A), mB = calcScenario(i, scs.B);
+  const validA = i.asIsValue > 0, validB = i.arv > 0;
+  if (!validA && !validB) { toast("Enter an exit value first"); return; }
+  const bestKey = validA && validB ? (mB.annRoi > mA.annRoi ? "B" : "A") : (validA ? "A" : "B");
+  const m = bestKey === "B" ? mB : mA;
+  const name = bestKey === "B" ? "Full reno" : "Quick flip";
+  const lines = [
+    (i.address || "Deal") + (i.zip ? " (" + i.zip + ")" : ""),
+    "Debt: " + fmt$(m.totalDebt) + " | Offer: " + fmt$(i.offer) + " | Cash to seller: " + fmt$(m.cashToSeller),
+    "Best exit: " + name + ", " + m.months + " mo at " + fmt$(m.sale),
+    "Net profit: " + fmt$(m.netProfit) + " | CoC: " + fmtPct(m.roi) + " | Annualized: " + fmtPct(m.annRoi),
+    "All-in: " + fmt$(m.allIn) + " | Cash in: " + fmt$(m.cashIn),
+    "Verdict: " + $("verdictChip").textContent.replace(/^[^A-Za-z]+/, "")
+  ];
+  if (i.sheriffDate) lines.push("Sheriff sale: " + i.sheriffDate + (daysUntil(i.sheriffDate) != null ? " (" + daysUntil(i.sheriffDate) + " days)" : ""));
+  try { navigator.clipboard.writeText(lines.join("\n")).then(() => toast("Summary copied"), () => toast("Copy blocked")); }
+  catch (e) { toast("Copy blocked"); }
+});
+
+/* ============================== seller text ============================== */
+$("copySellerText").addEventListener("click", () => {
+  const i = readInputs();
+  const m = calcScenario(i, scenarioInputs(i).A);
+  if (!(m.totalDebt > 0)) { toast("Enter the debt first"); return; }
+  if (!(i.offer > 0) || m.cashToSeller <= 0) { toast("Offer is at or below the debt, no seller pitch works yet"); return; }
+  const street = (i.address || "your property").split(",")[0];
+  const days = i.daysToClose > 0 ? i.daysToClose : 30;
+  const txt = "Hi, this is Michael with Blake Management. I'm a local home buyer, not an agent. " +
+    "I can pay off the full " + fmt$(m.totalDebt) + " owed on " + street + ", liens included, " +
+    "and put " + fmt$(m.cashToSeller) + " cash in your pocket on top. We close in about " + days + " days. " +
+    "No commission, no fees, no repairs, we buy as-is. Happy to walk you through the exact numbers. Call or text me anytime.";
+  try { navigator.clipboard.writeText(txt).then(() => toast("Seller text copied"), () => toast("Copy blocked")); }
+  catch (e) { toast("Copy blocked"); }
+});
+
+/* ============================== bulk lead import ============================== */
+function blankInputs() {
+  const o = {};
+  MONEY_IDS.concat(PCT_IDS, NUM_IDS).forEach(id => o[id] = DEFAULTS[id] != null ? DEFAULTS[id] : 0);
+  TEXT_IDS.concat(DATE_IDS).forEach(id => o[id] = "");
+  o.dealStatus = "Modeling"; o.leadSource = "Scraper list";
+  o.buyShare = 1; o.sellShare = 0.5; o.financed = 0; o.finType = "cash";
+  o.comps = []; o.activity = []; o.titleInsOverride = null;
+  return o;
+}
+function parseLeads(text) {
+  return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    const parts = line.includes("\t") ? line.split("\t") : line.split(/,(?=\s*[$\d])(?!\s*\d{3}\b)/);
+    let address = (parts[0] || "").trim().replace(/[,;]\s*$/, "");
+    let zip = "", monies = [];
+    for (const p of parts.slice(1)) {
+      const t = p.trim();
+      if (/^\d{5}$/.test(t)) zip = t;
+      else { const n = num(t); if (n > 0) monies.push(n); }
+    }
+    if (!zip) { const mz = address.match(/\b(\d{5})\s*$/); if (mz) { zip = mz[1]; address = address.replace(/\b\d{5}\s*$/, "").replace(/[,;\s]+$/, ""); } }
+    return address ? { address, zip, payoff: monies[0] || 0, muniLiens: monies[1] || 0, otherLiens: monies[2] || 0 } : null;
+  }).filter(Boolean);
+}
+$("importBtn").addEventListener("click", () => { $("importModal").classList.add("open"); $("importText").focus(); });
+$("importClose").addEventListener("click", () => $("importModal").classList.remove("open"));
+$("importModal").addEventListener("click", (e) => { if (e.target === $("importModal")) $("importModal").classList.remove("open"); });
+$("importText").addEventListener("input", () => {
+  const leads = parseLeads($("importText").value);
+  $("importPreview").textContent = leads.length
+    ? "Parsed " + leads.length + " lead" + (leads.length > 1 ? "s" : "") + ". First: " + leads[0].address +
+      (leads[0].zip ? ", " + leads[0].zip : "") + (leads[0].payoff ? ", payoff " + fmt$(leads[0].payoff) : "")
+    : "Nothing parsed yet";
+});
+$("importDo").addEventListener("click", async () => {
+  const leads = parseLeads($("importText").value);
+  if (!leads.length) { toast("Nothing to import"); return; }
+  for (const L of leads) {
+    const inp = blankInputs();
+    inp.address = L.address; inp.zip = L.zip;
+    inp.payoff = L.payoff; inp.muniLiens = L.muniLiens; inp.otherLiens = L.otherLiens;
+    const t = taxRateForZip(L.zip); if (t) inp.taxRate = t.rate;
+    const totalDebt = L.payoff + L.muniLiens + L.otherLiens;
+    const id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    await persistDeal(id, {
+      savedAt: Date.now(),
+      inputs: inp,
+      summary: { address: L.address, zip: L.zip, status: "Modeling", sheriffDate: "", followUpDate: "",
+        lastActivity: "", totalDebt, offer: 0, bestKey: null, netProfit: null, roi: null, annRoi: null }
+    });
+  }
+  $("importText").value = ""; $("importPreview").textContent = "";
+  $("importModal").classList.remove("open");
+  toast("Imported " + leads.length + " lead" + (leads.length > 1 ? "s" : ""));
+});
+
+/* ============================== seller net sheet ============================== */
+function netSheetData() {
+  const i = readInputs();
+  const m = calcScenario(i, scenarioInputs(i).A);
+  const lines = [
+    ["Mortgage / foreclosure payoff", i.payoff],
+    ["Back taxes", i.backTaxes],
+    ["Municipal liens", i.muniLiens],
+    ["Other liens and judgments", i.otherLiens],
+    ["Interest and fees through closing", i.payoffBuffer + m.payoffGrowth]
+  ].filter(l => l[1] > 0);
+  return { i, m, lines };
+}
+function openNetSheet() {
+  const { i, m, lines } = netSheetData();
+  $("nsAddr").textContent = i.address || "Your property";
+  $("nsDebtLines").innerHTML = lines.map(l => `<div class="line"><span>${esc(l[0])}</span><span>${fmt$(l[1])}</span></div>`).join("") +
+    `<div class="line total"><span>Total debt cleared</span><span>${fmt$(m.totalDebt)}</span></div>`;
+  $("nsCash").textContent = fmt$(Math.max(m.cashToSeller, 0));
+  const bullets = [];
+  if (i.perDiem > 0) bullets.push("The debt keeps growing at " + fmt$(i.perDiem) + " per day until it is paid");
+  bullets.push("Auction prices usually come in well below market value");
+  bullets.push("Sale costs and fees are deducted before any money reaches you");
+  bullets.push("Any surplus is paid out through the court, often months later");
+  bullets.push("A completed foreclosure stays on your credit for years");
+  $("nsSheriff").innerHTML = bullets.map(b => `<li>${esc(b)}</li>`).join("");
+  $("netSheetModal").classList.add("open");
+}
+$("netSheetBtn").addEventListener("click", () => {
+  const { m } = netSheetData();
+  if (!(m.totalDebt > 0)) { toast("Enter the debt first"); return; }
+  openNetSheet();
+});
+$("nsClose").addEventListener("click", () => $("netSheetModal").classList.remove("open"));
+$("netSheetModal").addEventListener("click", (e) => { if (e.target === $("netSheetModal")) $("netSheetModal").classList.remove("open"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("netSheetModal").classList.remove("open"); });
+$("nsCopy").addEventListener("click", () => {
+  const { i, m, lines } = netSheetData();
+  const txt = [
+    (i.address || "Your property"),
+    "",
+    "What we pay off for you at closing:",
+    ...lines.map(l => "- " + l[0] + ": " + fmt$(l[1])),
+    "Total debt cleared: " + fmt$(m.totalDebt),
+    "",
+    "Cash to you at closing: " + fmt$(Math.max(m.cashToSeller, 0)),
+    "No commission, no fees, no repairs. Sold as-is.",
+    "",
+    "If it goes to sheriff sale instead:" ,
+    ...(i.perDiem > 0 ? ["- The debt grows " + fmt$(i.perDiem) + " per day until it is paid"] : []),
+    "- Auction prices usually come in well below market value",
+    "- Sale costs and fees come out before any money reaches you",
+    "- Any surplus is paid through the court, often months later",
+    "- A completed foreclosure stays on your credit for years"
+  ].join("\n");
+  try { navigator.clipboard.writeText(txt).then(() => toast("Copied"), () => toast("Copy blocked")); }
+  catch (e) { toast("Copy blocked"); }
+});
+
+/* ============================== events ============================== */
+function applyFinType() {
+  const v = S.finType;
+  $("finFields").style.display = v === "cash" ? "none" : "grid";
+  $("pointsField").style.display = v === "loan" ? "" : "none";
+  $("lenderFeesField").style.display = v === "loan" ? "" : "none";
+  $("finHint").textContent = v === "ploc" ? "Interest-only carry on the draw. No points or lender fees."
+    : v === "loan" ? "Points and fees hit the all-in cost up front." : "";
+}
+document.querySelectorAll(".seg").forEach(seg => {
+  seg.addEventListener("click", (e) => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b === btn ? "true" : "false"));
+    const group = seg.dataset.group;
+    const val = btn.dataset.val;
+    if (group === "finType") { S.finType = val; applyFinType(); }
+    else if (group === "buyShare") S.buyShare = +val;
+    else if (group === "sellShare") S.sellShare = +val;
+    else if (group === "sensStrat") S.sensStrat = val;
+    update();
+  });
+});
+
+document.querySelectorAll("input, select, textarea").forEach(el => {
+  el.addEventListener("input", () => {
+    if (el.id === "zip") {
+      const t = taxRateForZip(el.value.trim());
+      if (t) { $("taxRate").value = t.rate; $("zipHint").textContent = t.label; }
+      else { $("zipHint").textContent = "Sets the PA transfer tax rate"; }
+    }
+    update();
+  });
+});
+MONEY_IDS.forEach(id => {
+  $(id).addEventListener("blur", () => {
+    const v = num($(id).value);
+    $(id).value = v ? v.toLocaleString("en-US", {maximumFractionDigits: 2}) : "0";
+  });
+});
+
+/* tabs */
+function showTab(which) {
+  $("tab-analyzer").setAttribute("aria-selected", which === "analyzer");
+  $("tab-log").setAttribute("aria-selected", which === "log");
+  $("view-analyzer").classList.toggle("active", which === "analyzer");
+  $("view-log").classList.toggle("active", which === "log");
+}
+$("tab-analyzer").addEventListener("click", () => showTab("analyzer"));
+$("tab-log").addEventListener("click", () => showTab("log"));
+
+/* ============================== persistence (db with local fallback) ============================== */
+let db = null, dbUser = null, deals = {}, usingLocal = true;
+const LKEY = "fda_deals_v1";
+
+function localLoad() {
+  try { deals = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch (e) { deals = {}; }
+}
+function localSave() {
+  try { localStorage.setItem(LKEY, JSON.stringify(deals)); } catch (e) { /* storage unavailable */ }
+}
+
+function dealFromState() {
+  const i = readInputs();
+  const scs = scenarioInputs(i);
+  const mA = calcScenario(i, scs.A);
+  const mB = calcScenario(i, scs.B);
+  const validA = i.asIsValue > 0, validB = i.arv > 0;
+  let bestKey = null;
+  if (validA && validB) bestKey = mB.annRoi > mA.annRoi ? "B" : "A";
+  else if (validA) bestKey = "A"; else if (validB) bestKey = "B";
+  const best = bestKey === "B" ? mB : mA;
+  return {
+    savedAt: Date.now(),
+    caseNumbers: linkedCases.slice(),
+    inputs: i,
+    summary: {
+      address: i.address || "(no address)", zip: i.zip, status: i.dealStatus,
+      sheriffDate: i.sheriffDate || "", followUpDate: i.followUpDate || "",
+      lastActivity: S.activity.length ? S.activity[0].txt : "",
+      totalDebt: mA.totalDebt, offer: i.offer, bestKey,
+      netProfit: bestKey ? best.netProfit : null,
+      roi: bestKey ? best.roi : null,
+      annRoi: bestKey ? best.annRoi : null
+    }
+  };
+}
+
+function renderLog() {
+  const body = $("logBody");
+  const list = Object.entries(deals).map(([id, d]) => ({ id, ...d }))
+    .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+  $("logEmpty").style.display = list.length ? "none" : "block";
+  $("logCount").textContent = list.length ? "(" + list.length + ")" : "";
+  /* pipeline header */
+  const st = (d) => normStatus(d.summary && d.summary.status);
+  const active = list.filter(d => !["Dead", "Sold"].includes(st(d)));
+  const offersOut = active.filter(d => ["Offer made", "Negotiating"].includes(st(d))).length;
+  const underK = active.filter(d => ["Under contract", "Owned / rehab", "Listed"].includes(st(d))).length;
+  const pipeProfit = active.reduce((s, d) => s + (d.summary && d.summary.netProfit > 0 ? d.summary.netProfit : 0), 0);
+  const fuDue = active.filter(d => { const n = daysUntil(d.summary && d.summary.followUpDate); return n != null && n <= 7; }).length;
+  const salesSoon = active.filter(d => { const n = daysUntil(d.summary && d.summary.sheriffDate); return n != null && n >= 0 && n <= 30; }).length;
+  $("pipeStats").innerHTML = list.length ? [
+    tile("Active deals", active.length, ""),
+    tile("Offers out / negotiating", offersOut, ""),
+    tile("Contract to listed", underK, ""),
+    tile("Pipeline profit", fmt$(pipeProfit), "Best-exit profit on active deals"),
+    tile("Follow-ups due", fuDue, "Next 7 days, overdue included"),
+    tile("Sheriff sales", salesSoon, "Next 30 days")
+  ].join("") : "";
+  body.innerHTML = list.map(d => {
+    const s = d.summary || {};
+    const dt = d.savedAt ? new Date(d.savedAt).toLocaleDateString("en-US", {month:"short", day:"numeric"}) : "";
+    const bk = s.bestKey === "A" ? `<span class="pill rec-A">Quick flip</span>` : s.bestKey === "B" ? `<span class="pill rec-B">Full reno</span>` : `<span class="pill">-</span>`;
+    const sdCell = s.sheriffDate ? esc(s.sheriffDate.slice(5)) + " " + dayPill(s.sheriffDate, 30, 60) : "-";
+    const fuCell = s.followUpDate ? esc(s.followUpDate.slice(5)) + " " + dayPill(s.followUpDate, 0, 3) : "-";
+    return `<tr>
+      <td>${esc(s.address)}${s.lastActivity ? `<div class="lastact">${esc(s.lastActivity)}</div>` : ""}</td>
+      <td><select class="status" data-id="${d.id}">${STATUSES.map(o => `<option${o===normStatus(s.status)?" selected":""}>${o}</option>`).join("")}</select></td>
+      <td>${sdCell}</td>
+      <td>${fuCell}</td>
+      <td>${dt}</td>
+      <td>${fmt$(s.totalDebt||0)}</td>
+      <td>${fmt$(s.offer||0)}</td>
+      <td>${bk}</td>
+      <td class="${(s.netProfit||0)<0?"neg":"pos"}">${s.netProfit==null?"-":fmt$(s.netProfit)}</td>
+      <td>${s.roi==null?"-":fmtPct(s.roi)}</td>
+      <td>${s.annRoi==null?"-":fmtPct(s.annRoi)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn sm" data-act="load" data-id="${d.id}">Load</button>
+        <button class="btn sm danger" data-act="del" data-id="${d.id}">Delete</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+/* Deals live on the site (/api/analyzer/deals) once startAnalyzer() has loaded them;
+   until then, or if the site cannot be reached, they stay in this browser. */
+let serverMode = false;
+/* Court case numbers of the MontCo card this deal was opened from. They are saved with
+   the deal so that card's Analyze button opens the saved deal again. */
+let linkedCases = [];
+
+async function serverSend(method, id, deal) {
+  const r = await fetch("/api/analyzer/deals/" + encodeURIComponent(id), {
+    method,
+    headers: { "Content-Type": "application/json", "X-Auth-Token": siteAuth.get() },
+    body: deal ? JSON.stringify(deal) : undefined
+  });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+}
+/* Both resolve to false when the site did not take the change. */
+async function persistDeal(id, deal) {
+  deals[id] = deal;
+  let ok = true;
+  if (serverMode) {
+    try { await serverSend("PUT", id, deal); }
+    catch (e) { ok = false; toast("Could not save to the site. Try again"); }
+  } else { localSave(); }
+  renderLog();
+  return ok;
+}
+async function removeDeal(id) {
+  const had = deals[id];
+  delete deals[id];
+  let ok = true;
+  if (serverMode) {
+    try { await serverSend("DELETE", id); }
+    catch (e) { ok = false; if (had) deals[id] = had; toast("Could not delete from the site. Try again"); }
+  } else { localSave(); }
+  renderLog();
+  return ok;
+}
+
+$("saveDeal").addEventListener("click", async () => {
+  const deal = dealFromState();
+  if (!deal.inputs.address && !deal.inputs.offer) { toast("Give the deal an address first"); return; }
+  const id = currentDealId
+    || (linkedCases.length ? "montco-" + linkedCases[0].replace(/[^\w-]/g, "_") : "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
+  currentDealId = id;
+  if (!(await persistDeal(id, deal))) return;
+  $("saveNote").textContent = "Saved " + (deal.summary.address) + " at " + new Date().toLocaleTimeString() +
+    (serverMode ? ". It will be here next time you open this property." : " (this browser only)");
+  toast("Deal saved");
+});
+
+$("newDeal").addEventListener("click", () => {
+  currentDealId = null; linkedCases = [];
+  MONEY_IDS.forEach(id => $(id).value = "0");
+  PCT_IDS.concat(NUM_IDS).forEach(id => $(id).value = DEFAULTS[id] != null ? DEFAULTS[id] : 0);
+  TEXT_IDS.concat(DATE_IDS).forEach(id => $(id).value = "");
+  $("titleIns").value = "";
+  $("dealStatus").value = "Modeling"; $("leadSource").value = "Door note";
+  S.comps = []; buildCompRows();
+  S.activity = []; renderActivity();
+  $("saveNote").textContent = "";
+  update();
+  toast("Cleared");
+});
+
+function loadDeal(id) {
+  const d = deals[id]; if (!d || !d.inputs) return;
+  const i = d.inputs;
+  currentDealId = id;
+  linkedCases = Array.isArray(d.caseNumbers) ? d.caseNumbers.slice() : [];
+  MONEY_IDS.concat(PCT_IDS, NUM_IDS).forEach(k => { if ($(k)) $(k).value = i[k] != null ? i[k] : (DEFAULTS[k] != null ? DEFAULTS[k] : 0); });
+  TEXT_IDS.concat(DATE_IDS).forEach(k => { if ($(k)) $(k).value = i[k] != null ? i[k] : ""; });
+  SEL_IDS.forEach(k => { if ($(k) && i[k] != null) $(k).value = i[k]; });
+  $("dealStatus").value = normStatus(i.dealStatus);
+  $("titleIns").value = i.titleInsOverride != null ? i.titleInsOverride : "";
+  S.comps = Array.isArray(i.comps) ? i.comps.slice() : [];
+  buildCompRows();
+  S.activity = Array.isArray(i.activity) ? i.activity.slice() : [];
+  renderActivity();
+  $("compsCard").open = S.comps.length > 0;
+  $("activityCard").open = S.activity.length > 0;
+  S.buyShare = i.buyShare ?? 1; S.sellShare = i.sellShare ?? 0.5;
+  S.finType = i.finType || (i.financed ? "loan" : "cash");
+  const setSeg = (segId, val) => {
+    document.querySelectorAll("#" + segId + " button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.val === +val || b.dataset.val === String(val))));
+  };
+  setSeg("buyShareSeg", S.buyShare); setSeg("sellShareSeg", S.sellShare); setSeg("finSeg", S.finType);
+  applyFinType();
+  const t = taxRateForZip((i.zip || "").trim());
+  $("zipHint").textContent = t ? t.label : "Sets the PA transfer tax rate";
+  showTab("analyzer");
+  update();
+  toast("Loaded " + (d.summary?.address || "deal"));
+}
+
+$("logBody").addEventListener("click", (e) => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.act === "load") loadDeal(id);
+  else if (btn.dataset.act === "del") { removeDeal(id); toast("Deleted"); }
+});
+$("logBody").addEventListener("change", (e) => {
+  const sel = e.target.closest("select.status"); if (!sel) return;
+  const d = deals[sel.dataset.id]; if (!d) return;
+  d.summary = d.summary || {}; d.summary.status = sel.value;
+  if (d.inputs) d.inputs.dealStatus = sel.value;
+  persistDeal(sel.dataset.id, d);
+});
+
+$("copyCsv").addEventListener("click", () => {
+  const list = Object.values(deals).sort((a,b) => (b.savedAt||0)-(a.savedAt||0));
+  const head = ["Address","Zip","Status","Sheriff sale","Follow-up","Saved","Total debt","Offer","Best exit","Net profit","Cash ROI","Annualized ROI"];
+  const lines = [head.join(",")].concat(list.map(d => {
+    const s = d.summary || {};
+    return [
+      '"' + String(s.address||"").replace(/"/g,'""') + '"', s.zip||"", s.status||"",
+      s.sheriffDate||"", s.followUpDate||"",
+      d.savedAt ? new Date(d.savedAt).toISOString().slice(0,10) : "",
+      Math.round(s.totalDebt||0), Math.round(s.offer||0),
+      s.bestKey==="A"?"Quick flip":s.bestKey==="B"?"Full reno":"",
+      s.netProfit==null?"":Math.round(s.netProfit),
+      s.roi==null?"":(s.roi*100).toFixed(1)+"%",
+      s.annRoi==null?"":(s.annRoi*100).toFixed(1)+"%"
+    ].join(",");
+  }));
+  const csv = lines.join("\n");
+  try {
+    navigator.clipboard.writeText(csv).then(() => toast("CSV copied"), () => toast("Copy blocked, select the table instead"));
+  } catch (e) { toast("Copy blocked, select the table instead"); }
+});
+
+/* ============================== saved deals: load from the site ============================== */
+localLoad(); renderLog();
+$("storageNote").textContent = "Deals save to this browser until the site's deal log loads.";
+
+async function fetchServerDeals() {
+  const r = await fetch("/api/analyzer/deals", { headers: { "X-Auth-Token": siteAuth.get() } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return (await r.json()).deals || {};
+}
+/* Picks up deals other people saved since this page loaded. */
+async function refreshDeals() {
+  if (!serverMode) return;
+  try { deals = await fetchServerDeals(); renderLog(); } catch (e) { /* keep what is on screen */ }
+}
+/* Called once the login is good (see the site login script below). */
+window.startAnalyzer = async function () {
+  try {
+    const next = await fetchServerDeals();
+    // Deals saved in this browser before the site kept them, or while it was unreachable, move up once.
+    let local = {};
+    try { local = JSON.parse(localStorage.getItem(LKEY) || "{}") || {}; } catch (e) {}
+    let moved = true;
+    for (const id of Object.keys(local)) {
+      if (next[id] && (next[id].savedAt || 0) >= (local[id].savedAt || 0)) continue;
+      try { await serverSend("PUT", id, local[id]); next[id] = local[id]; } catch (e) { moved = false; }
+    }
+    if (moved) { try { localStorage.removeItem(LKEY); } catch (e) {} }
+    deals = next; serverMode = true;
+    $("storageNote").textContent = "Deals save to the site. Everyone who signs in sees the same log.";
+    renderLog();
+  } catch (e) {
+    $("storageNote").textContent = "Could not reach the site's deal log. Deals save to this browser for now.";
+    return;
+  }
+  // Opened from a MontCo card that already has a saved deal: show the saved deal, not the fresh prefill.
+  if (linkedCases.length) {
+    const hit = Object.entries(deals)
+      .filter(([, d]) => Array.isArray(d.caseNumbers) && d.caseNumbers.some(n => linkedCases.includes(n)))
+      .sort((x, y) => (y[1].savedAt || 0) - (x[1].savedAt || 0))[0];
+    if (hit) {
+      const fromCard = linkedCases;
+      loadDeal(hit[0]);
+      linkedCases = [...new Set(fromCard.concat(linkedCases))];
+      $("saveNote").textContent = "Opened the deal saved on " + new Date(hit[1].savedAt || Date.now()).toLocaleDateString() + ".";
+    }
+  }
+};
+$("tab-log").addEventListener("click", refreshDeals);
+
+/* URL prefill: lets the scraper site open the analyzer with a lead loaded, e.g.
+   analyzer.html?address=123 Main St&zip=19405&payoff=95000&backTaxes=8000&muniLiens=4000&offer=140000&sheriffDate=2027-02-10 */
+(function prefillFromUrl() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (![...q.keys()].length) return;
+    linkedCases = (q.get("case") || "").split(",").map(s => s.trim()).filter(Boolean); // set by the MontCo card link
+    const map = { address:"address", zip:"zip", payoff:"payoff", backtaxes:"backTaxes", taxes:"backTaxes",
+      muniliens:"muniLiens", muni:"muniLiens", otherliens:"otherLiens", liens:"otherLiens", perdiem:"perDiem",
+      offer:"offer", asis:"asIsValue", arv:"arv", reno:"reno", repairs:"lightRepairs",
+      sheriffdate:"sheriffDate", saledate:"sheriffDate", followup:"followUpDate", sqft:"subjectSqft", notes:"notes" };
+    let hit = false;
+    for (const [k, v] of q.entries()) {
+      const id = map[k.toLowerCase()];
+      if (id && $(id)) { $(id).value = v; hit = true; }
+    }
+    if (hit) {
+      const t = taxRateForZip(($("zip").value || "").trim());
+      if (t) { $("taxRate").value = t.rate; $("zipHint").textContent = t.label; }
+    }
+  } catch (e) {}
+})();
+
+buildCompRows();
+renderActivity();
+update();
+</script>
+<script>
+/* Site login: the same shared password login as the other tabs (see nav-access.js).
+   Saved deals load only after the login is good (startAnalyzer, above). */
+(function () {
+  var overlay = document.getElementById("loginOverlay");
+  var main = document.getElementById("mainContent");
+  var err = document.getElementById("loginError");
+
+  function showLogin(message) {
+    main.style.display = "none";
+    overlay.style.display = "flex";
+    if (message) { err.textContent = message; err.style.display = "block"; }
+  }
+  // Resolves to "ok", "denied" (not a site password), "notab" (no MontCo access) or "offline".
+  function check(token) {
+    return fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: token })
+    }).then(function (r) {
+      if (r.status === 401) return "denied";
+      if (!r.ok) return "offline";
+      return r.json().then(function (d) {
+        return Array.isArray(d.tabs) && d.tabs.indexOf("montco") !== -1 ? "ok" : "notab";
+      });
+    }).catch(function () { return "offline"; });
+  }
+  function open(token) {
+    overlay.style.display = "none";
+    main.style.display = "";
+    syncNavTabs(token);
+    startAnalyzer();
+  }
+
+  window.siteLogin = function () {
+    var password = document.getElementById("passwordInput").value;
+    err.style.display = "none";
+    check(password).then(function (result) {
+      if (result === "ok") { siteAuth.set(password); open(password); }
+      else showLogin(result === "notab" ? "This password cannot open the MontCo tabs"
+        : result === "offline" ? "Could not reach the server, try again" : "Invalid password");
+    });
+  };
+
+  var saved = siteAuth.get();
+  if (!saved) return;
+  overlay.style.display = "none";
+  check(saved).then(function (result) {
+    if (result === "ok") open(saved);
+    else if (result === "denied") { siteAuth.clear(); showLogin(); }
+    else showLogin(result === "notab" ? "This password cannot open the MontCo tabs" : "Could not reach the server, try again");
+  });
+})();
+</script>
+</body>
+</html>

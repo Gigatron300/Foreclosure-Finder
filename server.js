@@ -1096,6 +1096,76 @@ app.post('/api/pipeline/notes', checkAuth, async (req, res) => {
   }
 });
 
+// ---- MontCo Analyzer: saved deals ----
+// One JSON object per deal, { savedAt, inputs, summary, caseNumbers }, keyed by deal id.
+// A deal opened from a MontCo card carries that card's case numbers, which is how the
+// card's Analyze button finds it again.
+const ANALYZER_DEALS_FILE = path.join(CONFIG.outputDir, 'analyzer-deals.json');
+
+async function readAnalyzerDeals() {
+  try {
+    return JSON.parse(await fs.readFile(ANALYZER_DEALS_FILE, 'utf8'));
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};
+    throw e; // an unreadable file must not be replaced by an empty one on the next save
+  }
+}
+
+// Writes are serialized so two quick saves can't overwrite each other.
+let analyzerDealsWrite = Promise.resolve();
+function updateAnalyzerDeals(mutate) {
+  const run = analyzerDealsWrite.then(async () => {
+    const all = await readAnalyzerDeals();
+    mutate(all);
+    const tmp = ANALYZER_DEALS_FILE + '.tmp';
+    await fs.writeFile(tmp, JSON.stringify(all));
+    await fs.rename(tmp, ANALYZER_DEALS_FILE);
+  });
+  analyzerDealsWrite = run.catch(() => {});
+  return run;
+}
+
+const ANALYZER_DEAL_ID = /^[\w-]{1,80}$/;
+
+app.use('/api/analyzer', (req, res, next) => {
+  const tabs = tabsFor(req.headers['x-auth-token']);
+  if (!tabs) return res.status(401).json({ error: 'Unauthorized' });
+  if (!tabs.includes('montco')) return res.status(403).json({ error: 'No access to the MontCo Analyzer' });
+  next();
+});
+
+app.get('/api/analyzer/deals', async (req, res) => {
+  try {
+    res.json({ deals: await readAnalyzerDeals() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/analyzer/deals/:id', async (req, res) => {
+  try {
+    const deal = req.body;
+    if (!ANALYZER_DEAL_ID.test(req.params.id)) return res.status(400).json({ error: 'Bad deal id' });
+    if (!deal || typeof deal !== 'object' || Array.isArray(deal) || typeof deal.inputs !== 'object') {
+      return res.status(400).json({ error: 'Not a deal' });
+    }
+    if (JSON.stringify(deal).length > 300000) return res.status(413).json({ error: 'Deal is too large' });
+    await updateAnalyzerDeals(all => { all[req.params.id] = deal; });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/analyzer/deals/:id', async (req, res) => {
+  try {
+    await updateAnalyzerDeals(all => { delete all[req.params.id]; });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Save the payoff inputs for one case and return the fresh estimate.
 // Body: { recorderText, overrides: {"MTG 15325/2923": false}, otherLiens: [{name, amount}],
 //         annualTaxes, rate, originalAmount, originationDate, additionalCosts }

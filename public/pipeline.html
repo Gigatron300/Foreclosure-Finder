@@ -107,7 +107,8 @@
         }
         .header-inner {
             display: grid;
-            grid-template-columns: auto 1fr auto;
+            /* The title keeps a floor so a full nav wraps to a second row instead of crushing it. */
+            grid-template-columns: auto minmax(280px, 1fr) auto;
             align-items: center;
             gap: 16px;
             max-width: 1400px;
@@ -691,6 +692,12 @@
             text-decoration: none !important;
         }
         .zillow-link:hover { background: #0057D9; }
+        .analyze-link {
+            background: var(--brand-gold); color: var(--on-gold) !important;
+            padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+            text-decoration: none !important;
+        }
+        .analyze-link:hover { background: var(--brand-gold-hover); }
         /* Scrape and data-maintenance buttons are for the site password only; hidden until
            the server confirms the owner, so the partner password never sees them flash. */
         body:not(.is-owner) .owner-only { display: none !important; }
@@ -1196,6 +1203,7 @@
                     <a href="/" data-tab="sheriff">Sheriff Sales</a>
                     <a href="/pipeline.html" data-tab="montco" class="active">MontCo Pipeline</a>
                     <a href="/montco-track" data-tab="montco">MontCo Track</a>
+                    <a href="/montco-analyzer.html" data-tab="montco">MontCo Analyzer</a>
                     <a href="/camden.html" data-tab="camden">Camden Pipeline</a>
                     <a href="/camden-track" data-tab="camden">Camden Track</a>
                 </nav>
@@ -3022,6 +3030,30 @@
             }
         }
         
+        // Opens the MontCo Analyzer with this card's address and estimated debt filled in.
+        // The debt is the high side of the card's payoff estimate, split the way the
+        // analyzer's debt fields are; nothing is sent when there is no estimate.
+        function analyzerUrl(c) {
+            const q = new URLSearchParams();
+            q.set('address', [c.propertyAddress, [c.propertyCity, c.propertyState || 'PA'].filter(Boolean).join(' ')].filter(Boolean).join(', '));
+            if (c.propertyZip) q.set('zip', String(c.propertyZip).slice(0, 5));
+            const p = c.payoff || {};
+            let note = `MontCo case ${c.caseNumber || ''}.`;
+            if (!p.error && !p.sold) {
+                const first = p.total ? Number(p.senior && p.senior.high) || 0 : 0;
+                const rest = p.total ? (Number(p.total.high) || 0) - first : Number(p.juniorTotal && p.juniorTotal.high) || 0;
+                if (first > 0) q.set(p.primaryCaseKind === 'lien' ? 'muniliens' : 'payoff', first);
+                if (rest > 0) q.set('otherliens', rest);
+                if (p.carryPerMonth > 0) q.set('perdiem', Math.round(p.carryPerMonth / 30.44));
+                if (first > 0 || rest > 0) note += ' Debt is the pipeline\'s high-side estimate, not a payoff letter.';
+                if (!p.total) note += ' No mortgage payoff estimate yet.';
+            }
+            q.set('notes', note);
+            // Lets the analyzer reopen a deal already saved for this card.
+            q.set('case', cardCaseNumbers(c).join(','));
+            return '/montco-analyzer.html?' + q.toString();
+        }
+
         function createPropertyCard(c) {
             const address = c.propertyAddress || 'Address not available';
             const city = c.propertyCity || '';
@@ -3257,6 +3289,7 @@
                             ${c.propertyAddress ? `<span style="display:flex;gap:8px;">
                                 <a href="${mapsUrl}" target="_blank" class="maps-link">Maps</a>
                                 <a href="https://www.zillow.com/homes/${encodedAddress}" target="_blank" class="zillow-link">Zillow</a>
+                                <a href="${escapeAttr(analyzerUrl(c))}" target="_blank" class="analyze-link">Analyze</a>
                             </span>` : ''}
                         </div>
                     </div>
