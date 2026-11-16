@@ -1,0 +1,10 @@
+{
+  "name": "court-docs-helper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pulls NJ court filings for cards ticked on the Foreclosure Finder Camden page",
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "puppeteer-core": "^22.15.0"
+  }
+}

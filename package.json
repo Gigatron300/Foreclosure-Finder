@@ -7,7 +7,8 @@
     "start": "node server.js",
     "scrape": "node scraper.js",
     "pipeline": "node pipeline-scraper.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "npx puppeteer browsers install chrome",
+    "build-helper": "node scripts/build-helper-zip.js"
   },
   "engines": {
     "node": "20.x"

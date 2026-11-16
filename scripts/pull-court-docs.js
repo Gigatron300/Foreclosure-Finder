@@ -24,11 +24,23 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
-const puppeteer = require('puppeteer');
+// The helper is also handed out on its own (see build-helper-zip.js), without the rest of the
+// site: there it has puppeteer-core in place of puppeteer and no scrapers folder.
+const puppeteer = (() => { try { return require('puppeteer'); } catch (e) { return require('puppeteer-core'); } })();
+const TOWN_TO_MUN_CODE = (() => { try { return require('../scrapers/camden-enrichment').TOWN_TO_MUN_CODE; } catch (e) { return {}; } })();
 
-const { TOWN_TO_MUN_CODE } = require('../scrapers/camden-enrichment');
-
-const PROPERTIES_DIR = process.env.PROPERTIES_DIR || path.join(require('os').homedir(), 'OneDrive', 'Documents', 'Real Estate', 'FORECLOSURES', 'PROPERTIES');
+// Where the property folders live: the PROPERTIES_DIR variable, else the folder chosen during
+// setup (court-docs-helper.config.json beside the scripts folder), else the owner's own path.
+function propertiesDir() {
+  if (process.env.PROPERTIES_DIR) return process.env.PROPERTIES_DIR;
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'court-docs-helper.config.json'), 'utf8').replace(/^﻿/, '');
+    const dir = JSON.parse(raw).propertiesDir;
+    if (dir) return dir;
+  } catch (e) { /* no setup file: use the default */ }
+  return path.join(require('os').homedir(), 'OneDrive', 'Documents', 'Real Estate', 'FORECLOSURES', 'PROPERTIES');
+}
+const PROPERTIES_DIR = propertiesDir();
 const PORT = 9333;
 const PROFILE_DIR = path.join(process.env.LOCALAPPDATA || require('os').homedir(), 'foreclosure-finder', 'njcourts-chrome');
 const PORTAL_URL = 'https://portal.njcourts.gov';
@@ -105,9 +117,13 @@ function debugPortAlive() {
 function chromePath() {
   const candidates = [
     path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe')
+    path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
   ];
-  return candidates.find(p => fs.existsSync(p)) || puppeteer.executablePath();
+  const found = candidates.find(p => fs.existsSync(p));
+  if (found) return found;
+  try { return puppeteer.executablePath(); }
+  catch (e) { throw new Error('Google Chrome was not found on this computer. Install Chrome, then try again.'); }
 }
 
 async function connectBrowser() {
