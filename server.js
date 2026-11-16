@@ -1778,6 +1778,27 @@ app.post('/api/camden/notes', checkAuth, async (req, res) => {
   }
 });
 
+// Record that a case's court filings were pulled into the PROPERTIES folder by the Court
+// Docs Helper (which runs on the owner's PC; the page relays its result here).
+app.post('/api/camden/court-docs', checkAuth, async (req, res) => {
+  try {
+    const { instrumentNumber, fileCount, property } = req.body || {};
+    if (!instrumentNumber) return res.status(400).json({ error: 'Missing instrumentNumber' });
+    const annotations = await readAnnotations();
+    if (!annotations[instrumentNumber]) annotations[instrumentNumber] = {};
+    const courtDocs = {
+      pulledAt: new Date().toISOString(),
+      fileCount: Math.max(0, parseInt(fileCount, 10) || 0),
+      property: String(property || '').slice(0, 160)
+    };
+    annotations[instrumentNumber].courtDocs = courtDocs;
+    await writeAnnotations(annotations);
+    res.json({ success: true, courtDocs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Upload Camden County CSV
 app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
   try {
@@ -1915,6 +1936,7 @@ app.get('/api/camden', checkAuth, async (req, res) => {
         defendantKey: ownerDefendantKey(c.primaryDefendant),
         userTags,
         userNotes: ann.userNotes ?? c.userNotes ?? '',
+        courtDocs: ann.courtDocs || null,
         scoreHistory: ann.scoreHistory ?? c.scoreHistory ?? []
       };
     });

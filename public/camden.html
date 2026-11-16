@@ -701,6 +701,31 @@
         }
         .tag-pill button { background: none; border: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 0.7rem; line-height: 1; opacity: 0.6; }
         .tag-pill button:hover { opacity: 1; }
+        /* Court docs: the tick box on a card, and the bar that sends ticked cases to the helper */
+        .docs-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 0.75rem; }
+        .docs-pick { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); cursor: pointer; font-weight: 600; }
+        .docs-pick input { margin: 0; cursor: pointer; accent-color: var(--brand-gold); }
+        .docs-marker { color: var(--success); font-weight: 600; white-space: nowrap; }
+        .doc-bar {
+            position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+            z-index: 900; display: none; flex-direction: column; gap: 8px;
+            width: min(560px, calc(100vw - 32px)); max-height: 60vh;
+            background: var(--surface); border: 1px solid var(--border-strong);
+            border-radius: 10px; box-shadow: var(--shadow-modal); padding: 12px 14px;
+            color: var(--ink); font-size: 0.85rem;
+        }
+        .doc-bar.open { display: flex; }
+        .doc-bar-head { display: flex; align-items: center; gap: 10px; }
+        .doc-bar-head .doc-bar-count { flex: 1; font-weight: 600; }
+        .doc-bar-link { background: none; border: none; color: var(--ink-2); cursor: pointer; font-size: 0.8rem; text-decoration: underline; padding: 0; font-family: inherit; }
+        .doc-bar-note { color: var(--ink-2); line-height: 1.4; }
+        .doc-bar-note.warn { color: var(--danger); }
+        .doc-bar-list { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+        .doc-bar-item { display: flex; justify-content: space-between; gap: 12px; padding: 5px 8px; background: var(--surface-2); border-radius: 6px; }
+        .doc-bar-item .what { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .doc-bar-item .how { color: var(--ink-2); text-align: right; flex-shrink: 0; max-width: 60%; }
+        .doc-bar-item.done .how { color: var(--success); }
+        .doc-bar-item.failed .how, .doc-bar-item.partial .how { color: var(--danger); }
         .tag-input {
             background: var(--surface); border: 1px solid var(--border-strong);
             border-radius: 4px; color: var(--ink); font-size: 0.75rem; padding: 4px 8px;
@@ -1206,6 +1231,17 @@
                 <div class="loading"><div class="spinner"></div><p>Loading cases...</p></div>
             </div>
         </main>
+    </div>
+
+    <div class="doc-bar" id="docBar">
+        <div class="doc-bar-head">
+            <span class="doc-bar-count" id="docBarCount"></span>
+            <button class="btn btn-primary" id="docBarPull" onclick="pullCourtDocs()">Pull court docs</button>
+            <button class="doc-bar-link" id="docBarClear" onclick="clearDocPicks()">Clear</button>
+            <button class="doc-bar-link" id="docBarClose" onclick="closeDocBar()">Close</button>
+        </div>
+        <div class="doc-bar-note" id="docBarNote"></div>
+        <div class="doc-bar-list" id="docBarList"></div>
     </div>
 
     <script>
@@ -3065,6 +3101,7 @@
                             <span style="color:${cs.text};font-weight:600;font-size:0.8rem;">${cs.icon} ${c.courtStatus}${c.courtDisposition ? ' - ' + c.courtDisposition : ''}</span>
                         </div>
                         ${c.courtDocketNumber ? `<div style="color:var(--ink-2);font-size:0.75rem;margin-top:4px;">Docket: ${c.courtDocketNumber.replace(/^SWCF?/i, '')}</div>` : ''}
+                        ${buildCourtDocsRow(c)}
                         ${c.courtDispositionDate ? `<div style="color:var(--ink-2);font-size:0.75rem;margin-top:2px;">Disposition: ${c.courtDispositionDate}</div>` : ''}
                         ${(c.courtStatus === 'RECHECK' && statusNoteDisplay) ? `<div style="color:var(--ink);font-size:0.75rem;margin-top:6px;line-height:1.35;">Reason: ${statusNoteDisplay}</div>` : ''}
                     </div>`;
@@ -3368,6 +3405,168 @@ async function manualAddress(instrumentNumber, currentAddress = '') {
 
         function setAllTagFilters(checked) {
             setAllMultiFilterOptions('tagFilterOptions', checked, 'tagFilterButton', 'All Tags');
+        }
+
+        // ---------- Court docs ----------
+        // Tick cards, press the button, and the Court Docs Helper running on this PC pulls each
+        // case's filings from NJ Courts into the PROPERTIES folder. The site only relays the
+        // ticked dockets to the helper and records the result; it never sees the documents.
+        const COURT_DOCS_HELPER = 'http://127.0.0.1:47613';
+        const docPicks = new Set();          // instrument numbers ticked on cards
+        const docReported = new Set();       // helper results already saved to the site
+        let docJob = null;                   // last status from the helper, while a pull is shown
+        let docPollTimer = null;
+
+        const escHtml = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const isPullableDocket = d => /F-?\d{1,6}-?\d{2}$/i.test(String(d || '').replace(/\s+/g, ''));
+        const findCachedCase = inst => (camdenDataCache && Array.isArray(camdenDataCache.cases))
+            ? camdenDataCache.cases.find(x => x.instrumentNumber === inst) : null;
+
+        function courtDocsMarkerHtml(cd) {
+            if (!cd || !cd.pulledAt) return '';
+            const d = new Date(cd.pulledAt);
+            const files = cd.fileCount === 1 ? '1 file' : `${cd.fileCount || 0} files`;
+            return `<span class="docs-marker" title="Saved in PROPERTIES › ${escHtml(cd.property || '')}">Docs pulled ${d.getMonth() + 1}/${d.getDate()} · ${files}</span>`;
+        }
+
+        function buildCourtDocsRow(c) {
+            if (!isPullableDocket(c.courtDocketNumber)) return '';
+            const inst = c.instrumentNumber;
+            return `<div class="docs-row" data-docs-for="${inst}">
+                <label class="docs-pick"><input type="checkbox" ${docPicks.has(inst) ? 'checked' : ''} onchange="toggleDocPick('${inst}', this.checked)"> Pull court docs</label>
+                <span data-docs-marker>${courtDocsMarkerHtml(c.courtDocs)}</span>
+            </div>`;
+        }
+
+        function toggleDocPick(inst, on) {
+            if (on) docPicks.add(inst); else docPicks.delete(inst);
+            renderDocBar();
+        }
+
+        function clearDocPicks() {
+            docPicks.clear();
+            document.querySelectorAll('.docs-pick input').forEach(i => { i.checked = false; });
+            renderDocBar();
+        }
+
+        function closeDocBar() {
+            if (docJob && docJob.running) return;   // keep it up while files are still coming in
+            docJob = null;
+            setDocNote('');
+            renderDocBar();
+        }
+
+        function setDocNote(text, warn = false) {
+            const note = document.getElementById('docBarNote');
+            note.textContent = text;
+            note.classList.toggle('warn', !!warn);
+            note.style.display = text ? '' : 'none';
+        }
+
+        function docItemLabel(item) {
+            const c = findCachedCase(item.id);
+            return (c && c.propertyAddress) ? `${c.propertyAddress}, ${getSubtown(c) || c.town || ''}` : item.docket;
+        }
+
+        function docItemStatus(item, job) {
+            if (item.state === 'queued') return 'Waiting';
+            if (item.state === 'running') {
+                if (job.waitingForLogin) return 'Waiting for the NJ Courts login';
+                return item.total ? `Pulling… ${item.saved || 0} saved` : 'Opening the case…';
+            }
+            if (item.state === 'done') {
+                const total = `${item.fileCount} file${item.fileCount === 1 ? '' : 's'} in folder`;
+                return item.saved ? `${item.saved} new · ${total}` : `Nothing new · ${total}`;
+            }
+            return item.message || 'Failed';
+        }
+
+        function renderDocBar() {
+            const bar = document.getElementById('docBar');
+            const n = docPicks.size;
+            const busy = !!(docJob && docJob.running);
+            bar.classList.toggle('open', n > 0 || !!docJob || !!document.getElementById('docBarNote').textContent);
+            document.getElementById('docBarCount').textContent = n
+                ? `${n} propert${n === 1 ? 'y' : 'ies'} ticked`
+                : (busy ? 'Pulling court docs…' : (docJob ? 'Court docs' : ''));
+            document.getElementById('docBarPull').style.display = n ? '' : 'none';
+            document.getElementById('docBarClear').style.display = n ? '' : 'none';
+            document.getElementById('docBarClose').style.display = (!n && !busy) ? '' : 'none';
+            document.getElementById('docBarList').innerHTML = docJob ? docJob.items.map(item =>
+                `<div class="doc-bar-item ${item.state}"><span class="what" title="${escHtml(item.docket)}">${escHtml(docItemLabel(item))}</span><span class="how">${escHtml(docItemStatus(item, docJob))}</span></div>`
+            ).join('') : '';
+        }
+
+        async function helperCall(path, body) {
+            const r = await fetch(COURT_DOCS_HELPER + path, body
+                ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+                : undefined);
+            return r.json();
+        }
+
+        async function pullCourtDocs() {
+            const cases = [...docPicks].map(findCachedCase).filter(c => c && isPullableDocket(c.courtDocketNumber)).map(c => ({
+                id: c.instrumentNumber,
+                docket: c.courtDocketNumber,
+                folderHint: c.propertyAddress ? `${c.propertyAddress}, ${getSubtown(c) || c.town || ''}, NJ` : ''
+            }));
+            if (!cases.length) return;
+            let job;
+            try {
+                job = await helperCall('/pull', { cases });
+            } catch (e) {
+                setDocNote('The Court Docs Helper is not running on this computer. Start "Court Docs Helper" from the desktop, then press the button again. If the browser asked whether this site may reach devices on your local network, choose Allow.', true);
+                renderDocBar();
+                return;
+            }
+            if (job.error) { setDocNote(job.error, true); renderDocBar(); return; }
+            cases.forEach(c => docReported.delete(c.id));
+            clearDocPicks();
+            applyDocJob(job);
+            if (docPollTimer) clearInterval(docPollTimer);
+            docPollTimer = setInterval(pollDocJob, 2000);
+        }
+
+        async function pollDocJob() {
+            try {
+                applyDocJob(await helperCall('/status'));
+            } catch (e) {
+                clearInterval(docPollTimer); docPollTimer = null;
+                if (docJob) docJob.running = false;
+                setDocNote('Lost contact with the Court Docs Helper. Files already saved are safe; start the helper and pull again to finish.', true);
+                renderDocBar();
+            }
+        }
+
+        function applyDocJob(job) {
+            docJob = job;
+            setDocNote(job.waitingForLogin
+                ? 'Log in to NJ Courts in the Chrome window the helper opened. The pull starts by itself once you are in.'
+                : '', false);
+            job.items.forEach(item => {
+                if ((item.state === 'done' || item.state === 'partial') && !docReported.has(item.id)) {
+                    docReported.add(item.id);
+                    recordCourtDocs(item);
+                }
+            });
+            if (!job.running && docPollTimer) { clearInterval(docPollTimer); docPollTimer = null; }
+            renderDocBar();
+        }
+
+        // Save the "Docs pulled" marker on the site and show it on the card.
+        async function recordCourtDocs(item) {
+            try {
+                const r = await fetch('/api/camden/court-docs', {
+                    method: 'POST',
+                    headers: { 'X-Auth-Token': authToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instrumentNumber: item.id, fileCount: item.fileCount, property: item.property })
+                });
+                const result = await r.json();
+                if (!result.success) return;
+                patchCachedCase(item.id, { courtDocs: result.courtDocs });
+                const slot = document.querySelector(`[data-docs-for="${item.id}"] [data-docs-marker]`);
+                if (slot) slot.innerHTML = courtDocsMarkerHtml(result.courtDocs);
+            } catch (e) { /* the files are saved either way; the marker shows after the next pull */ }
         }
 
         function renderTagPills(instrumentNumber, tags) {
