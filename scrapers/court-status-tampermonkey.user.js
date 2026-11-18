@@ -340,7 +340,7 @@
 // ==UserScript==
 // @name         NJ Courts Status Checker
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.2
 // @description  Auto-checks court case statuses from Camden pipeline data with auto-login CAPTCHA recovery
 // @match        https://portal.njcourts.gov/*
 // @match        https://portal-cloud.njcourts.gov/*
@@ -1352,7 +1352,8 @@
         <button id="csc-btn-resume" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#0f766e;color:#fff;">Continue Batch</button>
         <button id="csc-btn-standard" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#475569;color:#fff;">New Cases</button>
         <button id="csc-btn-tracked" title="Re-check only the Camden cards marked TRACK (any status)" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#b7791f;color:#fff;">Tracked Cases</button>
-        <button id="csc-btn-test" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#334155;color:#94a3b8;">Test Run (10)</button>
+        <button id="csc-btn-errors" title="Re-check only the Camden cards a previous run saved as ERROR" style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#c2410c;color:#fff;">Retry Errors</button>
+        <button id="csc-btn-test"style="width:100%;padding:10px;border-radius:8px;border:none;cursor:pointer;margin:4px 0;background:#334155;color:#94a3b8;">Test Run (10)</button>
       </div>
     `;
     document.body.appendChild(launcher);
@@ -1361,10 +1362,11 @@
     document.getElementById('csc-btn-resume').addEventListener('click', () => startRun({ testMode: false, mode: 'refresh', resume: true }));
     document.getElementById('csc-btn-standard').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, blankOnly: true }));
     document.getElementById('csc-btn-tracked').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, tracked: true }));
+    document.getElementById('csc-btn-errors').addEventListener('click', () => startRun({ testMode: false, mode: 'default', resume: false, errorsOnly: true }));
     document.getElementById('csc-btn-test').addEventListener('click', () => startRun({ testMode: true, mode: 'refresh', resume: false }));
   }
 
-  async function startRun({ testMode = false, mode = 'default', resume = false, blankOnly = false, tracked = false }) {
+  async function startRun({ testMode = false, mode = 'default', resume = false, blankOnly = false, tracked = false, errorsOnly = false }) {
     const launcher = document.getElementById('csc-launcher');
     if (launcher) launcher.remove();
 
@@ -1377,6 +1379,8 @@
       let url = SERVER + '/api/camden/court-status-cases?token=' + encodeURIComponent(TOKEN) + (testMode ? '&test=true' : '');
       if (tracked) {
         url += '&tracked=true';
+      } else if (errorsOnly) {
+        url += '&errorsOnly=true';
       } else if (blankOnly) {
         url += '&blankOnly=true';
       }
@@ -1395,7 +1399,7 @@
     const batch = Array.isArray(payload) ? null : (payload?.batch || null);
 
     if (!cases.length) {
-      setStatusByType('info', payload?.message || (tracked ? 'No tracked cases. Mark cards TRACK on the Camden tab first.' : 'No cases available.'));
+      setStatusByType('info', payload?.message || (tracked ? 'No tracked cases. Mark cards TRACK on the Camden tab first.' : errorsOnly ? 'No ERROR cases to retry.' : 'No cases available.'));
       return;
     }
 

@@ -2163,6 +2163,8 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
     const data = JSON.parse(content);
     const testMode = req.query.test === 'true';
     const blankOnly = req.query.blankOnly === 'true';
+    // Retry Errors (Tampermonkey): only cards a previous run saved as ERROR.
+    const errorsOnly = req.query.errorsOnly === 'true';
     // Tracked Cases (Tampermonkey): only cards tagged TRACK, whatever their status --
     // a tracked case can be reinstated after closing, and there are only a handful.
     const trackedOnly = req.query.tracked === 'true';
@@ -2180,6 +2182,8 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       const existingStatus = existingStatusRaw.toUpperCase();
       if (trackedOnly) {
         if (!trackedSet.has(c.instrumentNumber)) return false;
+      } else if (errorsOnly) {
+        if (existingStatus !== 'ERROR') return false;
       } else if (blankOnly) {
         if (existingStatusRaw) return false;
       } else {
@@ -2198,7 +2202,7 @@ app.get('/api/camden/court-status-cases', async (req, res) => {
       cases = cases.slice(0, 10);
     }
 
-    console.log(`📋 Serving ${cases.length} cases for court status lookup${trackedOnly ? ' (tracked only)' : blankOnly ? ' (blank court status only)' : ''}${testMode ? ' (TEST MODE)' : ''}`);
+    console.log(`📋 Serving ${cases.length} cases for court status lookup${trackedOnly ? ' (tracked only)' : errorsOnly ? ' (errors only)' : blankOnly ? ' (blank court status only)' : ''}${testMode ? ' (TEST MODE)' : ''}`);
     res.json(cases);
   } catch (error) {
     if (error.code === 'ENOENT') {
