@@ -1063,6 +1063,7 @@
                             <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="sellerScoreAsc" onchange="setSingleFilterValue('sortBy', 'Seller Score (Low to High)', true)"> <span>Seller Score (Low to High)</span></label>
                             <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="daysSinceFilingAsc" onchange="setSingleFilterValue('sortBy', 'Most Recent Filing', true)"> <span>Most Recent Filing</span></label>
                             <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="daysSinceFilingDesc" onchange="setSingleFilterValue('sortBy', 'Oldest Filing', true)"> <span>Oldest Filing</span></label>
+                            <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="latestActionDesc" onchange="setSingleFilterValue('sortBy', 'Latest Court Action', true)"> <span>Latest Court Action</span></label>
                             <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="assessedValue" onchange="setSingleFilterValue('sortBy', 'Assessed Value', true)"> <span>Assessed Value</span></label>
                             <label class="filter-dropdown-option"><input type="radio" name="sortByOption" value="town" onchange="setSingleFilterValue('sortBy', 'Town', true)"> <span>Town</span></label>
                         </div>
@@ -2307,6 +2308,16 @@
             }
         }
 
+        function latestActionTime(c) {
+            const acts = Array.isArray(c.courtCaseActions) ? c.courtCaseActions : [];
+            const last = acts.length ? acts[acts.length - 1] : null;
+            const raw = String(c.courtLatestActionDate || (last && (last.filedDate || last.entryDate)) || '').trim();
+            const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+            if (m) return new Date(+m[3], +m[1] - 1, +m[2]).getTime();
+            const t = Date.parse(raw);
+            return isNaN(t) ? 0 : t;
+        }
+
         function sortCases(cases, sortBy) {
             const sorters = {
                 sellerScoreDesc: (a, b) => (b.sellerScore || 0) - (a.sellerScore || 0),
@@ -2314,6 +2325,8 @@
                 daysSinceFilingAsc: (a, b) => (a.daysSinceFiling || 0) - (b.daysSinceFiling || 0),
                 daysSinceFilingDesc: (a, b) => (b.daysSinceFiling || 0) - (a.daysSinceFiling || 0),
                 assessedValue: (a, b) => (b.assessedValue || 0) - (a.assessedValue || 0),
+                // Newest court docket entry first; cases with no action date sink to the bottom.
+                latestActionDesc: (a, b) => latestActionTime(b) - latestActionTime(a),
                 // Sorts on the name the card actually shows, so the list reads
                 // alphabetically instead of grouping Blackwood and Glendora
                 // under an invisible "Gloucester Twp".
