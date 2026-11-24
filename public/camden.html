@@ -3078,6 +3078,8 @@
             const scoreExplainHtml = buildScoreExplainHtml(c);
             const latestAction = c.courtLatestActionText || '';
             const actionCount = c.courtCaseActionCount || (Array.isArray(c.courtCaseActions) ? c.courtCaseActions.length : 0);
+            const lastActionObj = Array.isArray(c.courtCaseActions) && c.courtCaseActions.length ? c.courtCaseActions[c.courtCaseActions.length - 1] : null;
+            const latestActionDate = String(c.courtLatestActionDate || (lastActionObj && (lastActionObj.filedDate || lastActionObj.entryDate)) || '').trim();
             const prevScore = Array.isArray(c.scoreHistory) && c.scoreHistory.length > 0 ? c.scoreHistory[c.scoreHistory.length - 1].score : null;
             const scoreDelta = prevScore !== null ? c.sellerScore - prevScore : null;
             const deltaHtml = scoreDelta !== null && scoreDelta !== 0
@@ -3173,7 +3175,7 @@
                         </div>
 
                         ${courtHtml}
-                        ${latestAction ? `<div class="action-strip"><b>Latest Action</b> (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
+                        ${latestAction ? `<div class="action-strip"><b>Latest Action</b>${latestActionDate ? ` <span style="font-size:0.75rem;color:var(--ink-2);">${latestActionDate.replace(/[<>&"]/g, '')}</span>` : ''} (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
 
                         <div style="margin-top:10px;">
                             <textarea class="notes-area" placeholder="Add notes..."
