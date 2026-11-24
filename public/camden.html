@@ -3175,7 +3175,7 @@
                         </div>
 
                         ${courtHtml}
-                        ${latestAction ? `<div class="action-strip"><b>Latest Action</b>${latestActionDate ? ` <span style="font-size:0.75rem;color:var(--ink-2);">${latestActionDate.replace(/[<>&"]/g, '')}</span>` : ''} (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
+                        ${latestAction ? `<div class="action-strip"><b>Latest Action</b>${latestActionDate ? ` <span style="font-size:0.75rem;${c.courtActionChanged ? 'color:var(--success);font-weight:700;" title="New docket entry since previous scan' : 'color:var(--ink);'}">${latestActionDate.replace(/[<>&"]/g, '')}</span>` : ''} (${actionCount} total): ${truncate(latestAction, 130)}</div>` : ''}
 
                         <div style="margin-top:10px;">
                             <textarea class="notes-area" placeholder="Add notes..."

@@ -1838,7 +1838,7 @@ app.post('/api/camden/upload-csv', checkAuth, async (req, res) => {
         'courtStatus', 'courtStatusRaw', 'courtStatusNote', 'courtDocketNumber',
         'courtDisposition', 'courtCaseType', 'courtCaseCaption', 'courtFiledDate',
         'courtDispositionDate', 'courtCaseActions', 'courtCaseActionsText',
-        'courtCaseActionCount', 'courtLatestActionText', 'courtLatestActionDate', 'courtMatchScore'
+        'courtCaseActionCount', 'courtLatestActionText', 'courtLatestActionDate', 'courtActionChanged', 'courtMatchScore'
       ];
       const enrichmentFields = [
         'propertyAddress', 'assessedValue', 'landValue', 'improvementValue',
@@ -2285,6 +2285,20 @@ app.post('/api/camden/court-status-update', cors({
         mergedCourtData.courtDocketNumber = data.cases[caseIdx].courtDocketNumber || '';
       }
       console.log(`⚖️ ${instrumentNumber} → kept ${existingStatus}, merged non-status updates`);
+    }
+
+    // Flag whether the docket gained/changed entries since the previous scan.
+    // Only judged when this scan actually returned actions; first-ever scan is not a "change".
+    const actionSig = (o) => {
+      const count = o.courtCaseActionCount || (Array.isArray(o.courtCaseActions) ? o.courtCaseActions.length : 0);
+      return `${count}|${o.courtLatestActionDate || ''}|${o.courtLatestActionText || ''}`;
+    };
+    const incomingHasActions = (Array.isArray(mergedCourtData.courtCaseActions) && mergedCourtData.courtCaseActions.length > 0)
+      || !!mergedCourtData.courtLatestActionText;
+    if (incomingHasActions) {
+      const prev = data.cases[caseIdx];
+      const prevHadActions = (Array.isArray(prev.courtCaseActions) && prev.courtCaseActions.length > 0) || !!prev.courtLatestActionText;
+      mergedCourtData.courtActionChanged = prevHadActions && actionSig(prev) !== actionSig(mergedCourtData);
     }
 
     Object.assign(data.cases[caseIdx], mergedCourtData);
